@@ -73,5 +73,18 @@
 - **Milestone** Week 0 **단일 세션으로 압축 완료** (계획 5일 → 실제 ~8시간)
 - **Next** Sprint 1 착수 — tauri-harness를 procman/ 본 프로젝트로 재편성 + T01-T10 실행
 
+### 2026-04-05 — Sprint 1 Day 1 (사용자 override로 즉시 착수)
+- **Added** 사용자 override → Manager가 Day 1 자율 진행 승인 (STOP 조건: 4h / compile fail 3연속 / W-D1-05 완료 중 최저)
+- **Changed** spikes/tauri-harness → app/ 승격 (`git mv`, 7 commits history 보존)
+- **Changed** identifier 일괄 리네임: Cargo pkg/lib → procman/procman_lib, bundle id → dev.procman.app
+- **Added** Tailwind v4 + @tailwindcss/vite 플러그인
+- **Added** shadcn/ui (new-york, zinc) + 12 components (button/card/tabs/dialog/command/scroll-area/badge/input/label/separator/textarea/input-group)
+- **Added** 3-pane MainLayout 스켈레톤 ([layouts/MainLayout.tsx](app/src/layouts/MainLayout.tsx)) + 3개 placeholder 컴포넌트 (ProjectList/ProcessGrid/LogViewer)
+- **Added** Rust 도메인 타입 ([types.rs](app/src-tauri/src/types.rs)): Project/Script/ProcessHandle/LogLine/PortInfo + enums (ProcessStatus/LogStream)
+- **Added** Rust 명령 스텁 8종 ([commands/](app/src-tauri/src/commands/)): list/create/delete_project, spawn/kill_process, get_logs, list/kill_port. 각 모듈 상단 `// LEARN:` 블록 (Rust/Tauri 초심자 설명)
+- **Added** TypeScript API 래퍼 ([src/api/](app/src/api/)): zod 스키마 + 런타임 검증 (`api.listProjects()` 등)
+- **Removed** 템플릿 asset (hero.png, react/vite svg, App.css)
+- **Retained** 스파이크 모듈 (stress.rs, pty.rs) — `#[allow(dead_code)]` 처리, T11-T17 참조 구현용
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

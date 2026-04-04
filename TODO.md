@@ -51,10 +51,18 @@
 - [ ] **Week 2 종료 재평가 게이트**: T05 2일 초과 시 Electron 전환 재검토
 
 ## Sprint 1 — 기반 & 등록 (Week 1-2)
-**Kick-off: 2026-04-06 Mon** (Manager 결정, 2026-04-05)
-- [x] T01: Tauri+React+TS 스캐폴드 — Week 0 spikes/tauri-harness에서 선행 완료. **월요일 첫 태스크 = spikes/tauri-harness → procman/ 재편성(T02 재배치)**
-- [ ] T02: shadcn/ui + Tailwind + 기본 레이아웃
-- [ ] T03: Config 스키마 확정 (TS + Rust serde)
+**Actual Kick-off: 2026-04-05** (사용자 override로 일요일 즉시 착수, Manager 재가동 승인)
+
+### Day 1 (2026-04-05) ✅
+- [x] T01 (스캐폴드) — Week 0에서 spikes/tauri-harness로 선행 완료
+- [x] W-D1-01: spikes/tauri-harness → app/ 승격 (git mv, history 보존) + identifier rename (procman)
+- [x] T02: shadcn/ui + Tailwind v4 + 12 components
+- [x] W-D1-03: 3-pane MainLayout (ProjectList 280px / ProcessGrid flex / LogViewer 280px drawer)
+- [x] W-D1-04: Rust 명령 스텁 8종 + 도메인 타입 (Project/Script/ProcessHandle/LogLine/PortInfo) + // LEARN 주석
+- [x] W-D1-05: api/tauri.ts + zod 스키마 (런타임 검증 래퍼)
+
+### Day 2~ (대기)
+- [ ] T03: Config 스키마 확정 (TS + Rust serde) — **첫 본격 Rust 작성 지점**
 - [ ] T04: ConfigStore (YAML read/write, atomic)
 - [ ] T05: Project CRUD IPC (4종)
 - [ ] T06: Script CRUD IPC (4종)
