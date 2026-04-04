@@ -20,12 +20,12 @@
 - [x] S0.6 Tauri #7684 검증 → v2 empirical test 필요
 
 ### S1 — stdout 스트레스 테스트 (1.5일)
-- [x] S1.1 line-emitter.sh (deterministic SEQ 생성기)
+- [x] S1.1 line-emitter (초안 bash→Rust 바이너리 교체, bash는 0.8%만 달성)
 - [x] S1.2 Rust stress harness (`cargo check` 통과)
 - [x] S1.3 FE per-eid seq gap 검출 UI
 - [x] S1.4 RSS 1s 폴링 + CSV 다운로드
-- [ ] **S1.5 측정 실행** (10proc×10k line/s × 60s × 3회) — Day 2 예정
-- [ ] S1.6 판정서 `spikes/s1-stdout/REPORT.md` — ★ 1차 Go/No-Go 게이트
+- [x] S1.5 측정 3회 완료 (~53k events/sec, 3.4M lines/run, **drops=0**)
+- [x] S1.6 판정서 [spikes/s1-stdout/REPORT.md](spikes/s1-stdout/REPORT.md) — **★ 1차 게이트 ✅ GO**
 
 ### S2 — PTY 인터랙션 (1일)
 - [ ] S2.1 `portable-pty` crate 통합

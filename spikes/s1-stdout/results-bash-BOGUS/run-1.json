@@ -1,0 +1,402 @@
+{
+  "run_idx": 1,
+  "params": {
+    "n": 10,
+    "rate": 10000,
+    "duration": 60
+  },
+  "start_ts": 1775330272891,
+  "end_ts": 1775330335936,
+  "wall_sec": 63.045,
+  "expected_total": 6000000,
+  "rust_total_lines": 47784,
+  "fe_total_received": 47784,
+  "total_gaps": 0,
+  "per_eid": [
+    {
+      "eid": 0,
+      "received": 4770,
+      "lastSeq": 4770,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 1,
+      "received": 4781,
+      "lastSeq": 4781,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 2,
+      "received": 4777,
+      "lastSeq": 4777,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 3,
+      "received": 4791,
+      "lastSeq": 4791,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 4,
+      "received": 4761,
+      "lastSeq": 4761,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 5,
+      "received": 4783,
+      "lastSeq": 4783,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 6,
+      "received": 4788,
+      "lastSeq": 4788,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 7,
+      "received": 4777,
+      "lastSeq": 4777,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 8,
+      "received": 4764,
+      "lastSeq": 4764,
+      "gaps": 0,
+      "firstGapAt": null
+    },
+    {
+      "eid": 9,
+      "received": 4792,
+      "lastSeq": 4792,
+      "gaps": 0,
+      "firstGapAt": null
+    }
+  ],
+  "peak_rss_kb": 99408,
+  "samples": [
+    {
+      "t": 1045,
+      "rssKb": 97568,
+      "totalLines": 320
+    },
+    {
+      "t": 2043,
+      "rssKb": 95488,
+      "totalLines": 1037
+    },
+    {
+      "t": 3046,
+      "rssKb": 93856,
+      "totalLines": 1833
+    },
+    {
+      "t": 4048,
+      "rssKb": 94032,
+      "totalLines": 2687
+    },
+    {
+      "t": 5046,
+      "rssKb": 94528,
+      "totalLines": 3593
+    },
+    {
+      "t": 6053,
+      "rssKb": 94864,
+      "totalLines": 4261
+    },
+    {
+      "t": 7048,
+      "rssKb": 92832,
+      "totalLines": 4778
+    },
+    {
+      "t": 8046,
+      "rssKb": 94448,
+      "totalLines": 5518
+    },
+    {
+      "t": 9053,
+      "rssKb": 99408,
+      "totalLines": 6267
+    },
+    {
+      "t": 10049,
+      "rssKb": 99072,
+      "totalLines": 7026
+    },
+    {
+      "t": 11054,
+      "rssKb": 97920,
+      "totalLines": 7750
+    },
+    {
+      "t": 12054,
+      "rssKb": 97776,
+      "totalLines": 8048
+    },
+    {
+      "t": 13052,
+      "rssKb": 94576,
+      "totalLines": 8546
+    },
+    {
+      "t": 14062,
+      "rssKb": 93776,
+      "totalLines": 9098
+    },
+    {
+      "t": 15054,
+      "rssKb": 92736,
+      "totalLines": 9810
+    },
+    {
+      "t": 16055,
+      "rssKb": 92784,
+      "totalLines": 10614
+    },
+    {
+      "t": 17059,
+      "rssKb": 91520,
+      "totalLines": 11019
+    },
+    {
+      "t": 18055,
+      "rssKb": 91424,
+      "totalLines": 11789
+    },
+    {
+      "t": 19059,
+      "rssKb": 91888,
+      "totalLines": 12609
+    },
+    {
+      "t": 20059,
+      "rssKb": 92032,
+      "totalLines": 13551
+    },
+    {
+      "t": 21060,
+      "rssKb": 92384,
+      "totalLines": 14429
+    },
+    {
+      "t": 22058,
+      "rssKb": 91568,
+      "totalLines": 15042
+    },
+    {
+      "t": 23058,
+      "rssKb": 91968,
+      "totalLines": 15853
+    },
+    {
+      "t": 24063,
+      "rssKb": 91680,
+      "totalLines": 16701
+    },
+    {
+      "t": 25061,
+      "rssKb": 91984,
+      "totalLines": 17604
+    },
+    {
+      "t": 26060,
+      "rssKb": 92016,
+      "totalLines": 18525
+    },
+    {
+      "t": 27063,
+      "rssKb": 92016,
+      "totalLines": 19248
+    },
+    {
+      "t": 28064,
+      "rssKb": 91920,
+      "totalLines": 20073
+    },
+    {
+      "t": 29063,
+      "rssKb": 91920,
+      "totalLines": 21071
+    },
+    {
+      "t": 30062,
+      "rssKb": 92864,
+      "totalLines": 22036
+    },
+    {
+      "t": 31069,
+      "rssKb": 92896,
+      "totalLines": 22986
+    },
+    {
+      "t": 32065,
+      "rssKb": 92928,
+      "totalLines": 23556
+    },
+    {
+      "t": 33064,
+      "rssKb": 92528,
+      "totalLines": 24397
+    },
+    {
+      "t": 34064,
+      "rssKb": 91696,
+      "totalLines": 25389
+    },
+    {
+      "t": 35070,
+      "rssKb": 91744,
+      "totalLines": 26304
+    },
+    {
+      "t": 36066,
+      "rssKb": 91744,
+      "totalLines": 27066
+    },
+    {
+      "t": 37073,
+      "rssKb": 90512,
+      "totalLines": 27754
+    },
+    {
+      "t": 38069,
+      "rssKb": 91536,
+      "totalLines": 28486
+    },
+    {
+      "t": 39068,
+      "rssKb": 91568,
+      "totalLines": 29443
+    },
+    {
+      "t": 40068,
+      "rssKb": 91632,
+      "totalLines": 30407
+    },
+    {
+      "t": 41072,
+      "rssKb": 91632,
+      "totalLines": 31393
+    },
+    {
+      "t": 42073,
+      "rssKb": 90624,
+      "totalLines": 32083
+    },
+    {
+      "t": 43075,
+      "rssKb": 91344,
+      "totalLines": 32799
+    },
+    {
+      "t": 44070,
+      "rssKb": 91440,
+      "totalLines": 33695
+    },
+    {
+      "t": 45074,
+      "rssKb": 91472,
+      "totalLines": 34713
+    },
+    {
+      "t": 46073,
+      "rssKb": 91472,
+      "totalLines": 35672
+    },
+    {
+      "t": 47073,
+      "rssKb": 90480,
+      "totalLines": 36354
+    },
+    {
+      "t": 48073,
+      "rssKb": 91472,
+      "totalLines": 37151
+    },
+    {
+      "t": 49077,
+      "rssKb": 91648,
+      "totalLines": 38110
+    },
+    {
+      "t": 50075,
+      "rssKb": 91712,
+      "totalLines": 39063
+    },
+    {
+      "t": 51080,
+      "rssKb": 91712,
+      "totalLines": 40016
+    },
+    {
+      "t": 52081,
+      "rssKb": 90336,
+      "totalLines": 40796
+    },
+    {
+      "t": 53078,
+      "rssKb": 91376,
+      "totalLines": 41533
+    },
+    {
+      "t": 54078,
+      "rssKb": 91408,
+      "totalLines": 42484
+    },
+    {
+      "t": 55079,
+      "rssKb": 91424,
+      "totalLines": 43497
+    },
+    {
+      "t": 56080,
+      "rssKb": 91440,
+      "totalLines": 44482
+    },
+    {
+      "t": 57081,
+      "rssKb": 90960,
+      "totalLines": 45325
+    },
+    {
+      "t": 58087,
+      "rssKb": 91376,
+      "totalLines": 46087
+    },
+    {
+      "t": 59083,
+      "rssKb": 91616,
+      "totalLines": 46937
+    },
+    {
+      "t": 60082,
+      "rssKb": 91616,
+      "totalLines": 47783
+    },
+    {
+      "t": 61084,
+      "rssKb": 91712,
+      "totalLines": 47784
+    },
+    {
+      "t": 62086,
+      "rssKb": 90832,
+      "totalLines": 47784
+    }
+  ],
+  "verdict": "GO",
+  "no_go_reasons": []
+}

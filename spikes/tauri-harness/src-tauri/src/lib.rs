@@ -22,6 +22,7 @@ pub fn run() {
       stress::stop_stress,
       stress::get_stats,
       stress::get_rss_kb,
+      stress::save_report,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

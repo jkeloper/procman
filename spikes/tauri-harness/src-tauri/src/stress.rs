@@ -43,8 +43,7 @@ pub async fn start_stress(
     state.total_lines.store(0, Ordering::SeqCst);
 
     for eid in 0..n_processes {
-        let mut child = Command::new("bash")
-            .arg(&emitter_script)
+        let mut child = Command::new(&emitter_script)
             .arg(rate_per_sec.to_string())
             .arg(duration_sec.to_string())
             .arg(eid.to_string())
@@ -95,6 +94,19 @@ pub fn get_stats(state: State<'_, Arc<StressState>>) -> StressStats {
         total_lines: state.total_lines.load(Ordering::Relaxed),
         running: state.running.load(Ordering::Relaxed),
     }
+}
+
+#[tauri::command]
+pub fn save_report(filename: String, content: String) -> Result<String, String> {
+    use std::fs;
+    use std::path::PathBuf;
+    let dir = PathBuf::from(
+        "/Users/jeonghwankim/projects/procman/spikes/s1-stdout/results",
+    );
+    fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {}", e))?;
+    let path = dir.join(&filename);
+    fs::write(&path, content).map_err(|e| format!("write: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Sample RSS (KB) of the current process via mach_task_basic_info.

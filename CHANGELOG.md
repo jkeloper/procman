@@ -36,5 +36,16 @@
 - **Added** S1.3 + S1.4 FE UI ([App.tsx](spikes/tauri-harness/src/App.tsx)) — per-eid seq gap 검출, 1s RSS 폴링, CSV 다운로드, Go/No-Go 자동 판정
 - **Next** Day 2 (04-06 월): 첫 `pnpm tauri dev` 빌드 (5~10분) → S1.5 측정 3회 → S1.6 판정서
 
+### 2026-04-05 — Day 2 S1 측정 완료 ✅ GO
+- **Fixed** line-emitter bash → Rust 재작성 ([line-emitter.rs](spikes/s1-stdout/line-emitter.rs)). bash/perl 버전은 목표 속도의 0.8%만 달성 (stress test로 무효). Rust 컴파일 버전은 standalone 10k/sec 정확히 달성 확인
+- **Fixed** Tauri devUrl 포트 5173 → 1420 (사용자 moyeo 프로젝트 Vite와 충돌. **아이러니: procman이 해결하려는 바로 그 종류의 버그**)
+- **Fixed** `UnlistenFn` type-only import 이슈
+- **Added** S1.5 측정 3회 (10proc × 10k/s target × 60s)
+- **Added** [spikes/s1-stdout/REPORT.md](spikes/s1-stdout/REPORT.md) — S1.6 판정서
+- **Finding** Tauri v2 이벤트 시스템 지속 처리량 **~53k events/sec**, 3.4M events/run, **drops=0**, peak RSS 128MB
+- **Finding** 병목은 `tokio::process` stdout reader (파이프 역압), app.emit()/listen()이 아님. procman 실사용(1k lines/sec 로그) 대비 50-100× 안전마진
+- **Finding** Issue #7684 (v1 라인 유실) v2에서 **재현 안됨** — 이벤트 루프 재작성 이점
+- **Decision** 1차 Go/No-Go 게이트 **PASS** → S2 PTY 인터랙션으로 진행
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.
