@@ -42,14 +42,13 @@
 - [x] S3.4 측정: avg 59.9fps, p5 58.3fps, min 54.5fps
 - [x] S3.5 판정서 [spikes/s3-xterm/REPORT.md](spikes/s3-xterm/REPORT.md) — **effectively GO** (0.17% miss, rAF 상한)
 
-### S4 — Rust self-assessment (1일, 사용자 직접)
-- [ ] S4.1 과제 A: tokio async 기본기 (2h)
-- [ ] S4.2 과제 B: tokio::process + broadcast 스트리밍 (2h)
-- [ ] S4.3 과제 C: portable-pty 에코 셸 (1~2h)
-- [ ] S4.4 `SELF-ASSESSMENT.md` 작성 → ★ 2차 Go/No-Go 게이트
+### S4 — Rust self-assessment — **SKIPPED** (사용자 Option C 선택, 리스크 감수)
+- [~] S4.1~S4.4 건너뜀. Week 2 종료(T05) 시점 재평가로 대체
 
 ### 최종
-- [ ] `spikes/FINAL-VERDICT.md` (Manager+Evaluator 통합 판정)
+- [x] [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) 작성 — **Tauri v2 확정**
+- [ ] Evaluator 독립 리뷰 대기
+- [ ] **Week 2 종료 재평가 게이트**: T05 2일 초과 시 Electron 전환 재검토
 
 ## Sprint 1 — 기반 & 등록 (Week 1-2)
 - [ ] T01: Tauri+React+TS 스캐폴드

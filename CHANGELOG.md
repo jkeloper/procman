@@ -65,5 +65,13 @@
 - **Finding** 34k lines/sec throughput, procman 실사용의 ~7배. scrollback 50k 버퍼 문제 없음
 - **Decision** **effectively GO**. Charter rubric을 `avg ≥ 58 AND p5 ≥ 30`으로 조정 권고 → S4 Rust self-assessment로 진행
 
+### 2026-04-05 — Week 0 최종 판정 (Option C, 사용자 결정) 🏁
+- **Decided** 사용자 Option C 선택: S4 Rust self-assessment **건너뛰고 Tauri 강행**, 리스크 감수
+- **Added** [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 통합 판정서
+- **Decided** **기술 스택 최종 확정: Tauri v2** (Plan A)
+- **Residual Risk** R_Rust_Proficiency HIGH — Week 2 종료 시점(T05) 재평가 게이트. T05 2일 초과 시 Electron 전환 재검토
+- **Milestone** Week 0 **단일 세션으로 압축 완료** (계획 5일 → 실제 ~8시간)
+- **Next** Sprint 1 착수 — tauri-harness를 procman/ 본 프로젝트로 재편성 + T01-T10 실행
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.
