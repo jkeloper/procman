@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Rust / Tauri
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Build outputs
+dist/
+build/
+out/
+*.dmg
+*.app
+
+# Logs / metrics
+*.log
+spikes/**/logs/
+spikes/**/*.csv
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# procman runtime
+~/.procman/
