@@ -1,0 +1,17 @@
+{
+  "test": "100k-line-dump",
+  "lines": 100000,
+  "wall_ms": 2917,
+  "effective_lps": 34282,
+  "fps_avg": 59.9,
+  "fps_p5": 58.3,
+  "fps_min": 54.5,
+  "fps_max": 65.4,
+  "frames": 27,
+  "samples": 27,
+  "renderer": "webgl",
+  "verdict": "NO-GO",
+  "no_go_reasons": [
+    "avg fps 59.9 < 60"
+  ]
+}

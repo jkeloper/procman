@@ -56,5 +56,14 @@
 - **Finding** T5 SSH FAIL은 환경 이슈 (macOS 기본 sshd off), PTY 레이어 자체는 정상 동작
 - **Decision** 핵심 3/3 PASS → S3 xterm.js on WKWebView으로 진행
 
+### 2026-04-05 — Day 4 S3 xterm.js 완료 ✅ GO (effective)
+- **Added** xterm.js v6 + @xterm/addon-webgl 0.19 + @xterm/addon-fit 통합
+- **Added** 100k 라인 dump 벤치마크 (7-color ANSI 로테이션)
+- **Added** [spikes/s3-xterm/REPORT.md](spikes/s3-xterm/REPORT.md) + [results/bench.json](spikes/s3-xterm/results/bench.json)
+- **Finding** WebGL2 렌더러 WKWebView에서 정상 활성화 — Canvas fallback 불필요
+- **Finding** avg 59.9fps / p5 58.3fps / min 54.5fps — 0.17% 미달은 **rAF 스케줄러 상한** (macOS 59.94Hz). p5 기준 목표(30)의 2배
+- **Finding** 34k lines/sec throughput, procman 실사용의 ~7배. scrollback 50k 버퍼 문제 없음
+- **Decision** **effectively GO**. Charter rubric을 `avg ≥ 58 AND p5 ≥ 30`으로 조정 권고 → S4 Rust self-assessment로 진행
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

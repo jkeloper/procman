@@ -35,11 +35,12 @@
 - [x] S2.5 ANSI escape 시퀀스 (PASS, `\x1b[31m` 원본 전달)
 - [x] S2.6 판정서 [spikes/s2-pty/REPORT.md](spikes/s2-pty/REPORT.md)
 
-### S3 — xterm.js on WKWebView (0.5일)
-- [ ] S3.1 xterm.js + @xterm/addon-webgl 통합
-- [ ] S3.2 10만 라인 주입 + FPS 벤치
-- [ ] S3.3 WebGL 활성화 확인
-- [ ] S3.4 측정 / S3.5 판정서
+### S3 — xterm.js on WKWebView (0.5일) ✅ GO (effective)
+- [x] S3.1 xterm.js v6 + @xterm/addon-webgl + @xterm/addon-fit 통합
+- [x] S3.2 10만 라인 dump 벤치 (34k lps, 7-color ANSI)
+- [x] S3.3 WebGL2 활성화 확인 (WKWebView 지원)
+- [x] S3.4 측정: avg 59.9fps, p5 58.3fps, min 54.5fps
+- [x] S3.5 판정서 [spikes/s3-xterm/REPORT.md](spikes/s3-xterm/REPORT.md) — **effectively GO** (0.17% miss, rAF 상한)
 
 ### S4 — Rust self-assessment (1일, 사용자 직접)
 - [ ] S4.1 과제 A: tokio async 기본기 (2h)

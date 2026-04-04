@@ -1,251 +1,277 @@
-// S2 PTY Auto-test Harness — runs 4 scenarios sequentially, saves report.
+// S3 xterm.js on WKWebView — 100k line dump benchmark + PTY integration.
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import '@xterm/xterm/css/xterm.css';
 
 interface DataEvent { sid: number; data: string }
-interface ExitEvent { sid: number; status: number | null }
 
-interface Scenario {
-  name: string;
-  command: string;
-  args: string[];
-  steps: Array<{ delay_ms: number; input: string; label: string }>;
-  timeout_ms: number;
-  expect_any: string[];            // any of these strings present in output
-  expect_all?: string[];           // all these strings present
-  expect_regex?: RegExp;           // optional regex check
-  check_ansi?: boolean;            // check for ESC[ sequences
+interface BenchResult {
+  test: string;
+  lines: number;
+  wall_ms: number;
+  effective_lps: number;      // lines per second throughput to xterm
+  fps_avg: number;
+  fps_p5: number;
+  fps_min: number;
+  fps_max: number;
+  frames: number;
+  samples: number;            // number of FPS samples
+  renderer: string;           // "webgl" | "canvas"
+  verdict: 'GO' | 'NO-GO';
+  no_go_reasons: string[];
 }
 
-interface TestResult {
-  name: string;
-  status: 'PASS' | 'FAIL' | 'SKIP';
-  reason: string;
-  output_len: number;
-  output_preview: string;
-  ansi_found: boolean;
-  duration_ms: number;
-  exit_status: number | null;
-}
+const BENCH_LINES = 100_000;
+const BENCH_CHUNK = 200;          // smaller chunks for finer FPS resolution
+const BENCH_CHUNK_DELAY_MS = 2;   // small delay so rAF has time to tick between chunks
 
-const SCENARIOS: Scenario[] = [
-  {
-    name: 'T1_zsh_baseline',
-    command: '/bin/zsh',
-    args: ['-i'],
-    steps: [
-      { delay_ms: 500, input: 'echo HELLO_PTY && echo TERM=$TERM\r', label: 'echo' },
-      { delay_ms: 800, input: 'exit\r', label: 'exit' },
-    ],
-    timeout_ms: 5000,
-    expect_all: ['HELLO_PTY', 'TERM=xterm-256color'],
-    check_ansi: false,
-  },
-  {
-    name: 'T2_python_repl',
-    command: '/opt/anaconda3/bin/python3',
-    args: ['-i', '-q'],
-    steps: [
-      { delay_ms: 800, input: 'print(2 + 40)\r', label: 'arithmetic' },
-      { delay_ms: 500, input: 'import sys; print(sys.version_info[0])\r', label: 'version' },
-      { delay_ms: 500, input: 'exit()\r', label: 'exit' },
-    ],
-    timeout_ms: 6000,
-    expect_all: ['42'],
-    expect_any: ['3'],
-  },
-  {
-    name: 'T3_ansi_colors',
-    command: '/bin/zsh',
-    args: ['-i'],
-    steps: [
-      { delay_ms: 500, input: 'printf "\\033[31mRED\\033[0m\\n\\033[1;32mBOLDGREEN\\033[0m\\n"\r', label: 'ansi' },
-      { delay_ms: 500, input: 'exit\r', label: 'exit' },
-    ],
-    timeout_ms: 5000,
-    expect_all: ['RED', 'BOLDGREEN'],
-    check_ansi: true,
-  },
-  {
-    name: 'T4_docker_exec',
-    command: '/usr/local/bin/docker',
-    args: ['run', '-i', '--rm', 'alpine', 'sh', '-c', 'echo DOCKER_PTY_OK && uname -a'],
-    steps: [],
-    timeout_ms: 20000,
-    expect_all: ['DOCKER_PTY_OK', 'Linux'],
-  },
-  {
-    name: 'T5_ssh_localhost',
-    command: '/usr/bin/ssh',
-    args: ['-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes',
-           'localhost', 'echo SSH_PTY_OK && uname -s'],
-    steps: [],
-    timeout_ms: 6000,
-    expect_all: ['SSH_PTY_OK', 'Darwin'],
-  },
-];
-
-async function runScenario(sc: Scenario, onLog: (s: string) => void): Promise<TestResult> {
-  const start = Date.now();
-  let accumulated = '';
-  let exit_status: number | null = null;
-  let exited = false;
-  let sid: number;
-
-  try {
-    sid = await invoke<number>('pty_spawn', {
-      command: sc.command, args: sc.args, cols: 120, rows: 30,
-    });
-  } catch (e) {
+// rAF-based FPS meter
+class FpsMeter {
+  samples: number[] = [];
+  private running = false;
+  private lastTime = 0;
+  private frameCount = 0;
+  private bucketStart = 0;
+  start() {
+    this.running = true;
+    this.lastTime = performance.now();
+    this.bucketStart = this.lastTime;
+    this.frameCount = 0;
+    this.samples = [];
+    const tick = (t: number) => {
+      if (!this.running) return;
+      this.frameCount++;
+      if (t - this.bucketStart >= 100) {
+        const fps = (this.frameCount * 1000) / (t - this.bucketStart);
+        this.samples.push(fps);
+        this.bucketStart = t;
+        this.frameCount = 0;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  stop() { this.running = false; }
+  summary() {
+    if (this.samples.length === 0) return { avg: 0, p5: 0, min: 0, max: 0, count: 0 };
+    const sorted = [...this.samples].sort((a, b) => a - b);
+    const avg = this.samples.reduce((s, v) => s + v, 0) / this.samples.length;
     return {
-      name: sc.name, status: 'SKIP', reason: `spawn failed: ${e}`,
-      output_len: 0, output_preview: '', ansi_found: false,
-      duration_ms: Date.now() - start, exit_status: null,
+      avg,
+      p5: sorted[Math.floor(sorted.length * 0.05)],
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      count: this.samples.length,
     };
   }
+}
 
-  const unlisten: UnlistenFn[] = [];
-  unlisten.push(await listen<DataEvent>(`pty://data/${sid}`, (ev) => {
-    accumulated += ev.payload.data;
-  }));
-  unlisten.push(await listen<ExitEvent>(`pty://exit/${sid}`, (ev) => {
-    exit_status = ev.payload.status;
-    exited = true;
-  }));
-
-  // Execute steps
-  for (const step of sc.steps) {
-    await new Promise((r) => setTimeout(r, step.delay_ms));
-    if (exited) break;
-    try {
-      await invoke('pty_write', { sid, data: step.input });
-    } catch (e) {
-      onLog(`${sc.name}: write error on ${step.label}: ${e}`);
-    }
-  }
-
-  // Wait for exit or timeout
-  const deadline = start + sc.timeout_ms;
-  while (!exited && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-
-  if (!exited) {
-    try { await invoke('pty_kill', { sid }); } catch {}
-  }
-  for (const un of unlisten) un();
-
-  const duration_ms = Date.now() - start;
-  const ansi_found = /\x1b\[/.test(accumulated);
-
-  // Check expectations
-  const reasons: string[] = [];
-  if (!exited) reasons.push('timeout');
-  if (sc.expect_all) {
-    for (const s of sc.expect_all) {
-      if (!accumulated.includes(s)) reasons.push(`missing "${s}"`);
-    }
-  }
-  if (sc.expect_any && sc.expect_any.length > 0) {
-    if (!sc.expect_any.some((s) => accumulated.includes(s))) {
-      reasons.push(`none of [${sc.expect_any.join(',')}]`);
-    }
-  }
-  if (sc.check_ansi && !ansi_found) reasons.push('no ANSI ESC[ sequence');
-
-  const status = reasons.length === 0 ? 'PASS' : 'FAIL';
-  const preview = accumulated.length > 300
-    ? accumulated.slice(0, 150) + '…' + accumulated.slice(-150)
-    : accumulated;
-
-  return {
-    name: sc.name, status,
-    reason: reasons.join('; ') || 'all checks passed',
-    output_len: accumulated.length,
-    output_preview: preview.replace(/\r/g, '\\r').replace(/\x1b/g, '\\e'),
-    ansi_found, duration_ms, exit_status,
-  };
+function genLine(i: number): string {
+  // ~100-byte line with some ANSI color variation
+  const hue = i % 7;
+  const color = 31 + hue; // 31..37 = red..white
+  const ts = new Date().toISOString();
+  return `\x1b[${color}m[${ts}]\x1b[0m lineno=${i.toString().padStart(6, '0')} payload=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n`;
 }
 
 export default function App() {
-  const [log, setLog] = useState<string[]>(['initializing...']);
-  const [results, setResults] = useState<TestResult[]>([]);
-  const [done, setDone] = useState(false);
-  const startedRef = useRef(false);
-
+  const termRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('canvas');
+  const [rendererMsg, setRendererMsg] = useState('');
+  const [log, setLog] = useState<string[]>([]);
+  const [bench, setBench] = useState<BenchResult | null>(null);
+  const [ptySid, setPtySid] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
   const appendLog = (s: string) =>
-    setLog((prev) => [...prev, `[${new Date().toISOString().slice(11, 19)}] ${s}`]);
+    setLog((p) => [...p, `[${new Date().toISOString().slice(11, 19)}] ${s}`]);
 
+  // xterm init
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    (async () => {
-      const all: TestResult[] = [];
-      for (const sc of SCENARIOS) {
-        appendLog(`▶ running ${sc.name}...`);
-        const r = await runScenario(sc, appendLog);
-        all.push(r);
-        setResults([...all]);
-        appendLog(`${r.status === 'PASS' ? '✅' : r.status === 'SKIP' ? '⚠️' : '❌'} ${sc.name}: ${r.status} (${r.reason}, ${r.duration_ms}ms, ${r.output_len}B)`);
-        await new Promise((r) => setTimeout(r, 500));
-      }
+    if (!termRef.current || xtermRef.current) return;
+    const term = new Terminal({
+      fontFamily: 'Menlo, monospace',
+      fontSize: 12,
+      theme: { background: '#000', foreground: '#eee' },
+      scrollback: 50000,
+      convertEol: false,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(termRef.current);
+    fit.fit();
 
-      const pass = all.filter((r) => r.status === 'PASS').length;
-      const fail = all.filter((r) => r.status === 'FAIL').length;
-      const skip = all.filter((r) => r.status === 'SKIP').length;
-      const required_core = ['T1_zsh_baseline', 'T2_python_repl', 'T3_ansi_colors'];
-      const core_pass = required_core.every((n) =>
-        all.find((r) => r.name === n)?.status === 'PASS'
-      );
-      const verdict = core_pass ? 'GO' : 'NO-GO';
+    // Probe raw WebGL2 availability first (independent of xterm addon)
+    const probe = document.createElement('canvas');
+    const gl2 = probe.getContext('webgl2');
+    const gl1 = probe.getContext('webgl');
+    const rendererInfo = gl2
+      ? 'webgl2 available'
+      : gl1
+      ? 'webgl1 only'
+      : 'no webgl';
 
-      const report = {
-        completed_at: new Date().toISOString(),
-        overall: { pass, fail, skip, total: all.length },
-        core_3_pass: core_pass,
-        verdict,
-        results: all,
-      };
+    // Try WebGL addon
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        setRendererMsg('WebGL context lost — reverting to canvas');
+        webgl.dispose();
+        setRenderer('canvas');
+      });
+      term.loadAddon(webgl);
+      setRenderer('webgl');
+      setRendererMsg(`WebGL addon OK (${rendererInfo})`);
+    } catch (e: any) {
+      setRenderer('canvas');
+      setRendererMsg(`addon throw: ${e?.message || e} | probe: ${rendererInfo}`);
+    }
 
-      try {
-        const path = await invoke<string>('save_report', {
-          filename: '../../s2-pty/results/combined.json',
-          content: JSON.stringify(report, null, 2),
-        });
-        appendLog(`💾 saved ${path}`);
-      } catch (e) {
-        appendLog(`save failed: ${e}`);
-      }
-      appendLog(`🏁 ALL DONE — verdict: ${verdict} (core 3 pass=${core_pass})`);
-      setDone(true);
-    })();
+    xtermRef.current = term;
+    fitRef.current = fit;
+
+    const onResize = () => fit.fit();
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      term.dispose();
+      xtermRef.current = null;
+    };
   }, []);
 
+  const runBenchmark = async () => {
+    if (!xtermRef.current || running) return;
+    setRunning(true);
+    const term = xtermRef.current;
+    term.clear();
+    appendLog(`▶ benchmark: dumping ${BENCH_LINES} lines in chunks of ${BENCH_CHUNK}`);
+
+    const fps = new FpsMeter();
+    fps.start();
+    const start = performance.now();
+
+    let i = 0;
+    while (i < BENCH_LINES) {
+      const end = Math.min(i + BENCH_CHUNK, BENCH_LINES);
+      let chunk = '';
+      for (let j = i; j < end; j++) chunk += genLine(j);
+      term.write(chunk);
+      i = end;
+      if (BENCH_CHUNK_DELAY_MS > 0) {
+        await new Promise((r) => setTimeout(r, BENCH_CHUNK_DELAY_MS));
+      } else {
+        // Yield to allow rAF to fire
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+
+    // Wait for final render
+    await new Promise<void>((r) => term.write('', () => r()));
+    await new Promise((r) => setTimeout(r, 200));
+    fps.stop();
+    const wall_ms = performance.now() - start;
+    const sum = fps.summary();
+
+    const no_go: string[] = [];
+    if (sum.avg < 60) no_go.push(`avg fps ${sum.avg.toFixed(1)} < 60`);
+    if (sum.p5 < 30) no_go.push(`p5 fps ${sum.p5.toFixed(1)} < 30`);
+    const verdict: 'GO' | 'NO-GO' = no_go.length === 0 ? 'GO' : 'NO-GO';
+
+    const result: BenchResult = {
+      test: '100k-line-dump',
+      lines: BENCH_LINES,
+      wall_ms: Math.round(wall_ms),
+      effective_lps: Math.round((BENCH_LINES * 1000) / wall_ms),
+      fps_avg: +sum.avg.toFixed(1),
+      fps_p5: +sum.p5.toFixed(1),
+      fps_min: +sum.min.toFixed(1),
+      fps_max: +sum.max.toFixed(1),
+      frames: sum.count,
+      samples: sum.count,
+      renderer,
+      verdict,
+      no_go_reasons: no_go,
+    };
+    setBench(result);
+    appendLog(`🏁 done in ${wall_ms.toFixed(0)}ms, fps avg=${sum.avg.toFixed(1)} p5=${sum.p5.toFixed(1)} min=${sum.min.toFixed(1)}`);
+    appendLog(`verdict: ${verdict}${no_go.length ? ' (' + no_go.join(', ') + ')' : ''}`);
+
+    try {
+      const path = await invoke<string>('save_report', {
+        filename: '../../s3-xterm/results/bench.json',
+        content: JSON.stringify(result, null, 2),
+      });
+      appendLog(`💾 saved ${path}`);
+    } catch (e) {
+      appendLog(`save failed: ${e}`);
+    }
+    setRunning(false);
+  };
+
+  const spawnPty = async () => {
+    if (ptySid != null) return;
+    const term = xtermRef.current;
+    if (!term) return;
+    const cols = term.cols;
+    const rows = term.rows;
+    const sid = await invoke<number>('pty_spawn', {
+      command: '/bin/zsh', args: ['-i'], cols, rows,
+    });
+    setPtySid(sid);
+    appendLog(`PTY spawned sid=${sid} (${cols}×${rows})`);
+
+    const un1: UnlistenFn = await listen<DataEvent>(`pty://data/${sid}`, (ev) => {
+      term.write(ev.payload.data);
+    });
+    const onData = term.onData((data: string) => {
+      invoke('pty_write', { sid, data });
+    });
+    const un2 = await listen(`pty://exit/${sid}`, () => {
+      appendLog(`PTY exited`);
+      un1();
+      onData.dispose();
+      setPtySid(null);
+    });
+    (window as any).__ptyUnlisteners = [un1, un2];
+  };
+
+  // Auto-run benchmark on mount (wait for renderer detection to stabilize)
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!xtermRef.current) return;
+    if (!rendererMsg) return; // wait until renderer probe logged
+    autoStartedRef.current = true;
+    setTimeout(() => runBenchmark(), 800);
+  }, [rendererMsg]);
+
   return (
-    <div style={{ fontFamily: 'monospace', padding: 16, fontSize: 12 }}>
-      <h2>S2 PTY auto-test ({SCENARIOS.length} scenarios)</h2>
-      <table cellPadding={4} style={{ borderCollapse: 'collapse', marginBottom: 12 }}>
-        <thead>
-          <tr><th>#</th><th>name</th><th>status</th><th>reason</th><th>bytes</th><th>ms</th><th>ANSI</th></tr>
-        </thead>
-        <tbody>
-          {results.map((r, i) => (
-            <tr key={i} style={{ borderTop: '1px solid #ccc' }}>
-              <td>{i + 1}</td>
-              <td>{r.name}</td>
-              <td style={{ color: r.status === 'PASS' ? 'green' : r.status === 'SKIP' ? 'orange' : 'red', fontWeight: 'bold' }}>{r.status}</td>
-              <td>{r.reason}</td>
-              <td>{r.output_len}</td>
-              <td>{r.duration_ms}</td>
-              <td>{r.ansi_found ? '✓' : '·'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {done && <p style={{ fontWeight: 'bold' }}>You can close this window.</p>}
-      <pre style={{ background: '#111', color: '#0f0', padding: 8, maxHeight: 300, overflow: 'auto' }}>
+    <div style={{ fontFamily: 'monospace', padding: 12, fontSize: 12 }}>
+      <h3>S3 xterm.js WKWebView bench</h3>
+      <div>
+        Renderer: <b style={{ color: renderer === 'webgl' ? 'green' : 'orange' }}>{renderer}</b> — {rendererMsg}
+      </div>
+      <div style={{ marginTop: 8, marginBottom: 8 }}>
+        <button onClick={runBenchmark} disabled={running}>▶ Re-run 100k dump</button>{' '}
+        <button onClick={spawnPty} disabled={ptySid != null}>Spawn zsh PTY</button>
+      </div>
+      {bench && (
+        <div style={{ background: '#f0f0f0', padding: 8, marginBottom: 8 }}>
+          <b>Verdict: <span style={{ color: bench.verdict === 'GO' ? 'green' : 'red' }}>{bench.verdict}</span></b>
+          {' | '}renderer={bench.renderer} | lines={bench.lines.toLocaleString()} |
+          wall={bench.wall_ms}ms | lps={bench.effective_lps.toLocaleString()} |
+          fps avg={bench.fps_avg} p5={bench.fps_p5} min={bench.fps_min} max={bench.fps_max}
+          {bench.no_go_reasons.length > 0 && <div style={{ color: 'red' }}>No-Go: {bench.no_go_reasons.join(', ')}</div>}
+        </div>
+      )}
+      <div ref={termRef} style={{ width: '100%', height: 420, background: '#000' }} />
+      <pre style={{ background: '#111', color: '#0f0', padding: 6, marginTop: 8, maxHeight: 150, overflow: 'auto', fontSize: 11 }}>
         {log.join('\n')}
       </pre>
     </div>
