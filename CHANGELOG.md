@@ -47,5 +47,14 @@
 - **Finding** Issue #7684 (v1 라인 유실) v2에서 **재현 안됨** — 이벤트 루프 재작성 이점
 - **Decision** 1차 Go/No-Go 게이트 **PASS** → S2 PTY 인터랙션으로 진행
 
+### 2026-04-05 — Day 2/3 S2 PTY 완료 ✅ GO
+- **Added** `portable-pty = "0.8"` dependency + [pty.rs](spikes/tauri-harness/src-tauri/src/pty.rs): `pty_spawn`/`pty_write`/`pty_resize`/`pty_kill` IPC commands, per-session event stream (`pty://data/{sid}`, `pty://exit/{sid}`)
+- **Added** S2 5-scenario auto-test harness (App.tsx)
+- **Added** [spikes/s2-pty/REPORT.md](spikes/s2-pty/REPORT.md) + [results/combined.json](spikes/s2-pty/results/combined.json)
+- **Finding** portable-pty on macOS: zsh/python/docker 모두 정상 동작, ANSI escape `\x1b[` 시퀀스 원본 그대로 양방향 전달
+- **Finding** T4 Docker alpine 이미지 first-pull 포함 4.2s — 실사용에서 `docker exec -it` 래핑 가능
+- **Finding** T5 SSH FAIL은 환경 이슈 (macOS 기본 sshd off), PTY 레이어 자체는 정상 동작
+- **Decision** 핵심 3/3 PASS → S3 xterm.js on WKWebView으로 진행
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

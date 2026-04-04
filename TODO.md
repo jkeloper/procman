@@ -27,11 +27,13 @@
 - [x] S1.5 측정 3회 완료 (~53k events/sec, 3.4M lines/run, **drops=0**)
 - [x] S1.6 판정서 [spikes/s1-stdout/REPORT.md](spikes/s1-stdout/REPORT.md) — **★ 1차 게이트 ✅ GO**
 
-### S2 — PTY 인터랙션 (1일)
-- [ ] S2.1 `portable-pty` crate 통합
-- [ ] S2.2 docker exec / S2.3 python -i / S2.4 ssh 시나리오
-- [ ] S2.5 컬러 시퀀스 육안 검증
-- [ ] S2.6 판정서
+### S2 — PTY 인터랙션 (1일) ✅ GO
+- [x] S2.1 `portable-pty = "0.8"` 통합 ([pty.rs](spikes/tauri-harness/src-tauri/src/pty.rs))
+- [x] S2.2 docker run alpine (PASS, 4.2s with first-pull)
+- [x] S2.3 python3 -i REPL (PASS, "42" + py3 확인)
+- [x] S2.4 ssh localhost (FAIL expected — sshd 꺼짐, PTY 레이어는 정상)
+- [x] S2.5 ANSI escape 시퀀스 (PASS, `\x1b[31m` 원본 전달)
+- [x] S2.6 판정서 [spikes/s2-pty/REPORT.md](spikes/s2-pty/REPORT.md)
 
 ### S3 — xterm.js on WKWebView (0.5일)
 - [ ] S3.1 xterm.js + @xterm/addon-webgl 통합

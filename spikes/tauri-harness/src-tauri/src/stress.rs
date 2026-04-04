@@ -100,13 +100,18 @@ pub fn get_stats(state: State<'_, Arc<StressState>>) -> StressStats {
 pub fn save_report(filename: String, content: String) -> Result<String, String> {
     use std::fs;
     use std::path::PathBuf;
-    let dir = PathBuf::from(
+    // Resolve path relative to spikes/s1-stdout/results, but allow ".." to escape.
+    let base = PathBuf::from(
         "/Users/jeonghwankim/projects/procman/spikes/s1-stdout/results",
     );
-    fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {}", e))?;
-    let path = dir.join(&filename);
+    let path = base.join(&filename);
+    let canonical_parent = path
+        .parent()
+        .ok_or("no parent dir")?
+        .to_path_buf();
+    fs::create_dir_all(&canonical_parent).map_err(|e| format!("mkdir: {}", e))?;
     fs::write(&path, content).map_err(|e| format!("write: {}", e))?;
-    Ok(path.to_string_lossy().into_owned())
+    Ok(path.canonicalize().unwrap_or(path).to_string_lossy().into_owned())
 }
 
 /// Sample RSS (KB) of the current process via mach_task_basic_info.

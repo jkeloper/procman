@@ -1,12 +1,15 @@
 mod stress;
+mod pty;
 
 use std::sync::Arc;
 use stress::StressState;
+use pty::PtyState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .manage(Arc::new(StressState::default()))
+    .manage(Arc::new(PtyState::default()))
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -23,6 +26,10 @@ pub fn run() {
       stress::get_stats,
       stress::get_rss_kb,
       stress::save_report,
+      pty::pty_spawn,
+      pty::pty_write,
+      pty::pty_resize,
+      pty::pty_kill,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -1,189 +1,253 @@
-// S1.5 Auto-run mode — runs 3 measurements sequentially, saves each as JSON, then quits.
+// S2 PTY Auto-test Harness — runs 4 scenarios sequentially, saves report.
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 
-interface LinePayload { eid: number; line: string }
-interface Stats { total_lines: number; running: boolean }
-interface EmitterState { received: number; lastSeq: number; gaps: number; firstGapAt: number | null }
-interface RssSample { t: number; rssKb: number; totalLines: number }
-interface RunReport {
-  run_idx: number;
-  params: { n: number; rate: number; duration: number };
-  start_ts: number;
-  end_ts: number;
-  wall_sec: number;
-  expected_total: number;
-  rust_total_lines: number;
-  fe_total_received: number;
-  total_gaps: number;
-  per_eid: Array<{ eid: number; received: number; lastSeq: number; gaps: number; firstGapAt: number | null }>;
-  peak_rss_kb: number;
-  samples: RssSample[];
-  verdict: 'GO' | 'NO-GO';
-  no_go_reasons: string[];
+interface DataEvent { sid: number; data: string }
+interface ExitEvent { sid: number; status: number | null }
+
+interface Scenario {
+  name: string;
+  command: string;
+  args: string[];
+  steps: Array<{ delay_ms: number; input: string; label: string }>;
+  timeout_ms: number;
+  expect_any: string[];            // any of these strings present in output
+  expect_all?: string[];           // all these strings present
+  expect_regex?: RegExp;           // optional regex check
+  check_ansi?: boolean;            // check for ESC[ sequences
 }
 
-const SCRIPT = '/Users/jeonghwankim/projects/procman/spikes/s1-stdout/line-emitter';
-const N = 10;
-const RATE = 10000;
-const DURATION = 60;
-const GAP_BETWEEN_RUNS_SEC = 8;
-const TOTAL_RUNS = 3;
-
-function parseSeq(line: string): number | null {
-  const m = line.match(/^SEQ=(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
+interface TestResult {
+  name: string;
+  status: 'PASS' | 'FAIL' | 'SKIP';
+  reason: string;
+  output_len: number;
+  output_preview: string;
+  ansi_found: boolean;
+  duration_ms: number;
+  exit_status: number | null;
 }
 
-async function runOne(idx: number, onProgress: (msg: string) => void): Promise<RunReport> {
-  const params = { n: N, rate: RATE, duration: DURATION };
-  const expected_total = N * RATE * DURATION;
-  const emitters: Record<number, EmitterState> = {};
-  const samples: RssSample[] = [];
-  let peakRssKb = 0;
+const SCENARIOS: Scenario[] = [
+  {
+    name: 'T1_zsh_baseline',
+    command: '/bin/zsh',
+    args: ['-i'],
+    steps: [
+      { delay_ms: 500, input: 'echo HELLO_PTY && echo TERM=$TERM\r', label: 'echo' },
+      { delay_ms: 800, input: 'exit\r', label: 'exit' },
+    ],
+    timeout_ms: 5000,
+    expect_all: ['HELLO_PTY', 'TERM=xterm-256color'],
+    check_ansi: false,
+  },
+  {
+    name: 'T2_python_repl',
+    command: '/opt/anaconda3/bin/python3',
+    args: ['-i', '-q'],
+    steps: [
+      { delay_ms: 800, input: 'print(2 + 40)\r', label: 'arithmetic' },
+      { delay_ms: 500, input: 'import sys; print(sys.version_info[0])\r', label: 'version' },
+      { delay_ms: 500, input: 'exit()\r', label: 'exit' },
+    ],
+    timeout_ms: 6000,
+    expect_all: ['42'],
+    expect_any: ['3'],
+  },
+  {
+    name: 'T3_ansi_colors',
+    command: '/bin/zsh',
+    args: ['-i'],
+    steps: [
+      { delay_ms: 500, input: 'printf "\\033[31mRED\\033[0m\\n\\033[1;32mBOLDGREEN\\033[0m\\n"\r', label: 'ansi' },
+      { delay_ms: 500, input: 'exit\r', label: 'exit' },
+    ],
+    timeout_ms: 5000,
+    expect_all: ['RED', 'BOLDGREEN'],
+    check_ansi: true,
+  },
+  {
+    name: 'T4_docker_exec',
+    command: '/usr/local/bin/docker',
+    args: ['run', '-i', '--rm', 'alpine', 'sh', '-c', 'echo DOCKER_PTY_OK && uname -a'],
+    steps: [],
+    timeout_ms: 20000,
+    expect_all: ['DOCKER_PTY_OK', 'Linux'],
+  },
+  {
+    name: 'T5_ssh_localhost',
+    command: '/usr/bin/ssh',
+    args: ['-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes',
+           'localhost', 'echo SSH_PTY_OK && uname -s'],
+    steps: [],
+    timeout_ms: 6000,
+    expect_all: ['SSH_PTY_OK', 'Darwin'],
+  },
+];
 
-  // Subscribe to per-eid events
-  const unlisteners: UnlistenFn[] = [];
-  for (let eid = 0; eid < N; eid++) {
-    const un = await listen<LinePayload>(`stress://line/${eid}`, (ev) => {
-      const seq = parseSeq(ev.payload.line);
-      if (seq == null) return;
-      const cur = emitters[eid] ?? { received: 0, lastSeq: 0, gaps: 0, firstGapAt: null };
-      let gaps = cur.gaps;
-      let firstGapAt = cur.firstGapAt;
-      if (cur.lastSeq > 0 && seq !== cur.lastSeq + 1) {
-        gaps += Math.max(0, seq - cur.lastSeq - 1);
-        if (firstGapAt == null) firstGapAt = seq;
-      }
-      emitters[eid] = { received: cur.received + 1, lastSeq: seq, gaps, firstGapAt };
+async function runScenario(sc: Scenario, onLog: (s: string) => void): Promise<TestResult> {
+  const start = Date.now();
+  let accumulated = '';
+  let exit_status: number | null = null;
+  let exited = false;
+  let sid: number;
+
+  try {
+    sid = await invoke<number>('pty_spawn', {
+      command: sc.command, args: sc.args, cols: 120, rows: 30,
     });
-    unlisteners.push(un);
+  } catch (e) {
+    return {
+      name: sc.name, status: 'SKIP', reason: `spawn failed: ${e}`,
+      output_len: 0, output_preview: '', ansi_found: false,
+      duration_ms: Date.now() - start, exit_status: null,
+    };
   }
 
-  onProgress(`run ${idx}: starting ${N} emitters × ${RATE}/s × ${DURATION}s`);
-  const start_ts = Date.now();
-  await invoke<string>('start_stress', {
-    emitterScript: SCRIPT, nProcesses: N, ratePerSec: RATE, durationSec: DURATION,
-  });
-
-  // Poll stats + RSS every 1s
-  const pollInterval = setInterval(async () => {
-    const rss = await invoke<number>('get_rss_kb');
-    const s = await invoke<Stats>('get_stats');
-    peakRssKb = Math.max(peakRssKb, rss);
-    samples.push({ t: Date.now() - start_ts, rssKb: rss, totalLines: s.total_lines });
-    onProgress(`run ${idx}: t=${Math.round((Date.now() - start_ts) / 1000)}s  rss=${(rss/1024).toFixed(0)}MB  lines=${s.total_lines}`);
-  }, 1000);
-
-  // Wait for duration + grace
-  await new Promise((r) => setTimeout(r, (DURATION + 3) * 1000));
-  clearInterval(pollInterval);
-  const finalStats = await invoke<Stats>('stop_stress');
-  const end_ts = Date.now();
-  for (const un of unlisteners) un();
-
-  // Build report
-  const per_eid = Array.from({ length: N }, (_, eid) => ({
-    eid,
-    received: emitters[eid]?.received ?? 0,
-    lastSeq: emitters[eid]?.lastSeq ?? 0,
-    gaps: emitters[eid]?.gaps ?? 0,
-    firstGapAt: emitters[eid]?.firstGapAt ?? null,
+  const unlisten: UnlistenFn[] = [];
+  unlisten.push(await listen<DataEvent>(`pty://data/${sid}`, (ev) => {
+    accumulated += ev.payload.data;
   }));
-  const total_gaps = per_eid.reduce((s, e) => s + e.gaps, 0);
-  const fe_total_received = per_eid.reduce((s, e) => s + e.received, 0);
-  const no_go_reasons: string[] = [];
-  if (total_gaps > 0) no_go_reasons.push(`${total_gaps} seq gaps`);
-  if (peakRssKb >= 150 * 1024) no_go_reasons.push(`peak RSS ${(peakRssKb/1024).toFixed(1)}MB ≥ 150MB`);
-  const verdict: 'GO' | 'NO-GO' = no_go_reasons.length === 0 ? 'GO' : 'NO-GO';
+  unlisten.push(await listen<ExitEvent>(`pty://exit/${sid}`, (ev) => {
+    exit_status = ev.payload.status;
+    exited = true;
+  }));
+
+  // Execute steps
+  for (const step of sc.steps) {
+    await new Promise((r) => setTimeout(r, step.delay_ms));
+    if (exited) break;
+    try {
+      await invoke('pty_write', { sid, data: step.input });
+    } catch (e) {
+      onLog(`${sc.name}: write error on ${step.label}: ${e}`);
+    }
+  }
+
+  // Wait for exit or timeout
+  const deadline = start + sc.timeout_ms;
+  while (!exited && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  if (!exited) {
+    try { await invoke('pty_kill', { sid }); } catch {}
+  }
+  for (const un of unlisten) un();
+
+  const duration_ms = Date.now() - start;
+  const ansi_found = /\x1b\[/.test(accumulated);
+
+  // Check expectations
+  const reasons: string[] = [];
+  if (!exited) reasons.push('timeout');
+  if (sc.expect_all) {
+    for (const s of sc.expect_all) {
+      if (!accumulated.includes(s)) reasons.push(`missing "${s}"`);
+    }
+  }
+  if (sc.expect_any && sc.expect_any.length > 0) {
+    if (!sc.expect_any.some((s) => accumulated.includes(s))) {
+      reasons.push(`none of [${sc.expect_any.join(',')}]`);
+    }
+  }
+  if (sc.check_ansi && !ansi_found) reasons.push('no ANSI ESC[ sequence');
+
+  const status = reasons.length === 0 ? 'PASS' : 'FAIL';
+  const preview = accumulated.length > 300
+    ? accumulated.slice(0, 150) + '…' + accumulated.slice(-150)
+    : accumulated;
 
   return {
-    run_idx: idx, params, start_ts, end_ts,
-    wall_sec: (end_ts - start_ts) / 1000,
-    expected_total,
-    rust_total_lines: finalStats.total_lines,
-    fe_total_received,
-    total_gaps, per_eid,
-    peak_rss_kb: peakRssKb, samples,
-    verdict, no_go_reasons,
+    name: sc.name, status,
+    reason: reasons.join('; ') || 'all checks passed',
+    output_len: accumulated.length,
+    output_preview: preview.replace(/\r/g, '\\r').replace(/\x1b/g, '\\e'),
+    ansi_found, duration_ms, exit_status,
   };
 }
 
 export default function App() {
-  const [status, setStatus] = useState('initializing...');
-  const [reports, setReports] = useState<RunReport[]>([]);
+  const [log, setLog] = useState<string[]>(['initializing...']);
+  const [results, setResults] = useState<TestResult[]>([]);
+  const [done, setDone] = useState(false);
   const startedRef = useRef(false);
+
+  const appendLog = (s: string) =>
+    setLog((prev) => [...prev, `[${new Date().toISOString().slice(11, 19)}] ${s}`]);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
     (async () => {
-      const allReports: RunReport[] = [];
-      for (let i = 1; i <= TOTAL_RUNS; i++) {
-        try {
-          const rep = await runOne(i, setStatus);
-          allReports.push(rep);
-          setReports([...allReports]);
-          const saved = await invoke<string>('save_report', {
-            filename: `run-${i}.json`,
-            content: JSON.stringify(rep, null, 2),
-          });
-          setStatus(`run ${i} done → ${saved} (verdict: ${rep.verdict})`);
-          if (i < TOTAL_RUNS) {
-            setStatus(`sleeping ${GAP_BETWEEN_RUNS_SEC}s before run ${i + 1}...`);
-            await new Promise((r) => setTimeout(r, GAP_BETWEEN_RUNS_SEC * 1000));
-          }
-        } catch (e) {
-          setStatus(`run ${i} ERROR: ${e}`);
-          return;
-        }
+      const all: TestResult[] = [];
+      for (const sc of SCENARIOS) {
+        appendLog(`▶ running ${sc.name}...`);
+        const r = await runScenario(sc, appendLog);
+        all.push(r);
+        setResults([...all]);
+        appendLog(`${r.status === 'PASS' ? '✅' : r.status === 'SKIP' ? '⚠️' : '❌'} ${sc.name}: ${r.status} (${r.reason}, ${r.duration_ms}ms, ${r.output_len}B)`);
+        await new Promise((r) => setTimeout(r, 500));
       }
-      // Save combined summary
-      const combined = {
+
+      const pass = all.filter((r) => r.status === 'PASS').length;
+      const fail = all.filter((r) => r.status === 'FAIL').length;
+      const skip = all.filter((r) => r.status === 'SKIP').length;
+      const required_core = ['T1_zsh_baseline', 'T2_python_repl', 'T3_ansi_colors'];
+      const core_pass = required_core.every((n) =>
+        all.find((r) => r.name === n)?.status === 'PASS'
+      );
+      const verdict = core_pass ? 'GO' : 'NO-GO';
+
+      const report = {
         completed_at: new Date().toISOString(),
-        runs: allReports,
-        overall_verdict: allReports.every((r) => r.verdict === 'GO') ? 'GO' : 'NO-GO',
+        overall: { pass, fail, skip, total: all.length },
+        core_3_pass: core_pass,
+        verdict,
+        results: all,
       };
-      await invoke<string>('save_report', {
-        filename: 'combined.json',
-        content: JSON.stringify(combined, null, 2),
-      });
-      setStatus(`ALL DONE. Overall verdict: ${combined.overall_verdict}. You can close this window.`);
+
+      try {
+        const path = await invoke<string>('save_report', {
+          filename: '../../s2-pty/results/combined.json',
+          content: JSON.stringify(report, null, 2),
+        });
+        appendLog(`💾 saved ${path}`);
+      } catch (e) {
+        appendLog(`save failed: ${e}`);
+      }
+      appendLog(`🏁 ALL DONE — verdict: ${verdict} (core 3 pass=${core_pass})`);
+      setDone(true);
     })();
   }, []);
 
   return (
-    <div style={{ fontFamily: 'monospace', padding: 16, fontSize: 13 }}>
-      <h2>S1.5 Auto-run ({TOTAL_RUNS}× measurement)</h2>
-      <p>Params: <b>{N}</b> procs × <b>{RATE}</b> lines/s × <b>{DURATION}</b>s per run</p>
-      <p>Expected per run: <b>{(N * RATE * DURATION).toLocaleString()}</b> lines</p>
-      <hr />
-      <div style={{ background: '#222', color: '#0f0', padding: 8 }}>{status}</div>
-      <hr />
-      <table cellPadding={6} style={{ borderCollapse: 'collapse' }}>
+    <div style={{ fontFamily: 'monospace', padding: 16, fontSize: 12 }}>
+      <h2>S2 PTY auto-test ({SCENARIOS.length} scenarios)</h2>
+      <table cellPadding={4} style={{ borderCollapse: 'collapse', marginBottom: 12 }}>
         <thead>
-          <tr>
-            <th>run</th><th>verdict</th><th>Rust lines</th><th>FE recv</th>
-            <th>expected</th><th>gaps</th><th>peak RSS</th><th>wall</th>
-          </tr>
+          <tr><th>#</th><th>name</th><th>status</th><th>reason</th><th>bytes</th><th>ms</th><th>ANSI</th></tr>
         </thead>
         <tbody>
-          {reports.map((r) => (
-            <tr key={r.run_idx} style={{ borderTop: '1px solid #666' }}>
-              <td>{r.run_idx}</td>
-              <td style={{ color: r.verdict === 'GO' ? 'green' : 'red', fontWeight: 'bold' }}>{r.verdict}</td>
-              <td>{r.rust_total_lines.toLocaleString()}</td>
-              <td>{r.fe_total_received.toLocaleString()}</td>
-              <td>{r.expected_total.toLocaleString()}</td>
-              <td style={{ color: r.total_gaps > 0 ? 'red' : 'inherit' }}>{r.total_gaps}</td>
-              <td>{(r.peak_rss_kb / 1024).toFixed(1)} MB</td>
-              <td>{r.wall_sec.toFixed(1)}s</td>
+          {results.map((r, i) => (
+            <tr key={i} style={{ borderTop: '1px solid #ccc' }}>
+              <td>{i + 1}</td>
+              <td>{r.name}</td>
+              <td style={{ color: r.status === 'PASS' ? 'green' : r.status === 'SKIP' ? 'orange' : 'red', fontWeight: 'bold' }}>{r.status}</td>
+              <td>{r.reason}</td>
+              <td>{r.output_len}</td>
+              <td>{r.duration_ms}</td>
+              <td>{r.ansi_found ? '✓' : '·'}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {done && <p style={{ fontWeight: 'bold' }}>You can close this window.</p>}
+      <pre style={{ background: '#111', color: '#0f0', padding: 8, maxHeight: 300, overflow: 'auto' }}>
+        {log.join('\n')}
+      </pre>
     </div>
   );
 }
