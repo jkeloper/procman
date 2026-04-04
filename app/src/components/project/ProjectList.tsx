@@ -3,6 +3,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { api, type Project } from '@/api/tauri';
 import { NewProjectDialog } from './NewProjectDialog';
+import { ScanDialog } from './ScanDialog';
+import { listen } from '@tauri-apps/api/event';
 
 interface Props {
   selectedId: string | null;
@@ -14,6 +16,7 @@ export function ProjectList({ selectedId, onSelect }: Props) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -30,6 +33,11 @@ export function ProjectList({ selectedId, onSelect }: Props) {
 
   useEffect(() => {
     reload();
+    // T09: listen for external config edits
+    const unlisten = listen('config-changed', () => reload());
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, [reload]);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
@@ -52,14 +60,24 @@ export function ProjectList({ selectedId, onSelect }: Props) {
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Projects
             </h2>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-xs"
-              onClick={() => setDialogOpen(true)}
-            >
-              + New
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                onClick={() => setScanOpen(true)}
+              >
+                Scan…
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                onClick={() => setDialogOpen(true)}
+              >
+                + New
+              </Button>
+            </div>
           </div>
 
           {loading ? (
@@ -102,6 +120,11 @@ export function ProjectList({ selectedId, onSelect }: Props) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onCreated={reload}
+      />
+      <ScanDialog
+        open={scanOpen}
+        onOpenChange={setScanOpen}
+        onImported={reload}
       />
     </>
   );

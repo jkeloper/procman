@@ -78,6 +78,13 @@ export const LogLineSchema = z.object({
 });
 export type LogLine = z.infer<typeof LogLineSchema>;
 
+export const ProjectCandidateSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  scripts: z.array(ScriptSchema),
+});
+export type ProjectCandidate = z.infer<typeof ProjectCandidateSchema>;
+
 export const PortInfoSchema = z.object({
   port: z.number().int().min(1).max(65535),
   pid: z.number().int(),

@@ -11,9 +11,11 @@
 pub mod port;
 pub mod process;
 pub mod project;
+pub mod scan;
 pub mod script;
 
 pub use port::*;
 pub use process::*;
 pub use project::*;
+pub use scan::*;
 pub use script::*;

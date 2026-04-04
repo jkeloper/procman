@@ -12,6 +12,7 @@ mod commands;
 mod config_store;
 mod state;
 mod types;
+mod watcher;
 
 // Spike modules retained as reference for Sprint 2-3.
 #[allow(dead_code)]
@@ -31,6 +32,8 @@ pub fn run() {
             .expect("failed to load or initialize config"),
     );
 
+    let watch_state = Arc::clone(&app_state);
+    let watch_path = config_path.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
@@ -43,6 +46,7 @@ pub fn run() {
                 )?;
             }
             log::info!("procman started, config at {:?}", config_path);
+            watcher::spawn_config_watcher(app.handle().clone(), watch_state, watch_path);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -56,6 +60,8 @@ pub fn run() {
             commands::create_script,
             commands::update_script,
             commands::delete_script,
+            // Scan
+            commands::scan_directory,
             // Processes (stubs)
             commands::spawn_process,
             commands::kill_process,

@@ -9,11 +9,13 @@ import { z } from 'zod';
 import {
   ProjectSchema,
   ScriptSchema,
+  ProjectCandidateSchema,
   ProcessHandleSchema,
   LogLineSchema,
   PortInfoSchema,
   type Project,
   type Script,
+  type ProjectCandidate,
   type ProcessHandle,
   type LogLine,
   type PortInfo,
@@ -72,6 +74,10 @@ export const api = {
   deleteScript: (projectId: string, id: string) =>
     call('delete_script', { projectId, id }, z.void()),
 
+  // Auto-detection
+  scanDirectory: (path: string) =>
+    call('scan_directory', { path }, z.array(ProjectCandidateSchema)),
+
   // Processes (stubs — wired in Sprint 2)
   spawnProcess: (projectId: string, scriptId: string) =>
     call('spawn_process', { projectId, scriptId }, ProcessHandleSchema),
@@ -85,4 +91,4 @@ export const api = {
   killPort: (port: number) => call('kill_port', { port }, z.void()),
 };
 
-export type { Project, Script, ProcessHandle, LogLine, PortInfo };
+export type { Project, Script, ProjectCandidate, ProcessHandle, LogLine, PortInfo };
