@@ -86,5 +86,18 @@
 - **Removed** 템플릿 asset (hero.png, react/vite svg, App.css)
 - **Retained** 스파이크 모듈 (stress.rs, pty.rs) — `#[allow(dead_code)]` 처리, T11-T17 참조 구현용
 
+### 2026-04-05 — Sprint 1 전체 완료 (사용자 "한번에 쭉" override, Day 2 연속 진행) 🏁
+- **Added** T03: Config 스키마 확정 (AppConfig/Project/Script/Group/GroupMember/AppSettings + ProcessStatus/LogStream enums) + 3 round-trip 테스트 (serde_yaml)
+- **Added** T04: ConfigStore (config_store.rs) — atomic write via tempfile+rename, thiserror-based ConfigError, 3 unit tests
+- **Added** T05: Project CRUD IPC — AppState with Arc<Mutex<AppConfig>> + mutate() helper (rollback on save fail), uuid v4 ids, path validation
+- **Added** T06: Script CRUD IPC (nested in Project), cascade delete from groups
+- **Added** T07: ProjectList UI + NewProjectDialog + native folder picker (tauri-plugin-dialog)
+- **Added** T08: ProcessGrid + ScriptEditor (create/edit shared dialog) + port validation
+- **Added** T09: FileSystem watcher (watcher.rs, notify crate, 200ms debounced) → emits 'config-changed' event, FE auto-reload
+- **Added** T10: Project auto-detect — scan_directory command (walkdir, skip node_modules/etc., max depth 5) + port inference from `--port N` patterns + ScanDialog with candidate picker + bulk import
+- **Tests** 7/7 Rust unit tests pass (types roundtrip + ConfigStore + port_inference)
+- **Decision** Sprint 1 완료 → Sprint 2(T11-T20 실행&로그) 대기
+- **R_Rust_Proficiency 상태**: 여전히 미측정 — 사용자가 자율 진행 override로 직접 타이핑 게이트 무효화. Sprint 2 시작 시 Manager 재평가 필요
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

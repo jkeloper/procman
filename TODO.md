@@ -61,9 +61,15 @@
 - [x] W-D1-04: Rust 명령 스텁 8종 + 도메인 타입 (Project/Script/ProcessHandle/LogLine/PortInfo) + // LEARN 주석
 - [x] W-D1-05: api/tauri.ts + zod 스키마 (런타임 검증 래퍼)
 
-### Day 2~ (대기)
-- [ ] T03: Config 스키마 확정 (TS + Rust serde) — **첫 본격 Rust 작성 지점**
-- [ ] T04: ConfigStore (YAML read/write, atomic)
+### Day 2 (2026-04-05, 사용자 "한번에 쭉" override) ✅ Sprint 1 전체 완료
+- [x] T03: Config 스키마 확정 + 3 round-trip 테스트
+- [x] T04: ConfigStore YAML atomic read/write + 3 테스트
+- [x] T05: Project CRUD IPC 4종 (list/create/update/delete)
+- [x] T06: Script CRUD IPC 4종 (scripts nested in Project)
+- [x] T07: Project 리스트 UI + New 다이얼로그 + 폴더 피커
+- [x] T08: Script 편집 Drawer + Start/Edit/Delete 버튼
+- [x] T09: config.yaml 파일시스템 watcher (notify, debounced 200ms)
+- [x] T10: package.json 자동 감지 + 스캔 다이얼로그 + bulk import
 - [ ] T05: Project CRUD IPC (4종)
 - [ ] T06: Script CRUD IPC (4종)
 - [ ] T07: Project 리스트 UI + 폼

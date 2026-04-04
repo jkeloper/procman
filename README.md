@@ -3,11 +3,12 @@
 Mac용 프로세스 매니저 GUI. 로컬 개발환경의 여러 서버·tunnel·docker 프로세스를 한 화면에서 관리.
 
 ## 상태
-🟢 **Sprint 1 Day 1 완료** (2026-04-05)
+🟢 **Sprint 1 전체 완료** (2026-04-05)
 
 - Week 0 스파이크 4건 전부 GO (S0/S1/S2/S3), S4 SKIP, **Tauri v2 확정**
-- Sprint 1 Day 1: 프로젝트 승격 + shadcn/ui + 3-pane 레이아웃 + 명령 스텁 + 타입 시스템
-- 잔여 리스크: R_Rust_Proficiency HIGH → T05 게이트(Week 2) 재평가
+- Sprint 1 T03~T10 단일 세션 완주: Config/ConfigStore + Project/Script CRUD + 3-pane UI + fs watcher + auto-detect
+- 7/7 Rust 단위 테스트 통과
+- 잔여 리스크: R_Rust_Proficiency 미측정 (사용자 자율 진행 override) → Sprint 2 시작 시 재평가
 
 ## 핵심 기능 (계획)
 - 스크립트 등록/실행/중지
