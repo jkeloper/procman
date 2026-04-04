@@ -51,7 +51,8 @@
 - [ ] **Week 2 종료 재평가 게이트**: T05 2일 초과 시 Electron 전환 재검토
 
 ## Sprint 1 — 기반 & 등록 (Week 1-2)
-- [ ] T01: Tauri+React+TS 스캐폴드
+**Kick-off: 2026-04-06 Mon** (Manager 결정, 2026-04-05)
+- [x] T01: Tauri+React+TS 스캐폴드 — Week 0 spikes/tauri-harness에서 선행 완료. **월요일 첫 태스크 = spikes/tauri-harness → procman/ 재편성(T02 재배치)**
 - [ ] T02: shadcn/ui + Tailwind + 기본 레이아웃
 - [ ] T03: Config 스키마 확정 (TS + Rust serde)
 - [ ] T04: ConfigStore (YAML read/write, atomic)
