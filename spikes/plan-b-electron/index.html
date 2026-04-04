@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>procman Plan B</title></head>
+<body>
+  <h1>Plan B skeleton (Electron + node-pty)</h1>
+  <button id="ping">Ping</button>
+  <pre id="out"></pre>
+  <script>
+    document.getElementById('ping').onclick = async () => {
+      const r = await window.procman.ping({ hello: 'world' });
+      document.getElementById('out').textContent = JSON.stringify(r, null, 2);
+    };
+  </script>
+</body>
+</html>

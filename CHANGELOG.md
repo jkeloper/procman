@@ -24,5 +24,17 @@
   - 전환 트리거 3건 명시: S1 No-Go / S4 미완수 / 스파이크 5일 초과 → Plan B(Electron) 즉시 전환
 - **Scheduled** Week 0 스파이크 D-Day: **2026-04-06(월)** 착수
 
+### 2026-04-05 — Week 0 Day 1 실행 (D-Day 조기 착수)
+- **Added** Git repo 초기화 (main branch, `.gitignore`, `.tool-versions`)
+- **Added** 개발 환경 구축: pnpm 10.33.0 (brew), Rust stable 1.94.1 (rustup), hyperfine
+- **Added** [spikes/](spikes/) 디렉토리 구조 (S1~S4 + tauri-harness + plan-b-electron)
+- **Added** S0.4 Tauri v2.10.3 스캐폴드 (Vite + React-TS, identifier: `dev.procman.spike`)
+- **Added** S0.5 Electron Plan B 스켈레톤 (IPC ping-pong + node-pty placeholder, dormant)
+- **Added** S0.6 Tauri Issue #7684 상태 검증: PR#9698 은 v1.x에만 merge, v2 empirical 검증 필요
+- **Added** S1.1 [line-emitter.sh](spikes/s1-stdout/line-emitter.sh) — deterministic SEQ/EID/T 생성기
+- **Added** S1.2 Tauri Rust stress harness ([stress.rs](spikes/tauri-harness/src-tauri/src/stress.rs)) — `start_stress`/`stop_stress`/`get_stats`/`get_rss_kb` 커맨드 + mach_task RSS 샘플러, `cargo check` 통과
+- **Added** S1.3 + S1.4 FE UI ([App.tsx](spikes/tauri-harness/src/App.tsx)) — per-eid seq gap 검출, 1s RSS 폴링, CSV 다운로드, Go/No-Go 자동 판정
+- **Next** Day 2 (04-06 월): 첫 `pnpm tauri dev` 빌드 (5~10분) → S1.5 측정 3회 → S1.6 판정서
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

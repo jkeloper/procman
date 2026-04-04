@@ -9,14 +9,44 @@
 - [ ] "이것만 되면 쓴다" 마지노선 기능 1개 지정
 - [ ] MVP 목표 일자 확정 (2026-05-31 잠정)
 
-## Week 0 — 스파이크 (D-Day: 2026-04-06 월요일 착수)
-- [ ] S1: 대용량 stdout 스트레스 테스트 (1.5일) — 10프로세스 × 10k line/s, 라인유실 0, RSS<150MB
-- [ ] S2: PTY 인터랙션 검증 (1일) — docker exec / python -i / ssh
-- [ ] S3: xterm.js on WKWebView WebGL (0.5일) — 10만 라인 60fps
-- [ ] S4: Rust self-assessment (1일) — 사용자 본인이 S1~S3 직접 수행
-- [ ] 예비 버퍼 (0.5일)
-- [ ] Evaluator: 스파이크 Go/No-Go 판정 체크리스트 작성
-- [ ] Go/No-Go 판정 회의 → Tauri 확정 또는 Electron 전환
+## Week 0 — 스파이크 (D-Day 조기 착수 2026-04-05)
+
+### S0 — 사전 준비 ✅ 완료
+- [x] S0.1 Git init + `.gitignore` + `.tool-versions`
+- [x] S0.2 `spikes/` 디렉토리 구조
+- [x] S0.3 도구 설치 (pnpm, Rust stable 1.94.1, hyperfine)
+- [x] S0.4 Tauri v2.10.3 스캐폴드
+- [x] S0.5 Electron Plan B 스켈레톤 (dormant)
+- [x] S0.6 Tauri #7684 검증 → v2 empirical test 필요
+
+### S1 — stdout 스트레스 테스트 (1.5일)
+- [x] S1.1 line-emitter.sh (deterministic SEQ 생성기)
+- [x] S1.2 Rust stress harness (`cargo check` 통과)
+- [x] S1.3 FE per-eid seq gap 검출 UI
+- [x] S1.4 RSS 1s 폴링 + CSV 다운로드
+- [ ] **S1.5 측정 실행** (10proc×10k line/s × 60s × 3회) — Day 2 예정
+- [ ] S1.6 판정서 `spikes/s1-stdout/REPORT.md` — ★ 1차 Go/No-Go 게이트
+
+### S2 — PTY 인터랙션 (1일)
+- [ ] S2.1 `portable-pty` crate 통합
+- [ ] S2.2 docker exec / S2.3 python -i / S2.4 ssh 시나리오
+- [ ] S2.5 컬러 시퀀스 육안 검증
+- [ ] S2.6 판정서
+
+### S3 — xterm.js on WKWebView (0.5일)
+- [ ] S3.1 xterm.js + @xterm/addon-webgl 통합
+- [ ] S3.2 10만 라인 주입 + FPS 벤치
+- [ ] S3.3 WebGL 활성화 확인
+- [ ] S3.4 측정 / S3.5 판정서
+
+### S4 — Rust self-assessment (1일, 사용자 직접)
+- [ ] S4.1 과제 A: tokio async 기본기 (2h)
+- [ ] S4.2 과제 B: tokio::process + broadcast 스트리밍 (2h)
+- [ ] S4.3 과제 C: portable-pty 에코 셸 (1~2h)
+- [ ] S4.4 `SELF-ASSESSMENT.md` 작성 → ★ 2차 Go/No-Go 게이트
+
+### 최종
+- [ ] `spikes/FINAL-VERDICT.md` (Manager+Evaluator 통합 판정)
 
 ## Sprint 1 — 기반 & 등록 (Week 1-2)
 - [ ] T01: Tauri+React+TS 스캐폴드
