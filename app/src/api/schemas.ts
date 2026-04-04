@@ -1,25 +1,59 @@
 // Runtime validation schemas mirroring Rust types in src-tauri/src/types.rs.
-// These catch mismatches between frontend and backend at the IPC boundary
-// instead of letting them fail silently.
-//
-// Keep field names + enum variants in sync with types.rs.
+// Field names MUST match 1:1 — any drift fails zod.safeParse with a clear error.
 import { z } from 'zod';
+
+// --- Persisted config types ---
+
+export const ScriptSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  command: z.string(),
+  expected_port: z.number().int().min(1).max(65535).nullable().default(null),
+  auto_restart: z.boolean().default(false),
+});
+export type Script = z.infer<typeof ScriptSchema>;
 
 export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  scripts: z.array(ScriptSchema).default([]),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
-export const ScriptSchema = z.object({
-  id: z.string(),
+export const GroupMemberSchema = z.object({
   project_id: z.string(),
-  name: z.string(),
-  command: z.string(),
-  expected_port: z.number().int().min(1).max(65535).nullable(),
+  script_id: z.string(),
 });
-export type Script = z.infer<typeof ScriptSchema>;
+export type GroupMember = z.infer<typeof GroupMemberSchema>;
+
+export const GroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  members: z.array(GroupMemberSchema).default([]),
+});
+export type Group = z.infer<typeof GroupSchema>;
+
+export const AppSettingsSchema = z.object({
+  log_buffer_size: z.number().int().default(5000),
+  port_poll_interval_ms: z.number().int().default(1000),
+  theme: z.string().default('system'),
+});
+export type AppSettings = z.infer<typeof AppSettingsSchema>;
+
+export const AppConfigSchema = z.object({
+  version: z.string(),
+  projects: z.array(ProjectSchema).default([]),
+  groups: z.array(GroupSchema).default([]),
+  settings: AppSettingsSchema.default({
+    log_buffer_size: 5000,
+    port_poll_interval_ms: 1000,
+    theme: 'system',
+  }),
+});
+export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+// --- Runtime-only types (not persisted) ---
 
 export const ProcessStatusSchema = z.enum(['running', 'stopped', 'error']);
 export type ProcessStatus = z.infer<typeof ProcessStatusSchema>;
