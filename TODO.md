@@ -89,15 +89,15 @@
 - [x] T19: 그룹 CRUD + Morning Stack 순차 실행 (400ms 딜레이)
 - [x] T20: 크래시 감지 & 배지 (exit_code != 0 AND !user_killed)
 
-## Sprint 3 — 포트 관리 & 완성도 (Week 5-6)
-- [ ] T21: PortScanner (lsof, 1s 폴링)
-- [ ] T22: 충돌 감지 배너
-- [ ] T23: 원클릭 해결 (킬러 기능)
-- [ ] T24: ⌘K 커맨드 팔레트 (cmdk)
-- [ ] T25: 단축키/핫키 매핑
-- [ ] T26: 로그 디스크 rotate (옵션)
-- [ ] T27: 앱 재시작 시 세션 복원 프롬프트
-- [ ] T28: .dmg 빌드 + 코드서명 + README
+## Sprint 3 — 포트 관리 & 완성도 (2026-04-05 단일 세션 완료) ✅
+- [x] T21: PortScanner (lsof -F pcnT 파싱, 2s 폴링) — Sprint 1에서 선행
+- [x] T22: 충돌 감지 (Dashboard matched/other 포트 테이블) — Sprint 1에서 선행
+- [x] T23: 원클릭 kill (SIGTERM 1.5s → SIGKILL) — Sprint 1에서 선행
+- [x] T24: ⌘K/Ctrl+K 커맨드 팔레트 (프로젝트/스크립트/액션 퍼지 검색)
+- [x] T25: 단축키 — ⌘K 팔레트, ⌘L 로그 토글, ⌘, 대시보드로
+- [~] T26: 로그 디스크 rotate — 메모리 ring buffer(5000)로 충분, skip
+- [x] T27: 세션 복원 — `last_running` 추적 + 재시작 시 RestorePrompt
+- [ ] T28: DMG 빌드 + 코드서명 — 수동 릴리즈 단계, README에 빌드 가이드만 추가
 
 ## Post-MVP (v0.2+)
 - [ ] Docker 컨테이너 직접 제어

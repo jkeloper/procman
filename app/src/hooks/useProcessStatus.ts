@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { api, type RuntimeStatus, type StatusEvent } from '@/api/tauri';
 
 /**
@@ -35,6 +36,8 @@ export function useProcessStatus() {
           return rest;
         });
       }
+      // T27: persist running state for session restore on next launch
+      invoke('mark_last_running', { scriptId: id, running: status === 'running' }).catch(() => {});
     });
     return () => {
       un.then((fn) => fn());

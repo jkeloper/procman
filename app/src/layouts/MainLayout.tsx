@@ -4,13 +4,22 @@ import { ProjectList } from '@/components/project/ProjectList';
 import { ProcessGrid } from '@/components/process/ProcessGrid';
 import { LogViewer } from '@/components/log/LogViewer';
 import { Dashboard } from '@/components/dashboard/Dashboard';
+import { CommandPalette } from '@/components/palette/CommandPalette';
+import { RestorePrompt } from '@/components/session/RestorePrompt';
 import { Button } from '@/components/ui/button';
 import { api, type Project } from '@/api/tauri';
+import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { useHotkeys } from '@/hooks/useHotkeys';
 
 export function MainLayout() {
   const [logOpen, setLogOpen] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const { statuses } = useProcessStatus();
+  useHotkeys({
+    toggleLogs: () => setLogOpen((v) => !v),
+    goDashboard: () => setSelectedProjectId(null),
+  });
 
   const reloadProjects = useCallback(async () => {
     try {
@@ -47,10 +56,21 @@ export function MainLayout() {
             </>
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setLogOpen((v) => !v)}>
-          {logOpen ? 'Hide logs' : 'Show logs'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <kbd className="hidden rounded border px-1.5 py-0.5 text-xs text-muted-foreground sm:inline">
+            ⌘K
+          </kbd>
+          <Button variant="ghost" size="sm" onClick={() => setLogOpen((v) => !v)}>
+            {logOpen ? 'Hide logs' : 'Show logs'}
+          </Button>
+        </div>
       </header>
+      <CommandPalette
+        projects={projects}
+        statuses={statuses}
+        onSelectProject={setSelectedProjectId}
+      />
+      <RestorePrompt projects={projects} />
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-[280px] shrink-0 border-r">

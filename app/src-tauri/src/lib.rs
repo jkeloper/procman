@@ -74,6 +74,10 @@ pub fn run() {
             commands::update_group,
             commands::delete_group,
             commands::run_group,
+            // Session
+            commands::get_last_running,
+            commands::clear_last_running,
+            commands::mark_last_running,
             // Processes
             commands::spawn_process,
             commands::kill_process,

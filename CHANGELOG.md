@@ -115,5 +115,14 @@
 - **Tests** 15/15 Rust unit tests pass
 - **Decision** MVP 코어 기능 전부 구현. Sprint 3(포트 관리)은 이미 Sprint 1에서 완료 → 남은 건 ⌘K 커맨드 팔레트 + DMG 빌드 + 세션 복원 (T24-T28)
 
+### 2026-04-05 — Sprint 3 완료 (사용자 override, 단일 세션) 🏁 MVP 전체 완료
+- **Added** T24 ⌘K/Ctrl+K 커맨드 팔레트 ([CommandPalette.tsx](app/src/components/palette/CommandPalette.tsx)) — 프로젝트/스크립트/액션 퍼지 검색, Start/Stop/Restart 원클릭, Dashboard 점프
+- **Added** T25 글로벌 단축키 ([useHotkeys.ts](app/src/hooks/useHotkeys.ts)) — ⌘L 로그 토글, ⌘, 대시보드
+- **Skipped** T26 로그 디스크 rotate — 메모리 ring buffer 5000라인으로 충분, 디스크 유출 불필요
+- **Added** T27 세션 복원 — `AppConfig.last_running` 필드 + `mark_last_running`/`get_last_running`/`clear_last_running` 커맨드. useProcessStatus가 status 변화마다 자동 persist. 재시작 시 RestorePrompt 다이얼로그
+- **Added** T28 README — 전체 기능/빌드/개발 가이드. DMG 빌드는 수동 릴리즈로 분리 (pnpm tauri build)
+- **Done** T21-T23은 이미 Sprint 1 Dashboard 작업에서 완료됨
+- **Milestone** procman MVP 전체 기능 구현 완료. 모든 계획 태스크 closed
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

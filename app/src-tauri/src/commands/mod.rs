@@ -14,6 +14,7 @@ pub mod process;
 pub mod project;
 pub mod scan;
 pub mod script;
+pub mod session;
 
 pub use group::*;
 pub use port::*;
@@ -21,3 +22,4 @@ pub use process::*;
 pub use project::*;
 pub use scan::*;
 pub use script::*;
+pub use session::*;

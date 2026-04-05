@@ -21,6 +21,10 @@ pub struct AppConfig {
     pub groups: Vec<Group>,
     #[serde(default)]
     pub settings: AppSettings,
+    /// script_ids that were running at last shutdown. Used by T27 session
+    /// restore prompt. Persisted on process start; cleared on graceful exit.
+    #[serde(default)]
+    pub last_running: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -30,6 +34,7 @@ impl Default for AppConfig {
             projects: Vec::new(),
             groups: Vec::new(),
             settings: AppSettings::default(),
+            last_running: Vec::new(),
         }
     }
 }
@@ -186,6 +191,7 @@ mod tests {
                 port_poll_interval_ms: 500,
                 theme: "dark".into(),
             },
+            last_running: vec![],
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         let back: AppConfig = serde_yaml::from_str(&yaml).unwrap();
