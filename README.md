@@ -84,15 +84,32 @@ pnpm install
 pnpm tauri dev              # Vite + Tauri 창 (port 1420)
 ```
 
-### 빌드 (DMG)
+### 빌드 & 설치 (원클릭)
 ```bash
-cd app
-pnpm tauri build
-# 결과: src-tauri/target/release/bundle/dmg/procman_0.1.0_aarch64.dmg
+# release 빌드 + /Applications 설치 + quarantine 해제 + 실행
+./scripts/install.sh
+
+# 옵션
+./scripts/install.sh --no-run   # 설치만, 실행 X
+./scripts/install.sh --debug    # 빠른 debug 빌드 (release보다 ~5배 빠름)
 ```
 
-코드서명은 선택 (Developer ID 인증서 필요). 서명 없이 쓰려면 빌드 후
-`xattr -cr /Applications/procman.app` 로 quarantine 해제.
+결과물: `/Applications/procman.app` — Dock/Launchpad/Spotlight에서 바로 실행.
+
+### 자동 재빌드 파이프라인
+소스 수정 시 자동으로 `/Applications/procman.app` 재빌드+재설치:
+```bash
+brew install fswatch   # 최초 1회
+./scripts/watch-install.sh          # debug 빌드 (기본)
+./scripts/watch-install.sh --release  # release 빌드
+```
+
+(일상 개발은 `pnpm tauri dev` 권장 — HMR로 <1초 반영.
+ 이 파이프라인은 "설치된 버전도 최신으로 유지하고 싶다" 용도.)
+
+### 코드서명 & 배포
+개인용이면 서명 불필요. 다른 사람 배포 시 애플 개발자 계정($99/년) 필요.
+`scripts/install.sh`는 자동으로 `xattr -cr`로 quarantine 해제.
 
 ### 테스트
 ```bash
