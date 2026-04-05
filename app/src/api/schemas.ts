@@ -95,6 +95,7 @@ export const LaunchConfigCandidateSchema = z.object({
   kind: z.string(),
   skipped_reason: z.string().nullable(),
   script: ScriptSchema.nullable(),
+  raw_json: z.string(),
 });
 export type LaunchConfigCandidate = z.infer<typeof LaunchConfigCandidateSchema>;
 

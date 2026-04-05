@@ -28,20 +28,17 @@ pub struct LaunchConfigCandidate {
     pub skipped_reason: Option<String>,
     /// Resulting Script (only set when !skipped).
     pub script: Option<Script>,
+    /// Raw launch.json configuration as pretty-printed JSON (for "view original").
+    pub raw_json: String,
 }
 
-#[tauri::command]
-pub async fn scan_vscode_configs(
-    project_path: String,
-) -> Result<Vec<LaunchConfigCandidate>, String> {
-    let root = Path::new(&project_path);
-    let path = root.join(".vscode").join("launch.json");
+/// Sync core used by both the tauri command and scan.rs auto-detect.
+pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>, String> {
+    let path = project_dir.join(".vscode").join("launch.json");
     if !path.exists() {
         return Ok(vec![]);
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("read launch.json: {}", e))?;
-    // launch.json often has // comments and trailing commas. Strip comments
-    // then rely on serde_json (trailing commas are rare enough to tolerate failures).
     let text = strip_jsonc_comments(std::str::from_utf8(&bytes).unwrap_or(""));
     let json: Value = match serde_json::from_str(&text) {
         Ok(v) => v,
@@ -52,15 +49,23 @@ pub async fn scan_vscode_configs(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-
+    let workspace = project_dir.to_string_lossy().into_owned();
     let mut out = Vec::new();
     for cfg in configs {
-        out.push(translate_config(&cfg, &project_path));
+        out.push(translate_config(&cfg, &workspace));
     }
     Ok(out)
 }
 
+#[tauri::command]
+pub async fn scan_vscode_configs(
+    project_path: String,
+) -> Result<Vec<LaunchConfigCandidate>, String> {
+    scan_launch_json(Path::new(&project_path))
+}
+
 fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
+    let raw_json = serde_json::to_string_pretty(cfg).unwrap_or_default();
     let name = cfg
         .get("name")
         .and_then(|v| v.as_str())
@@ -75,10 +80,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
 
     // Reject attach / remote / compound modes early.
     if req == "attach" {
-        return skip(name, kind, "'attach' request not supported (launch only)");
+        return skip(name, kind, "'attach' request not supported (launch only)", raw_json);
     }
     if kind.starts_with("pwa-") {
-        return skip(name, kind, "pwa-* debuggers unsupported; use the plain type");
+        return skip(name, kind, "pwa-* debuggers unsupported; use the plain type", raw_json);
     }
 
     let env_map: HashMap<String, String> = cfg
@@ -176,10 +181,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let base = format!("{} {}", shell_quote(&prog), quoted_args);
                 prefix_env(&env_prefix, &base)
             } else {
-                return skip(name, kind, "binary debugger needs program or Cargo.toml");
+                return skip(name, kind, "binary debugger needs program or Cargo.toml", raw_json);
             }
         }
-        _ => return skip(name, kind, "unsupported launch type"),
+        _ => return skip(name, kind, "unsupported launch type", raw_json),
     };
 
     let script = Script {
@@ -197,10 +202,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         kind,
         skipped_reason: None,
         script: Some(script),
+        raw_json,
     }
 }
 
-fn skip(name: String, kind: String, reason: &str) -> LaunchConfigCandidate {
+fn skip(name: String, kind: String, reason: &str, raw_json: String) -> LaunchConfigCandidate {
     LaunchConfigCandidate {
         name,
         command: String::new(),
@@ -208,6 +214,7 @@ fn skip(name: String, kind: String, reason: &str) -> LaunchConfigCandidate {
         kind,
         skipped_reason: Some(reason.to_string()),
         script: None,
+        raw_json,
     }
 }
 
@@ -276,50 +283,58 @@ fn resolve_var(key: &str, workspace: &str, env_map: &HashMap<String, String>) ->
 
 /// Remove // line comments and /* */ block comments. Preserves strings.
 fn strip_jsonc_comments(input: &str) -> String {
+    // Char-based iteration to preserve multi-byte UTF-8 (e.g. Korean).
+    // We only need to recognize `//`, `/* */` at ASCII positions; string
+    // bodies and other content are passed through verbatim.
     let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
+    let mut chars = input.chars().peekable();
     let mut in_string = false;
     let mut escape = false;
-    while i < bytes.len() {
-        let c = bytes[i];
+    while let Some(c) = chars.next() {
         if in_string {
-            out.push(c as char);
+            out.push(c);
             if escape {
                 escape = false;
-            } else if c == b'\\' {
+            } else if c == '\\' {
                 escape = true;
-            } else if c == b'"' {
+            } else if c == '"' {
                 in_string = false;
             }
-            i += 1;
             continue;
         }
-        if c == b'"' {
+        if c == '"' {
             in_string = true;
-            out.push('"');
-            i += 1;
+            out.push(c);
             continue;
         }
-        if c == b'/' && i + 1 < bytes.len() {
-            if bytes[i + 1] == b'/' {
-                // skip to end of line
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
+        if c == '/' {
+            match chars.peek() {
+                Some('/') => {
+                    // consume until newline
+                    chars.next();
+                    for nc in chars.by_ref() {
+                        if nc == '\n' {
+                            out.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if bytes[i + 1] == b'*' {
-                i += 2;
-                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                    i += 1;
+                Some('*') => {
+                    chars.next();
+                    let mut prev = '\0';
+                    for nc in chars.by_ref() {
+                        if prev == '*' && nc == '/' {
+                            break;
+                        }
+                        prev = nc;
+                    }
+                    continue;
                 }
-                i += 2;
-                continue;
+                _ => {}
             }
         }
-        out.push(c as char);
-        i += 1;
+        out.push(c);
     }
     out
 }
@@ -335,6 +350,14 @@ mod tests {
 {"b":2}"#;
         let out = strip_jsonc_comments(input);
         assert!(!out.contains("//"));
+    }
+
+    #[test]
+    fn preserves_utf8_korean() {
+        let input = r#"{"name": "전체 시작 (대시보드 + 거래)"} // 주석"#;
+        let out = strip_jsonc_comments(input);
+        assert!(out.contains("전체 시작 (대시보드 + 거래)"));
+        assert!(!out.contains("주석"));
     }
 
     #[test]

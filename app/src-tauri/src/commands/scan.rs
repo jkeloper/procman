@@ -10,6 +10,7 @@
 //     scripts they define — so a Rust+Docker project shows both sets.
 
 use crate::types::Script;
+use crate::vscode_scanner;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -129,6 +130,20 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             });
         }
     }
+    // VSCode launch.json — detect + merge importable configs
+    let vscode_launch = dir.join(".vscode").join("launch.json");
+    if vscode_launch.exists() {
+        stacks.push("vscode".into());
+        // Parse the launch.json and pull in any importable configs.
+        if let Ok(candidates) = vscode_scanner::scan_launch_json(dir) {
+            for c in candidates {
+                if let Some(s) = c.script {
+                    scripts.push(s);
+                }
+            }
+        }
+    }
+
     // Docker Compose
     if has_any(dir, DOCKER_MARKERS) {
         stacks.push("docker".into());

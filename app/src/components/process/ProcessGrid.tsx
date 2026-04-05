@@ -4,7 +4,9 @@ import { api, type Script } from '@/api/tauri';
 import { ScriptEditor } from './ScriptEditor';
 import { StatusBadge } from './StatusBadge';
 import { VSCodeImportDialog } from './VSCodeImportDialog';
+import { PortConflictDialog } from './PortConflictDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import type { PortInfo } from '@/api/tauri';
 
 interface Props {
   projectId: string;
@@ -21,6 +23,11 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editingScript, setEditingScript] = useState<Script | null>(null);
   const { statuses, pids } = useProcessStatus();
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [conflict, setConflict] = useState<{
+    script: Script;
+    port: number;
+    info: PortInfo | null;
+  } | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -68,6 +75,50 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
         return n;
       });
     }
+  }
+
+  /**
+   * Pre-flight port check before spawning. If script declares an
+   * expected_port that's already bound by something other than an
+   * already-running procman managed instance (which `spawn_process`
+   * handles internally via single-instance guard), show a dialog.
+   */
+  async function handleStart(script: Script) {
+    if (script.expected_port == null) {
+      return withBusy(script.id, () => api.spawnProcess(projectId, script.id));
+    }
+    try {
+      const ports = await api.listPorts();
+      const hit = ports.find((p) => p.port === script.expected_port);
+      if (hit) {
+        // If this port is owned by this very script's previous instance,
+        // spawn_process will kill it anyway — still warn so the user is explicit.
+        setConflict({ script, port: script.expected_port, info: hit });
+        return;
+      }
+    } catch {
+      // Port probe failed — fall through and try to start anyway
+    }
+    return withBusy(script.id, () => api.spawnProcess(projectId, script.id));
+  }
+
+  async function resolveConflictKillAndStart() {
+    if (!conflict) return;
+    const { script, port } = conflict;
+    setConflict(null);
+    await withBusy(script.id, async () => {
+      await api.killPort(port).catch(() => {});
+      // Small delay so the port is released before we re-bind.
+      await new Promise((r) => setTimeout(r, 600));
+      return api.spawnProcess(projectId, script.id);
+    });
+  }
+
+  async function resolveConflictStartAnyway() {
+    if (!conflict) return;
+    const { script } = conflict;
+    setConflict(null);
+    await withBusy(script.id, () => api.spawnProcess(projectId, script.id));
   }
 
   const onSaved = () => {
@@ -185,7 +236,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                       <button
                         className="rounded bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
                         disabled={b}
-                        onClick={() => withBusy(s.id, () => api.spawnProcess(projectId, s.id))}
+                        onClick={() => handleStart(s)}
                       >
                         {b ? '…' : 'Start'}
                       </button>
@@ -223,6 +274,15 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
         projectId={projectId}
         projectPath={projectPath}
         onImported={onSaved}
+      />
+      <PortConflictDialog
+        open={conflict != null}
+        onOpenChange={(v) => !v && setConflict(null)}
+        port={conflict?.port ?? 0}
+        conflict={conflict?.info ?? null}
+        scriptName={conflict?.script.name ?? ''}
+        onKillAndStart={resolveConflictKillAndStart}
+        onStartAnyway={resolveConflictStartAnyway}
       />
     </div>
   );
