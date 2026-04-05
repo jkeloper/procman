@@ -15,7 +15,7 @@ use std::path::Path;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
-const MAX_DEPTH: usize = 5;
+const MAX_DEPTH: usize = 7;
 const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", "target", "dist", "build", ".next",
     ".nuxt", "__pycache__", ".venv", "venv", ".cache",

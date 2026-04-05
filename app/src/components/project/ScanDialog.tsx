@@ -55,9 +55,18 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
     try {
       for (const i of checked) {
         const c = candidates[i];
-        await api.createProject(c.name, c.path);
-        // Note: scripts from the candidate aren't auto-added here; user
-        // edits the project to pick which ones to register (MVP scope).
+        const project = await api.createProject(c.name, c.path);
+        // Also import the scripts found in package.json so the project
+        // isn't empty after import.
+        for (const s of c.scripts) {
+          await api.createScript(
+            project.id,
+            s.name,
+            s.command,
+            s.expected_port,
+            s.auto_restart,
+          );
+        }
       }
       onImported();
       onOpenChange(false);
