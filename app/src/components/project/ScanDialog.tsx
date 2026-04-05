@@ -118,7 +118,7 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
                         <div className="truncate font-medium">{c.name}</div>
                         <div className="truncate text-xs text-muted-foreground">{c.path}</div>
                         <div className="text-xs text-muted-foreground">
-                          {c.scripts.length} scripts
+                          {c.stacks.join(', ')} · {c.scripts.length} scripts
                         </div>
                       </div>
                     </li>

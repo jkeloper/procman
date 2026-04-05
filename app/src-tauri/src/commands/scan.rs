@@ -1,43 +1,36 @@
-// Project auto-detection — scan a directory for package.json files.
+// Project auto-detection — scan a directory for project markers.
 //
 // LEARN (walking filesystems safely):
-//   - `walkdir` traverses recursively; use `.filter_entry()` to prune
-//     early (otherwise you walk into node_modules and waste seconds).
-//   - Parsing JSON: serde_json::Value for loose parsing (fields may be
-//     missing) vs a strict typed struct. We use Value here since
-//     package.json varies wildly in the wild.
-//   - max_depth keeps scans bounded — most monorepos have projects at
-//     depth ≤ 4 from a workspace root.
+//   - `walkdir` traverses recursively; `min_depth(1)` skips the root itself,
+//     `max_depth(2)` keeps us at one subdir level (projects/<name>/marker).
+//   - We detect multiple ecosystems via well-known marker files:
+//     package.json (Node), Cargo.toml (Rust), go.mod (Go),
+//     pyproject.toml / requirements.txt (Python), docker-compose.yml.
+//   - For each subdirectory, we collect ALL markers present and merge the
+//     scripts they define — so a Rust+Docker project shows both sets.
 
 use crate::types::Script;
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use walkdir::{DirEntry, WalkDir};
 
-const MAX_DEPTH: usize = 7;
-const SKIP_DIRS: &[&str] = &[
-    "node_modules", ".git", "target", "dist", "build", ".next",
-    ".nuxt", "__pycache__", ".venv", "venv", ".cache",
-];
+const NODE_MARKERS: &[&str] = &["package.json"];
+const RUST_MARKERS: &[&str] = &["Cargo.toml"];
+const GO_MARKERS: &[&str] = &["go.mod"];
+const PY_MARKERS: &[&str] = &["pyproject.toml", "requirements.txt", "setup.py"];
+const DOCKER_MARKERS: &[&str] = &["docker-compose.yml", "docker-compose.yaml", "compose.yml"];
 
-/// A project candidate detected from a package.json scan.
-/// Not yet persisted — frontend chooses which to import.
+/// A project candidate detected from a directory scan.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectCandidate {
-    /// Detected project name (from package.json "name" or directory name).
+    /// Detected project name (directory name, or from manifest if clearer).
     pub name: String,
-    /// Absolute path to the directory containing package.json.
+    /// Absolute path to the project directory.
     pub path: String,
-    /// Scripts extracted from package.json's "scripts" field.
+    /// Detected ecosystems: ["node", "rust", "go", "python", "docker"].
+    pub stacks: Vec<String>,
+    /// Scripts suggested from detected manifests.
     pub scripts: Vec<Script>,
-}
-
-fn is_skipped(e: &DirEntry) -> bool {
-    e.file_name()
-        .to_str()
-        .map(|s| SKIP_DIRS.contains(&s))
-        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -47,67 +40,167 @@ pub async fn scan_directory(path: String) -> Result<Vec<ProjectCandidate>, Strin
         return Err(format!("not a directory: {}", path));
     }
 
+    // Only look at direct children of `root`. Example: if root is
+    // /Users/foo/projects, we detect /Users/foo/projects/procman but NOT
+    // /Users/foo/projects/procman/app.
     let mut candidates = Vec::new();
-    let walker = WalkDir::new(root)
-        .max_depth(MAX_DEPTH)
-        .into_iter()
-        .filter_entry(|e| !is_skipped(e));
+    let entries = match std::fs::read_dir(root) {
+        Ok(e) => e,
+        Err(e) => return Err(format!("read_dir: {}", e)),
+    };
 
-    for entry in walker.filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() && entry.file_name() == "package.json" {
-            let pkg_path = entry.path();
-            let parent = match pkg_path.parent() {
-                Some(p) => p,
-                None => continue,
-            };
-            let bytes = match std::fs::read(pkg_path) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let json: serde_json::Value = match serde_json::from_slice(&bytes) {
-                Ok(v) => v,
-                Err(_) => continue, // malformed package.json — skip silently
-            };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let Ok(ft) = entry.file_type() else { continue };
+        if !ft.is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        // Skip hidden dirs by name
+        if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with('.') {
+                continue;
+            }
+        }
 
-            let name = json
-                .get("name")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| {
-                    parent
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unnamed")
-                        .to_string()
-                });
+        if let Some(candidate) = detect_project(&dir) {
+            candidates.push(candidate);
+        }
+    }
 
-            let scripts = json
-                .get("scripts")
-                .and_then(|v| v.as_object())
-                .map(|obj| {
-                    obj.iter()
-                        .filter_map(|(k, v)| {
-                            let cmd = v.as_str()?.to_string();
-                            Some(Script {
-                                id: Uuid::new_v4().to_string(),
-                                name: k.clone(),
-                                command: format!("pnpm {}", k),
-                                expected_port: infer_port(&cmd),
-                                auto_restart: false,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+    // Stable order: by directory name
+    candidates.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(candidates)
+}
 
-            candidates.push(ProjectCandidate {
-                name,
-                path: parent.to_string_lossy().into_owned(),
-                scripts,
+fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unnamed")
+        .to_string();
+
+    let mut stacks = Vec::new();
+    let mut scripts = Vec::new();
+
+    // Node
+    if has_any(dir, NODE_MARKERS) {
+        stacks.push("node".into());
+        scripts.extend(scripts_from_package_json(&dir.join("package.json")));
+    }
+    // Rust
+    if has_any(dir, RUST_MARKERS) {
+        stacks.push("rust".into());
+        scripts.push(Script {
+            id: Uuid::new_v4().to_string(),
+            name: "cargo run".into(),
+            command: "cargo run".into(),
+            expected_port: None,
+            auto_restart: false,
+        });
+        scripts.push(Script {
+            id: Uuid::new_v4().to_string(),
+            name: "cargo test".into(),
+            command: "cargo test".into(),
+            expected_port: None,
+            auto_restart: false,
+        });
+    }
+    // Go
+    if has_any(dir, GO_MARKERS) {
+        stacks.push("go".into());
+        scripts.push(Script {
+            id: Uuid::new_v4().to_string(),
+            name: "go run".into(),
+            command: "go run .".into(),
+            expected_port: None,
+            auto_restart: false,
+        });
+    }
+    // Python
+    if has_any(dir, PY_MARKERS) {
+        stacks.push("python".into());
+        if dir.join("manage.py").exists() {
+            scripts.push(Script {
+                id: Uuid::new_v4().to_string(),
+                name: "django runserver".into(),
+                command: "python manage.py runserver".into(),
+                expected_port: Some(8000),
+                auto_restart: false,
             });
         }
     }
-    Ok(candidates)
+    // Docker Compose
+    if has_any(dir, DOCKER_MARKERS) {
+        stacks.push("docker".into());
+        scripts.push(Script {
+            id: Uuid::new_v4().to_string(),
+            name: "compose up".into(),
+            command: "docker compose up".into(),
+            expected_port: None,
+            auto_restart: false,
+        });
+        scripts.push(Script {
+            id: Uuid::new_v4().to_string(),
+            name: "compose down".into(),
+            command: "docker compose down".into(),
+            expected_port: None,
+            auto_restart: false,
+        });
+    }
+
+    if stacks.is_empty() {
+        return None;
+    }
+
+    Some(ProjectCandidate {
+        name,
+        path: dir.to_string_lossy().into_owned(),
+        stacks,
+        scripts,
+    })
+}
+
+fn has_any(dir: &Path, markers: &[&str]) -> bool {
+    markers.iter().any(|m| dir.join(m).exists())
+}
+
+fn scripts_from_package_json(path: &Path) -> Vec<Script> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return vec![];
+    };
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return vec![];
+    };
+    let Some(scripts_obj) = json.get("scripts").and_then(|v| v.as_object()) else {
+        return vec![];
+    };
+    // Detect package manager from presence of lock files
+    let pm = detect_pm(path.parent().unwrap_or(Path::new(".")));
+    scripts_obj
+        .iter()
+        .filter_map(|(k, v)| {
+            let cmd_str = v.as_str()?;
+            Some(Script {
+                id: Uuid::new_v4().to_string(),
+                name: k.clone(),
+                command: format!("{} {}", pm, k),
+                expected_port: infer_port(cmd_str),
+                auto_restart: false,
+            })
+        })
+        .collect()
+}
+
+fn detect_pm(dir: &Path) -> &'static str {
+    if dir.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if dir.join("yarn.lock").exists() {
+        "yarn"
+    } else if dir.join("bun.lockb").exists() || dir.join("bun.lock").exists() {
+        "bun"
+    } else {
+        "npm run"
+    }
 }
 
 /// Heuristic: pull --port N or -p N from a command string.
@@ -120,7 +213,6 @@ fn infer_port(cmd: &str) -> Option<u16> {
             }
         }
     }
-    // Also catch `--port=3000` style
     for t in &tokens {
         if let Some(rest) = t.strip_prefix("--port=") {
             if let Ok(n) = rest.parse::<u16>() {
@@ -129,6 +221,16 @@ fn infer_port(cmd: &str) -> Option<u16> {
         }
     }
     None
+}
+
+#[allow(unused_imports)]
+#[allow(dead_code)]
+mod _ensure_path_buf_used {
+    use super::PathBuf;
+    #[allow(dead_code)]
+    fn _never_called() -> PathBuf {
+        PathBuf::new()
+    }
 }
 
 #[cfg(test)]
@@ -141,5 +243,31 @@ mod tests {
         assert_eq!(infer_port("vite dev -p 3000"), Some(3000));
         assert_eq!(infer_port("vite --port=4000"), Some(4000));
         assert_eq!(infer_port("node server.js"), None);
+    }
+
+    #[test]
+    fn detects_rust_project() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+        let c = detect_project(dir.path()).unwrap();
+        assert!(c.stacks.contains(&"rust".to_string()));
+        assert!(c.scripts.iter().any(|s| s.command == "cargo run"));
+    }
+
+    #[test]
+    fn detects_multi_stack() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("docker-compose.yml"), "version: '3'").unwrap();
+        let c = detect_project(dir.path()).unwrap();
+        assert!(c.stacks.contains(&"node".to_string()));
+        assert!(c.stacks.contains(&"docker".to_string()));
+    }
+
+    #[test]
+    fn detects_pm_from_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(detect_pm(dir.path()), "pnpm");
     }
 }

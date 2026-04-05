@@ -1,44 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { api, type Project } from '@/api/tauri';
 import { NewProjectDialog } from './NewProjectDialog';
 import { ScanDialog } from './ScanDialog';
-import { listen } from '@tauri-apps/api/event';
 
 interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  projects: Project[];
+  onProjectsChanged: () => void;
 }
 
-export function ProjectList({ selectedId, onSelect }: Props) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const list = await api.listProjects();
-      setProjects(list);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-    // T09: listen for external config edits
-    const unlisten = listen('config-changed', () => reload());
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [reload]);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
@@ -46,7 +22,7 @@ export function ProjectList({ selectedId, onSelect }: Props) {
     try {
       await api.deleteProject(id);
       if (selectedId === id) onSelect(null);
-      reload();
+      onProjectsChanged();
     } catch (e: any) {
       alert(`Failed to delete: ${e?.message ?? e}`);
     }
@@ -80,13 +56,20 @@ export function ProjectList({ selectedId, onSelect }: Props) {
             </div>
           </div>
 
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : err ? (
-            <p className="text-sm text-red-600">Error: {err}</p>
-          ) : projects.length === 0 ? (
+          {/* Dashboard pseudo-item */}
+          <button
+            className={`mb-2 flex w-full items-center rounded px-2 py-1.5 text-left text-sm ${
+              selectedId === null ? 'bg-accent' : 'hover:bg-accent/50'
+            }`}
+            onClick={() => onSelect(null)}
+          >
+            <span className="mr-2">📊</span>
+            <span className="font-medium">Dashboard</span>
+          </button>
+
+          {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No projects yet. Click "+ New" to add one.
+              No projects yet. Click "Scan…" or "+ New" to add one.
             </p>
           ) : (
             <ul className="space-y-1">
@@ -100,7 +83,9 @@ export function ProjectList({ selectedId, onSelect }: Props) {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{p.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">{p.path}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {p.scripts.length} scripts
+                    </div>
                   </div>
                   <button
                     className="ml-2 hidden text-xs text-muted-foreground hover:text-red-600 group-hover:inline"
@@ -119,12 +104,12 @@ export function ProjectList({ selectedId, onSelect }: Props) {
       <NewProjectDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onCreated={reload}
+        onCreated={onProjectsChanged}
       />
       <ScanDialog
         open={scanOpen}
         onOpenChange={setScanOpen}
-        onImported={reload}
+        onImported={onProjectsChanged}
       />
     </>
   );

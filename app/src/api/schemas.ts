@@ -81,6 +81,7 @@ export type LogLine = z.infer<typeof LogLineSchema>;
 export const ProjectCandidateSchema = z.object({
   name: z.string(),
   path: z.string(),
+  stacks: z.array(z.string()),
   scripts: z.array(ScriptSchema),
 });
 export type ProjectCandidate = z.infer<typeof ProjectCandidateSchema>;
