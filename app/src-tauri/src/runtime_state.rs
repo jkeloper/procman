@@ -22,6 +22,10 @@ pub struct RuntimeState {
     /// Consumed by RestorePrompt on next launch.
     #[serde(default)]
     pub last_running: Vec<String>,
+    /// Pre-shared bearer token for remote control server. Generated on
+    /// first server start, persisted here, user can rotate.
+    #[serde(default)]
+    pub remote_token: String,
 }
 
 pub fn default_runtime_path() -> Result<PathBuf, ConfigError> {
@@ -70,6 +74,21 @@ impl RuntimeStore {
             }
         }
         self.schedule_flush();
+    }
+
+    pub async fn get_remote_token(&self) -> String {
+        self.state.lock().await.remote_token.clone()
+    }
+
+    pub async fn set_remote_token(
+        self: &Arc<Self>,
+        token: String,
+    ) -> Result<(), ConfigError> {
+        {
+            let mut guard = self.state.lock().await;
+            guard.remote_token = token;
+        }
+        self.flush_now().await
     }
 
     pub async fn clear_last_running(self: &Arc<Self>) -> Result<(), ConfigError> {

@@ -31,6 +31,10 @@ pub async fn list_ports() -> Result<Vec<PortInfo>, String> {
 }
 
 /// Dedupe: same (pid, port) pair can appear multiple times (IPv4 + IPv6).
+pub fn parse_lsof_for_api(text: &str) -> Vec<PortInfo> {
+    parse_lsof(text)
+}
+
 fn parse_lsof(text: &str) -> Vec<PortInfo> {
     let mut seen: HashMap<(u32, u16), PortInfo> = HashMap::new();
     let mut cur_pid: Option<u32> = None;

@@ -117,6 +117,30 @@ export const api = {
   resolvePidToScript: (pid: number) =>
     call('resolve_pid_to_script', { pid }, z.string().nullable()),
 
+  // Remote server
+  serverStatus: () =>
+    callRaw<{
+      running: boolean;
+      port: number | null;
+      mode: 'loopback' | 'lan' | null;
+      token: string;
+    }>('server_status', {}),
+  startServer: (port: number, mode: 'loopback' | 'lan') =>
+    callRaw('start_server', { port, mode }),
+  stopServer: () => callRaw<null>('stop_server', {}),
+  rotateToken: () => callRaw<string>('rotate_token', {}),
+  getAuditLog: () =>
+    callRaw<
+      Array<{
+        ts_ms: number;
+        action: string;
+        target: string;
+        ok: boolean;
+        detail: string | null;
+      }>
+    >('get_audit_log', {}),
+  localIp: () => callRaw<string>('local_ip', {}),
+
   // VSCode
   scanVscodeConfigs: (projectPath: string) =>
     call('scan_vscode_configs', { projectPath }, z.array(LaunchConfigCandidateSchema)),

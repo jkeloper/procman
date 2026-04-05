@@ -96,6 +96,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         })
         .unwrap_or_default();
 
+    let env_file = cfg
+        .get("envFile")
+        .and_then(|v| v.as_str())
+        .map(|s| subst_vars(s, workspace, &env_map));
+
     let substitute = |s: &str| -> String { subst_vars(s, workspace, &env_map) };
 
     let program_raw = cfg.get("program").and_then(|v| v.as_str()).map(String::from);
@@ -139,10 +144,18 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 .clone()
                 .unwrap_or_else(|| "index.js".to_string());
             let base = format!("{} {} {}", interp, shell_quote(&prog), quoted_args);
-            prefix_env(&env_prefix, &base)
+            prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "python" | "debugpy" => {
-            let interp = runtime_exec.unwrap_or_else(|| "python3".to_string());
+            // VSCode Python uses "python" field for the interpreter path,
+            // not runtimeExecutable.
+            let python_path = cfg
+                .get("python")
+                .and_then(|v| v.as_str())
+                .map(|s| substitute(s));
+            let interp = runtime_exec
+                .or(python_path)
+                .unwrap_or_else(|| "python3".to_string());
             let module = cfg
                 .get("module")
                 .and_then(|v| v.as_str())
@@ -156,30 +169,28 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 shell_quote(&prog)
             };
             let base = format!("{} {} {}", interp, target, quoted_args);
-            prefix_env(&env_prefix, &base)
+            prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "shell" | "bashdb" => {
             let prog = program
                 .clone()
                 .unwrap_or_else(|| "./run.sh".to_string());
             let base = format!("{} {}", shell_quote(&prog), quoted_args);
-            prefix_env(&env_prefix, &base)
+            prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "go" => {
             let prog = program.clone().unwrap_or_else(|| ".".to_string());
             let base = format!("go run {} {}", shell_quote(&prog), quoted_args);
-            prefix_env(&env_prefix, &base)
+            prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "lldb" | "cppdbg" | "rust" | "codelldb" => {
-            // Rust/C++ binary launch — try `cargo run` if workspace has Cargo.toml,
-            // else fall back to executing program path directly.
             let has_cargo = Path::new(workspace).join("Cargo.toml").exists();
             if has_cargo {
                 let base = format!("cargo run -- {}", quoted_args);
-                prefix_env(&env_prefix, base.trim())
+                prefix_envfile(&env_file, prefix_env(&env_prefix, base.trim()).as_str())
             } else if let Some(prog) = program.clone() {
                 let base = format!("{} {}", shell_quote(&prog), quoted_args);
-                prefix_env(&env_prefix, &base)
+                prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
             } else {
                 return skip(name, kind, "binary debugger needs program or Cargo.toml", raw_json);
             }
@@ -223,6 +234,14 @@ fn prefix_env(env_prefix: &str, cmd: &str) -> String {
         cmd.to_string()
     } else {
         format!("{} {}", env_prefix, cmd)
+    }
+}
+
+/// Wraps a command with `set -a; source <envFile>; set +a;` to load env vars.
+fn prefix_envfile(env_file: &Option<String>, cmd: &str) -> String {
+    match env_file {
+        Some(path) => format!("set -a; source {}; set +a; {}", shell_quote(path), cmd),
+        None => cmd.to_string(),
     }
 }
 

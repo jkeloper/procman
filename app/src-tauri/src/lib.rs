@@ -14,6 +14,7 @@ mod config_store;
 mod log_buffer;
 mod process;
 mod runtime_state;
+mod server;
 mod state;
 mod types;
 mod vscode_scanner;
@@ -70,6 +71,23 @@ pub fn run() {
                 }
             }
             app.manage(pm);
+
+            // Remote server state (bearer token loaded from runtime_state).
+            let rs = app.state::<Arc<RuntimeStore>>().inner().clone();
+            let token = tauri::async_runtime::block_on(rs.get_remote_token());
+            let token = if token.is_empty() {
+                let fresh = server::auth::generate_token();
+                let rs_c = rs.clone();
+                let t_c = fresh.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = rs_c.set_remote_token(t_c).await;
+                });
+                fresh
+            } else {
+                token
+            };
+            app.manage(commands::remote::RemoteServerState::new(token));
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -121,6 +139,13 @@ pub fn run() {
             cloudflared::list_cf_tunnels,
             cloudflared::detect_running_cloudflared,
             cloudflared::kill_cloudflared_pid,
+            // Remote server
+            commands::server_status,
+            commands::start_server,
+            commands::stop_server,
+            commands::rotate_token,
+            commands::get_audit_log,
+            commands::local_ip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type PortInfo, type Project } from '@/api/tauri';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
 import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
+import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
 
 interface Props {
   projects: Project[];
@@ -10,15 +11,20 @@ interface Props {
 
 export function Dashboard({ projects, onSelectProject }: Props) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [killing, setKilling] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     try {
-      const list = await api.listPorts();
+      const [list, procs] = await Promise.all([
+        api.listPorts(),
+        api.listProcesses().catch(() => []),
+      ]);
       setPorts(list);
-    } catch {}
-    finally {
+      setManagedPids(new Set(procs.map((p) => p.pid)));
+    } catch {
+    } finally {
       setLoading(false);
     }
   }, []);
@@ -45,21 +51,16 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   async function handlePortClick(p: PortInfo) {
     try {
       const scriptId = await api.resolvePidToScript(p.pid);
-      if (scriptId) {
-        const proj = projects.find((pr) =>
-          pr.scripts.some((s) => s.id === scriptId),
-        );
-        if (proj && onSelectProject) {
-          onSelectProject(proj.id);
-          window.dispatchEvent(
-            new CustomEvent('procman:focus-log', { detail: { scriptId } }),
-          );
-          return;
-        }
-      }
-      alert(
-        `External process\nPID ${p.pid} (${p.process_name})\nPort :${p.port}\n\nprocman has no log stream for this process (not managed by procman).`,
+      if (!scriptId) return; // External process — no-op (row is visually disabled)
+      const proj = projects.find((pr) =>
+        pr.scripts.some((s) => s.id === scriptId),
       );
+      if (proj && onSelectProject) {
+        onSelectProject(proj.id);
+        window.dispatchEvent(
+          new CustomEvent('procman:focus-log', { detail: { scriptId } }),
+        );
+      }
     } catch (e: any) {
       console.error('resolve pid', e);
     }
@@ -112,6 +113,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
             <PortTable
               rows={matched}
               expectedMap={expectedPortMap}
+              managedPids={managedPids}
               killing={killing}
               onKill={handleKill}
               onClickRow={handlePortClick}
@@ -126,6 +128,9 @@ export function Dashboard({ projects, onSelectProject }: Props) {
         {/* Cloudflare */}
         <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
 
+        {/* Remote access for mobile */}
+        <RemoteAccessCard />
+
         {/* Other ports */}
         <section>
           <SectionHeader title="Other listening ports" count={others.length} />
@@ -135,6 +140,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
             <PortTable
               rows={others}
               expectedMap={expectedPortMap}
+              managedPids={managedPids}
               killing={killing}
               onKill={handleKill}
               onClickRow={handlePortClick}
@@ -205,6 +211,7 @@ function StatPill({
 function PortTable({
   rows,
   expectedMap,
+  managedPids,
   killing,
   onKill,
   onClickRow,
@@ -212,6 +219,7 @@ function PortTable({
 }: {
   rows: PortInfo[];
   expectedMap: Map<number, { project: string; script: string }>;
+  managedPids: Set<number>;
   killing: number | null;
   onKill: (port: number) => void;
   onClickRow: (p: PortInfo) => void;
@@ -232,20 +240,27 @@ function PortTable({
         <tbody>
           {rows.map((p) => {
             const match = expectedMap.get(p.port);
+            const managed = managedPids.has(p.pid);
             return (
               <tr
                 key={`${p.pid}-${p.port}`}
-                className="cursor-pointer border-t border-border/40 transition-colors hover:bg-accent/50"
-                onClick={() => onClickRow(p)}
+                className={`border-t border-border/40 transition-colors ${
+                  managed
+                    ? 'cursor-pointer hover:bg-accent/50'
+                    : 'cursor-default'
+                }`}
+                title={managed ? 'Click to jump to logs' : 'External process — procman has no log stream'}
+                onClick={() => managed && onClickRow(p)}
               >
                 <td className="px-3 py-2">
                   <span
-                    className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
+                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
                       variant === 'matched'
                         ? 'bg-primary/15 text-primary'
                         : 'bg-muted/50 text-muted-foreground'
                     }`}
                   >
+                    {managed && <span className="text-[8px]">↗</span>}
                     :{p.port}
                   </span>
                 </td>

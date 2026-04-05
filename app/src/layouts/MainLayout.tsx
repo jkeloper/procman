@@ -9,6 +9,7 @@ import { RestorePrompt } from '@/components/session/RestorePrompt';
 import { api, type Project } from '@/api/tauri';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { useHotkeys } from '@/hooks/useHotkeys';
+import { useResizable } from '@/hooks/useResizable';
 
 export function MainLayout() {
   const [logOpen, setLogOpen] = useState(true);
@@ -18,6 +19,23 @@ export function MainLayout() {
   useHotkeys({
     toggleLogs: () => setLogOpen((v) => !v),
     goDashboard: () => setSelectedProjectId(null),
+  });
+
+  const sidebar = useResizable({
+    storageKey: 'procman.sidebarWidth',
+    defaultSize: 240,
+    min: 180,
+    max: 420,
+    axis: 'horizontal',
+    edge: 'start',
+  });
+  const logDrawer = useResizable({
+    storageKey: 'procman.logHeight',
+    defaultSize: 260,
+    min: 120,
+    max: 720,
+    axis: 'vertical',
+    edge: 'end',
   });
 
   const reloadProjects = useCallback(async () => {
@@ -71,7 +89,10 @@ export function MainLayout() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar */}
-        <aside className="flex w-[240px] shrink-0 flex-col border-r border-border/60 bg-sidebar">
+        <aside
+          className="flex shrink-0 flex-col border-r border-border/60 bg-sidebar"
+          style={{ width: sidebar.size }}
+        >
           <ProjectList
             selectedId={selectedProjectId}
             onSelect={setSelectedProjectId}
@@ -79,6 +100,14 @@ export function MainLayout() {
             onProjectsChanged={reloadProjects}
           />
         </aside>
+        {/* Sidebar resize handle */}
+        <div
+          onMouseDown={sidebar.onMouseDown}
+          className="group relative w-[3px] shrink-0 cursor-col-resize bg-border/60 transition-colors hover:bg-primary/60"
+          title="Drag to resize sidebar"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+        </div>
 
         {/* Main content */}
         <main className="flex flex-1 flex-col overflow-hidden">
@@ -120,9 +149,19 @@ export function MainLayout() {
           </section>
 
           {logOpen && (
-            <section className="h-[260px] shrink-0 border-t border-border/60">
-              <LogViewer />
-            </section>
+            <>
+              {/* Log drawer resize handle */}
+              <div
+                onMouseDown={logDrawer.onMouseDown}
+                className="group relative h-[3px] shrink-0 cursor-row-resize bg-border/60 transition-colors hover:bg-primary/60"
+                title="Drag to resize log drawer"
+              >
+                <div className="absolute inset-x-0 -top-1 -bottom-1" />
+              </div>
+              <section className="shrink-0" style={{ height: logDrawer.size }}>
+                <LogViewer />
+              </section>
+            </>
           )}
         </main>
       </div>

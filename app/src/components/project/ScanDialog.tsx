@@ -55,6 +55,13 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
     setChecked(next);
   }
 
+  function resetToPicker() {
+    setCandidates(null);
+    setChecked(new Set());
+    setRootPath(null);
+    setErr(null);
+  }
+
   async function importSelected() {
     if (!candidates) return;
     setBusy(true);
@@ -147,6 +154,11 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
           </div>
         )}
         <DialogFooter>
+          {candidates && (
+            <Button variant="outline" onClick={resetToPicker} disabled={busy}>
+              ← Back
+            </Button>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>

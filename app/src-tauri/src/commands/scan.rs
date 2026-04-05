@@ -68,6 +68,15 @@ pub async fn scan_directory(path: String) -> Result<Vec<ProjectCandidate>, Strin
         }
     }
 
+    // Fallback: if nothing was found in children, try treating `root` itself
+    // as a project. This handles the case where the user picked the project
+    // folder directly instead of its parent.
+    if candidates.is_empty() {
+        if let Some(candidate) = detect_project(root) {
+            candidates.push(candidate);
+        }
+    }
+
     // Stable order: by directory name
     candidates.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(candidates)
