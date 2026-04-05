@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>tauri-harness</title>
+    <title>procman</title>
+    <script>
+      // Apply theme before paint to avoid light-mode flash.
+      // Follows system preference; user can override later via settings.
+      (function () {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        var apply = function (isDark) {
+          document.documentElement.classList.toggle('dark', isDark);
+        };
+        apply(mq.matches);
+        mq.addEventListener('change', function (e) { apply(e.matches); });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
