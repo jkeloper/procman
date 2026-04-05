@@ -59,6 +59,9 @@ export function RestorePrompt({ projects }: Props) {
   }, [projects]);
 
   async function restoreAll() {
+    // Clear before spawning so transient status events don't re-add the
+    // same set. Each successful spawn will re-mark itself via useProcessStatus.
+    await invoke('clear_last_running').catch(() => {});
     for (const it of items) {
       try {
         await api.spawnProcess(it.projectId, it.scriptId);

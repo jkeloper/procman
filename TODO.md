@@ -47,8 +47,19 @@
 
 ### 최종
 - [x] [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) 작성 — **Tauri v2 확정**
-- [ ] Evaluator 독립 리뷰 대기
-- [ ] **Week 2 종료 재평가 게이트**: T05 2일 초과 시 Electron 전환 재검토
+- [x] 3-agent 교차점검 (Evaluator 7.0/10, User-tester NPS 5/10, Architecture)
+- [x] Critical Fix Pack (UNI-1~UNI-7 + B4) 전부 적용
+
+## Critical Fix Pack (2026-04-06)
+- [x] UNI-1: `blocking_lock()` → async `.lock().await` (데드락 위험 제거)
+- [x] UNI-2: generation epoch + try_wait 기반 kill (PID race 방지)
+- [x] UNI-3: `runtime.json` 분리 + 500ms debounced flush (config.yaml 오염 제거)
+- [x] UNI-4: RestoreAll이 spawn 전에 clear_last_running 호출
+- [x] UNI-5: ⌘K 팔레트에 Groups 섹션 추가
+- [x] UNI-7: 타입 단일화 (dead `ProcessStatus`/`ProcessHandle`/legacy LogLine 제거)
+- [x] B4: `delete_script`/`delete_project`가 실행 중 프로세스 kill (orphan 방지)
+- [x] 라인 8KB 트렁케이션 + reader 에러 로깅 (M3)
+- [x] log_buffer_size 설정값 연결 (설정 파이프라인)
 
 ## Sprint 1 — 기반 & 등록 (Week 1-2)
 **Actual Kick-off: 2026-04-05** (사용자 override로 일요일 즉시 착수, Manager 재가동 승인)

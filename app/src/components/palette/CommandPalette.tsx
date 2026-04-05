@@ -10,6 +10,12 @@ import {
 } from '@/components/ui/command';
 import { api, type Project, type RuntimeStatus } from '@/api/tauri';
 
+interface Group {
+  id: string;
+  name: string;
+  members: Array<{ project_id: string; script_id: string }>;
+}
+
 interface Props {
   projects: Project[];
   statuses: Record<string, RuntimeStatus>;
@@ -22,6 +28,17 @@ interface Props {
  */
 export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
   const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const g = (await api.listGroups()) as Group[];
+        setGroups(g);
+      } catch {}
+    })();
+  }, [open]);
 
   // Global ⌘K / Ctrl+K
   useEffect(() => {
@@ -79,6 +96,15 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
     }
   }
 
+  async function runGroupAction(groupId: string) {
+    close();
+    try {
+      await api.runGroup(groupId);
+    } catch (e: any) {
+      alert(`Run group failed: ${e?.message ?? e}`);
+    }
+  }
+
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput placeholder="Type to search projects, scripts, actions…" />
@@ -95,6 +121,26 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
             📊 Go to Dashboard
           </CommandItem>
         </CommandGroup>
+
+        {groups.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Groups — Run">
+              {groups.map((g) => (
+                <CommandItem
+                  key={`group-${g.id}`}
+                  value={`group run ${g.name}`}
+                  onSelect={() => runGroupAction(g.id)}
+                >
+                  ▶▶ {g.name}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {g.members.length} scripts
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
 
         {projects.length > 0 && (
           <>

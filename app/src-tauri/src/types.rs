@@ -21,10 +21,6 @@ pub struct AppConfig {
     pub groups: Vec<Group>,
     #[serde(default)]
     pub settings: AppSettings,
-    /// script_ids that were running at last shutdown. Used by T27 session
-    /// restore prompt. Persisted on process start; cleared on graceful exit.
-    #[serde(default)]
-    pub last_running: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -34,7 +30,6 @@ impl Default for AppConfig {
             projects: Vec::new(),
             groups: Vec::new(),
             settings: AppSettings::default(),
-            last_running: Vec::new(),
         }
     }
 }
@@ -100,38 +95,14 @@ impl Default for AppSettings {
 
 // --- Runtime-only types (not persisted to config.yaml) ---
 
-/// Current status of a running (or recently-stopped) process instance.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ProcessStatus {
-    Running,
-    Stopped,
-    Error,
-}
-
-/// Runtime handle for a script invocation — one per active process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessHandle {
-    pub id: String,
-    pub project_id: String,
-    pub script_id: String,
-    pub status: ProcessStatus,
-    pub pid: Option<u32>,
-    pub started_at_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Source of a log line. Runtime-only type; single authoritative definition.
+/// See process.rs for RuntimeStatus (Running/Stopped/Crashed) and
+/// log_buffer.rs for LogLine (which embeds LogStream + monotonic seq).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogStream {
     Stdout,
     Stderr,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogLine {
-    pub ts_ms: u64,
-    pub stream: LogStream,
-    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,7 +162,6 @@ mod tests {
                 port_poll_interval_ms: 500,
                 theme: "dark".into(),
             },
-            last_running: vec![],
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         let back: AppConfig = serde_yaml::from_str(&yaml).unwrap();

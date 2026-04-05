@@ -124,5 +124,19 @@
 - **Done** T21-T23은 이미 Sprint 1 Dashboard 작업에서 완료됨
 - **Milestone** procman MVP 전체 기능 구현 완료. 모든 계획 태스크 closed
 
+### 2026-04-06 — Critical Fix Pack (3-agent 교차점검 반영) 🛡️
+- **3-agent 교차점검 완료**: Evaluator 7.0/10, User-tester NPS 5/10, Architecture 리뷰
+- **Fixed UNI-1** (Critical): `commands/process.rs`의 `blocking_lock()` async 컨텍스트 호출 제거 → `.lock().await`로 전환. tokio 런타임 데드락 위험 해소
+- **Fixed UNI-2** (Critical): ProcessManager에 generation counter 도입. kill()이 exited flag polling(50ms)으로 try_wait 기반 종료 확인 후에야 SIGKILL → PID 재활용 race 방지. watcher task는 generation 매칭 시에만 remove
+- **Fixed UNI-3** (Critical): `last_running`을 config.yaml에서 분리하여 별도 [runtime.json](~/Library/Application Support/procman/runtime.json)으로 이관. 500ms debounced flush로 SSD 부하/git dirty 제거. [runtime_state.rs](app/src-tauri/src/runtime_state.rs) 신규 + 2 unit tests
+- **Fixed UNI-4**: RestorePrompt의 restoreAll이 spawn 전에 `clear_last_running` 명시 호출 → 프롬프트 재출현 방지
+- **Fixed UNI-5**: CommandPalette에 Groups 섹션 추가. ⌘K → group name → Enter로 "Morning Stack" 즉시 실행 (killer journey 복구)
+- **Fixed UNI-7**: dead types 전부 제거 — `types::ProcessStatus`, `types::ProcessHandle`, `types::LogLine`, TS legacy `ProcessStatusSchema`/`ProcessHandleSchema`. 단일 `RuntimeStatus` + `log_buffer::LogLine`만 유지. `get_logs` 제거
+- **Fixed B4**: `delete_script` / `delete_project` 커맨드가 실행 중 프로세스를 먼저 kill 후 config 수정 → 고아 프로세스 방지
+- **Added M3**: 로그 라인 8KB 트렁케이션 + reader I/O 에러 시 `[procman: ... read error]` stderr로 에스컬레이트 + 2 unit tests
+- **Added** `AppSettings.log_buffer_size` 설정값이 ProcessManager에 실제 주입 (dead config 해소)
+- **Tests** 19/19 Rust unit tests pass (기존 15 + 신규 4: process truncate 2 + runtime_state 2)
+- **Status** MVP 안정화 완료, v0.1.0-rc1 릴리즈 준비
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

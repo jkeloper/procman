@@ -7,6 +7,7 @@
 //   - Commands return `Result<T, String>` — `.map_err(|e| e.to_string())`
 //     on every fallible call converts typed errors into JS-facing strings.
 
+use crate::process::ProcessManager;
 use crate::state::AppState;
 use crate::types::Project;
 use std::sync::Arc;
@@ -89,7 +90,22 @@ pub async fn update_project(
 pub async fn delete_project(
     id: String,
     state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
 ) -> Result<(), String> {
+    // Kill any running processes belonging to this project's scripts (B4).
+    let script_ids: Vec<String> = {
+        let guard = state.config.lock().await;
+        guard
+            .projects
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.scripts.iter().map(|s| s.id.clone()).collect())
+            .unwrap_or_default()
+    };
+    for sid in script_ids {
+        let _ = pm.kill(&sid).await;
+    }
+
     let removed = state
         .mutate(|cfg| {
             let before = cfg.projects.len();

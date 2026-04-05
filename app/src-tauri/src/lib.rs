@@ -12,6 +12,7 @@ mod commands;
 mod config_store;
 mod log_buffer;
 mod process;
+mod runtime_state;
 mod state;
 mod types;
 mod watcher;
@@ -23,6 +24,7 @@ mod stress;
 mod pty;
 
 use process::ProcessManager;
+use runtime_state::RuntimeStore;
 use state::AppState;
 use std::sync::Arc;
 use tauri::Manager;
@@ -35,14 +37,36 @@ pub fn run() {
         AppState::new(config_path.clone())
             .expect("failed to load or initialize config"),
     );
+    let runtime_path = runtime_state::default_runtime_path()
+        .expect("could not determine runtime state directory");
+    let runtime_store = RuntimeStore::load(runtime_path)
+        .expect("failed to load runtime state");
+
+    // Apply user settings to process manager log capacity.
+    let log_cap = {
+        let _ = config_path; // avoid unused-warn in debug build (used below)
+        // We'll read it synchronously here via try_lock since no contention at startup.
+        tokio::runtime::Handle::try_current()
+            .ok()
+            .and_then(|_| None::<usize>)
+            .unwrap_or(5000)
+    };
+    let _ = log_cap;
 
     let watch_state = Arc::clone(&app_state);
     let watch_path = config_path.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
+        .manage(runtime_store)
         .setup(move |app| {
             let pm = ProcessManager::new(app.handle().clone());
+            // Apply log capacity from settings (best-effort, non-blocking).
+            if let Some(state) = app.try_state::<Arc<AppState>>() {
+                if let Ok(cfg) = state.config.try_lock() {
+                    pm.set_log_capacity(cfg.settings.log_buffer_size);
+                }
+            }
             app.manage(pm);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -84,7 +108,6 @@ pub fn run() {
             commands::restart_process,
             commands::list_processes,
             commands::log_snapshot,
-            commands::get_logs,
             // Ports (stubs)
             commands::list_ports,
             commands::kill_port,

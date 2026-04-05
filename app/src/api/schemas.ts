@@ -76,19 +76,6 @@ export const ProcessSnapshotSchema = z.object({
 });
 export type ProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 
-// Legacy (kept for backwards compat during migration)
-export const ProcessStatusSchema = z.enum(['running', 'stopped', 'error']);
-export type ProcessStatus = z.infer<typeof ProcessStatusSchema>;
-
-export const ProcessHandleSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  script_id: z.string(),
-  status: ProcessStatusSchema,
-  pid: z.number().int().nullable(),
-  started_at_ms: z.number().int().nullable(),
-});
-export type ProcessHandle = z.infer<typeof ProcessHandleSchema>;
 
 export const LogStreamSchema = z.enum(['stdout', 'stderr']);
 export type LogStream = z.infer<typeof LogStreamSchema>;

@@ -9,6 +9,7 @@
 //     a lazily-constructed error — use over `.ok_or` when the error value
 //     requires allocation (e.g. format!).
 
+use crate::process::ProcessManager;
 use crate::state::AppState;
 use crate::types::Script;
 use std::sync::Arc;
@@ -106,7 +107,10 @@ pub async fn delete_script(
     project_id: String,
     id: String,
     state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
 ) -> Result<(), String> {
+    // Kill any running process for this script first (B4 orphan cleanup).
+    let _ = pm.kill(&id).await;
     let removed = state
         .mutate(|cfg| {
             let Some(proj) = cfg.projects.iter_mut().find(|p| p.id == project_id) else {

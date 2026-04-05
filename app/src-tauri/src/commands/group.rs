@@ -105,11 +105,9 @@ pub async fn run_group(
     // Snapshot members + their scripts/cwd first to avoid holding the lock.
     let members: Vec<(String, String, crate::types::Script, String)> = {
         let guard = state.config.lock().await;
-        let g = guard
-            .groups
-            .iter()
-            .find(|g| g.id == id)
-            .ok_or_else(|| format!("group not found: {}", id))?;
+        let Some(g) = guard.groups.iter().find(|g| g.id == id) else {
+            return Err(format!("group not found: {}", id));
+        };
         g.members
             .iter()
             .filter_map(|m| {
