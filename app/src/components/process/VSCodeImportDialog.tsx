@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { api, type LaunchConfigCandidate } from '@/api/tauri';
+import { api, type LaunchConfigCandidate, type Script } from '@/api/tauri';
 
 interface Props {
   open: boolean;
@@ -28,6 +28,7 @@ export function VSCodeImportDialog({
   onImported,
 }: Props) {
   const [candidates, setCandidates] = useState<LaunchConfigCandidate[] | null>(null);
+  const [existingSet, setExistingSet] = useState<Set<string>>(new Set());
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,12 +44,22 @@ export function VSCodeImportDialog({
       setBusy(true);
       setErr(null);
       try {
-        const found = await api.scanVscodeConfigs(projectPath);
+        const [found, existing] = await Promise.all([
+          api.scanVscodeConfigs(projectPath),
+          api.listScripts(projectId),
+        ]);
+        const taken = new Set<string>();
+        existing.forEach((s: Script) => {
+          taken.add(`name:${s.name}`);
+          taken.add(`cmd:${s.command}`);
+        });
+        setExistingSet(taken);
         setCandidates(found);
-        // Default: check all that aren't skipped
         const initial = new Set<number>();
         found.forEach((c, i) => {
-          if (!c.skipped_reason) initial.add(i);
+          if (c.skipped_reason) return;
+          if (taken.has(`name:${c.name}`) || taken.has(`cmd:${c.command}`)) return;
+          initial.add(i);
         });
         setChecked(initial);
       } catch (e: any) {
@@ -57,7 +68,11 @@ export function VSCodeImportDialog({
         setBusy(false);
       }
     })();
-  }, [open, projectPath]);
+  }, [open, projectPath, projectId]);
+
+  function isDuplicate(c: LaunchConfigCandidate): boolean {
+    return existingSet.has(`name:${c.name}`) || existingSet.has(`cmd:${c.command}`);
+  }
 
   function toggle(i: number) {
     const n = new Set(checked);
@@ -117,6 +132,8 @@ export function VSCodeImportDialog({
             <ul className="divide-y">
               {candidates.map((c, i) => {
                 const isImportable = !c.skipped_reason;
+                const dup = isImportable && isDuplicate(c);
+                const disabled = !isImportable || dup;
                 return (
                   <li key={i} className="p-3 text-sm">
                     <div className="flex items-start gap-2">
@@ -124,7 +141,7 @@ export function VSCodeImportDialog({
                         type="checkbox"
                         className="mt-1"
                         checked={checked.has(i)}
-                        disabled={!isImportable}
+                        disabled={disabled}
                         onChange={() => toggle(i)}
                       />
                       <div className="min-w-0 flex-1">
@@ -136,6 +153,11 @@ export function VSCodeImportDialog({
                           {!isImportable && (
                             <Badge variant="destructive" className="text-xs">
                               skipped
+                            </Badge>
+                          )}
+                          {dup && (
+                            <Badge variant="outline" className="text-xs">
+                              already imported
                             </Badge>
                           )}
                         </div>

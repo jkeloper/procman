@@ -44,10 +44,29 @@ pub async fn create_script(
     if command.trim().is_empty() {
         return Err("command cannot be empty".into());
     }
+    let trimmed_name = name.trim().to_string();
+    let trimmed_cmd = command.trim().to_string();
+
+    // Dedup within the same project: same (name) OR same (command) is rejected.
+    {
+        let guard = state.config.lock().await;
+        let proj = guard
+            .projects
+            .iter()
+            .find(|p| p.id == project_id)
+            .ok_or_else(|| format!("project not found: {}", project_id))?;
+        if proj.scripts.iter().any(|s| s.name == trimmed_name) {
+            return Err(format!("script with name '{}' already exists", trimmed_name));
+        }
+        if proj.scripts.iter().any(|s| s.command == trimmed_cmd) {
+            return Err(format!("script with identical command already exists"));
+        }
+    }
+
     let script = Script {
         id: Uuid::new_v4().to_string(),
-        name: name.trim().to_string(),
-        command: command.trim().to_string(),
+        name: trimmed_name,
+        command: trimmed_cmd,
         expected_port,
         auto_restart,
     };

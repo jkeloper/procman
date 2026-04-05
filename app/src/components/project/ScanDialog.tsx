@@ -32,8 +32,15 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
     setBusy(true);
     try {
       const found = await api.scanDirectory(selected);
-      setCandidates(found);
-      setChecked(new Set(found.map((_, i) => i)));
+      // Filter out already-registered paths.
+      const existing = await api.listProjects();
+      const existingPaths = new Set(existing.map((p) => p.path));
+      const fresh = found.filter((c) => !existingPaths.has(c.path));
+      setCandidates(fresh);
+      setChecked(new Set(fresh.map((_, i) => i)));
+      if (fresh.length < found.length) {
+        setErr(`${found.length - fresh.length} project(s) already registered, filtered out`);
+      }
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
@@ -52,28 +59,38 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
     if (!candidates) return;
     setBusy(true);
     setErr(null);
+    const errors: string[] = [];
     try {
       for (const i of checked) {
         const c = candidates[i];
-        const project = await api.createProject(c.name, c.path);
-        // Also import the scripts found in package.json so the project
-        // isn't empty after import.
-        for (const s of c.scripts) {
-          await api.createScript(
-            project.id,
-            s.name,
-            s.command,
-            s.expected_port,
-            s.auto_restart,
-          );
+        try {
+          const project = await api.createProject(c.name, c.path);
+          // Also import the scripts (best-effort; dedup errors ignored).
+          for (const s of c.scripts) {
+            try {
+              await api.createScript(
+                project.id,
+                s.name,
+                s.command,
+                s.expected_port,
+                s.auto_restart,
+              );
+            } catch {
+              // skip duplicate scripts silently
+            }
+          }
+        } catch (e: any) {
+          errors.push(`${c.name}: ${e?.message ?? e}`);
         }
       }
       onImported();
-      onOpenChange(false);
-      setCandidates(null);
-      setRootPath(null);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      if (errors.length > 0) {
+        setErr(`Imported with ${errors.length} error(s):\n${errors.join('\n')}`);
+      } else {
+        onOpenChange(false);
+        setCandidates(null);
+        setRootPath(null);
+      }
     } finally {
       setBusy(false);
     }

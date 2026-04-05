@@ -39,10 +39,28 @@ pub async fn create_project(
         return Err("name cannot be empty".into());
     }
 
+    // Dedup by canonical path — same folder can't be registered twice.
+    let canon = pb
+        .canonicalize()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.clone());
+    {
+        let guard = state.config.lock().await;
+        if guard.projects.iter().any(|p| {
+            std::path::Path::new(&p.path)
+                .canonicalize()
+                .map(|c| c.to_string_lossy() == canon)
+                .unwrap_or(false)
+                || p.path == path
+        }) {
+            return Err(format!("project already registered: {}", canon));
+        }
+    }
+
     let project = Project {
         id: Uuid::new_v4().to_string(),
         name: name.trim().to_string(),
-        path,
+        path: canon,
         scripts: Vec::new(),
     };
     let to_return = project.clone();
