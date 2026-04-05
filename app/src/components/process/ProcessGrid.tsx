@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { api, type Script } from '@/api/tauri';
 import { ScriptEditor } from './ScriptEditor';
@@ -77,118 +76,137 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-        <h3 className="text-sm font-semibold">Scripts</h3>
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-xs"
+    <div className="flex h-full flex-col bg-background">
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-4 py-2">
+        <div className="flex items-center gap-3 text-[12px]">
+          <h3 className="font-semibold">Scripts</h3>
+          <span className="text-muted-foreground">{scripts.length}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            className="rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => setVscodeOpen(true)}
           >
-            VSCode import
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
-            + Script
+            Import from VSCode
+          </button>
+          <Button
+            size="sm"
+            className="h-7 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
+            onClick={() => openEditor(null)}
+          >
+            + New script
           </Button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto">
         {loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+          <div className="p-8 text-center text-[12px] text-muted-foreground">Loading…</div>
         ) : err ? (
-          <p className="p-4 text-sm text-red-600">Error: {err}</p>
+          <div className="p-8 text-center text-[12px] text-red-500">Error: {err}</div>
         ) : scripts.length === 0 ? (
-          <div className="flex h-64 items-center justify-center text-muted-foreground">
-            No scripts. Click "+ Script" to add one.
+          <div className="flex h-64 flex-col items-center justify-center gap-2">
+            <div className="text-[12px] text-muted-foreground">No scripts yet.</div>
+            <button
+              className="text-[12px] text-primary hover:underline"
+              onClick={() => setVscodeOpen(true)}
+            >
+              Import from .vscode/launch.json
+            </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-2.5 p-4 md:grid-cols-2 lg:grid-cols-3">
+          <ul className="divide-y divide-border/40">
             {scripts.map((s) => {
               const status = statuses[s.id];
               const pid = pids[s.id];
               const isRunning = status === 'running';
               const b = busy.has(s.id);
               return (
-                <Card
+                <li
                   key={s.id}
-                  className="group transition-all duration-200 hover:-translate-y-[1px] hover:shadow-md"
+                  className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40"
                 >
-                  <CardHeader className="pb-2 pt-3">
-                    <CardTitle className="flex items-center justify-between text-sm">
-                      <span className="truncate font-medium">{s.name}</span>
-                      <StatusBadge status={status} />
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pb-3 pt-0">
-                    <div className="mb-2 truncate font-mono text-[11px] text-muted-foreground">
+                  {/* Status dot */}
+                  <div className="shrink-0 w-[70px]">
+                    <StatusBadge status={status} />
+                  </div>
+
+                  {/* Name + command */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-foreground">
+                        {s.name}
+                      </span>
+                      {s.expected_port != null && (
+                        <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          :{s.expected_port}
+                        </span>
+                      )}
+                      {s.auto_restart && (
+                        <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          auto-restart
+                        </span>
+                      )}
+                      {pid != null && (
+                        <span className="font-mono text-[10px] text-muted-foreground/70">
+                          pid {pid}
+                        </span>
+                      )}
+                    </div>
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">
                       $ {s.command}
                     </div>
-                    <div className="mb-2 flex items-center gap-3 text-[11px] text-muted-foreground">
-                      {s.expected_port != null && (
-                        <span className="font-mono">:{s.expected_port}</span>
-                      )}
-                      {pid != null && <span className="font-mono">pid {pid}</span>}
-                    </div>
-                    <div className="flex items-center justify-end gap-1">
-                      {isRunning ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs"
-                            disabled={b}
-                            onClick={() =>
-                              withBusy(s.id, () => api.restartProcess(projectId, s.id))
-                            }
-                            title="Restart"
-                          >
-                            ↻
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            disabled={b}
-                            onClick={() => withBusy(s.id, () => api.killProcess(s.id))}
-                          >
-                            stop
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          className="h-7 px-3 text-xs"
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {isRunning ? (
+                      <>
+                        <button
+                          className="rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                           disabled={b}
-                          onClick={() => withBusy(s.id, () => api.spawnProcess(projectId, s.id))}
+                          title="Restart"
+                          onClick={() =>
+                            withBusy(s.id, () => api.restartProcess(projectId, s.id))
+                          }
                         >
-                          start
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs opacity-0 transition-opacity group-hover:opacity-100"
-                        onClick={() => openEditor(s)}
+                          ↻
+                        </button>
+                        <button
+                          className="rounded border border-border/60 px-2.5 py-1 text-[11px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                          disabled={b}
+                          onClick={() => withBusy(s.id, () => api.killProcess(s.id))}
+                        >
+                          Stop
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="rounded bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
+                        disabled={b}
+                        onClick={() => withBusy(s.id, () => api.spawnProcess(projectId, s.id))}
                       >
-                        edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs text-red-500/70 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-                        onClick={() => handleDelete(s.id)}
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                        {b ? '…' : 'Start'}
+                      </button>
+                    )}
+                    <button
+                      className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                      onClick={() => openEditor(s)}
+                    >
+                      edit
+                    </button>
+                    <button
+                      className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                      onClick={() => handleDelete(s.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </div>
 

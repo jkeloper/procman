@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { api, type Project } from '@/api/tauri';
 import { NewGroupDialog } from './NewGroupDialog';
 
@@ -19,16 +16,12 @@ export function GroupsPanel({ projects }: Props) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
       const list = (await api.listGroups()) as Group[];
       setGroups(list);
-      setErr(null);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -64,63 +57,64 @@ export function GroupsPanel({ projects }: Props) {
   }
 
   return (
-    <>
-      <Card>
-        <CardHeader className="flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm">Groups</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDialogOpen(true)}
-            disabled={projects.length === 0}
-          >
-            + Group
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {err && <p className="mb-2 text-xs text-red-600">{err}</p>}
-          {groups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No groups yet. Create one to launch multiple scripts at once.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {groups.map((g) => (
-                <li key={g.id} className="rounded border p-2">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="text-sm font-medium">{g.name}</span>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy === g.id || g.members.length === 0}
-                        onClick={() => handleRun(g.id)}
-                      >
-                        {busy === g.id ? 'Launching…' : '▶ Run'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-600"
-                        onClick={() => handleDelete(g.id)}
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {g.members.map((m, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs">
-                        {memberLabel(m)}
-                      </Badge>
-                    ))}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+    <section>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-[13px] font-semibold">Groups</h2>
+          <span className="font-mono text-[11px] text-muted-foreground">{groups.length}</span>
+        </div>
+        <button
+          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+          onClick={() => setDialogOpen(true)}
+          disabled={projects.length === 0}
+        >
+          + new
+        </button>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-4 text-center text-[12px] text-muted-foreground">
+          No groups. Bundle scripts to launch them together.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {groups.map((g) => (
+            <li
+              key={g.id}
+              className="group rounded-lg border border-border/60 bg-card p-3 transition-all hover:border-border hover:shadow-sm"
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[13px] font-medium">{g.name}</span>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    disabled={busy === g.id || g.members.length === 0}
+                    onClick={() => handleRun(g.id)}
+                  >
+                    {busy === g.id ? 'launching…' : '▶ Run'}
+                  </button>
+                  <button
+                    className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                    onClick={() => handleDelete(g.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {g.members.map((m, i) => (
+                  <span
+                    key={i}
+                    className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                  >
+                    {memberLabel(m)}
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <NewGroupDialog
         open={dialogOpen}
@@ -128,6 +122,6 @@ export function GroupsPanel({ projects }: Props) {
         projects={projects}
         onCreated={reload}
       />
-    </>
+    </section>
   );
 }

@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   api,
   type CfInstalled,
@@ -12,7 +9,6 @@ import {
 
 interface Props {
   projects: Project[];
-  /** Called after a tunnel is registered as a script, so sidebar updates. */
   onProjectsChanged: () => void;
 }
 
@@ -53,7 +49,6 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
       alert('Create a project first, then come back here.');
       return;
     }
-    // For MVP: attach to the first project. A picker can come later.
     const proj = projects[0];
     setBusy(tunnel.id);
     try {
@@ -90,95 +85,98 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
 
   if (!installed?.installed) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="py-3 text-xs text-muted-foreground">
-          ☁︎ cloudflared not installed.{' '}
+      <section>
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-[13px] font-semibold">Cloudflare Tunnels</h2>
+        </div>
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-3 text-[11px] text-muted-foreground">
+          <span className="mr-1">☁︎</span>
+          cloudflared not installed.{' '}
           <a
             href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
             target="_blank"
             rel="noreferrer"
-            className="underline"
+            className="text-primary underline-offset-2 hover:underline"
           >
             Install
           </a>{' '}
           to manage tunnels here.
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     );
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm">
-          <span>Cloudflare Tunnels</span>
-          {installed.version && (
-            <span className="text-xs font-normal text-muted-foreground">
-              {installed.version}
-            </span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <section>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-[13px] font-semibold">Cloudflare Tunnels</h2>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {running.length} running · {named.length} configured
+          </span>
+        </div>
+        {installed.version && (
+          <span className="font-mono text-[10px] text-muted-foreground/60">
+            {installed.version}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2">
         {/* Running */}
-        <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Running ({running.length})
-          </div>
-          {running.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No active cloudflared processes.</p>
-          ) : (
-            <ul className="divide-y rounded border">
+        {running.length > 0 && (
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+            <div className="border-b border-border/40 bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Running
+            </div>
+            <ul className="divide-y divide-border/40">
               {running.map((r) => (
-                <li key={r.pid} className="flex items-center gap-2 p-2 text-xs">
-                  <Badge variant="default">pid {r.pid}</Badge>
-                  <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                <li key={r.pid} className="flex items-center gap-2 px-3 py-2 text-[12px]">
+                  <span className="status-dot bg-emerald-500" style={{ marginRight: 0 }} />
+                  <span className="font-mono text-[10px] text-muted-foreground">pid {r.pid}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
                     {r.tunnel_name
-                      ? `tunnel: ${r.tunnel_name}`
+                      ? r.tunnel_name
                       : r.url
                       ? `quick: ${r.url}`
                       : r.command}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs text-red-600"
+                  <button
+                    className="rounded px-2 py-0.5 text-[11px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
                     disabled={busy === `pid-${r.pid}`}
                     onClick={() => kill(r.pid)}
                   >
-                    {busy === `pid-${r.pid}` ? 'Killing…' : 'Kill'}
-                  </Button>
+                    {busy === `pid-${r.pid}` ? 'killing…' : 'kill'}
+                  </button>
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Named tunnels */}
-        <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Named tunnels ({named.length})
-          </div>
-          {named.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              None. Run `cloudflared login` and create a tunnel.
-            </p>
-          ) : (
-            <ul className="divide-y rounded border">
+        {named.length > 0 ? (
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+            <div className="border-b border-border/40 bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Configured
+            </div>
+            <ul className="divide-y divide-border/40">
               {named.map((t) => {
                 const isRunning = running.some(
                   (r) => r.tunnel_name === t.name || r.command.includes(t.name),
                 );
                 return (
-                  <li key={t.id} className="flex items-center gap-2 p-2 text-xs">
-                    <Badge variant={isRunning ? 'default' : 'secondary'}>{t.name}</Badge>
-                    <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                  <li key={t.id} className="flex items-center gap-2 px-3 py-2 text-[12px]">
+                    <span
+                      className={`status-dot ${isRunning ? 'bg-emerald-500' : 'bg-border'}`}
+                      style={{ marginRight: 0 }}
+                    />
+                    <span className="font-medium">{t.name}</span>
+                    <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground">
                       {t.id.slice(0, 8)} · {t.connections} conn
                     </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 text-xs"
+                    <button
+                      className="rounded border border-border/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
                       disabled={busy === t.id || isRunning || projects.length === 0}
                       onClick={() => registerAndRun(t)}
                       title={
@@ -189,15 +187,21 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
                           : `Register as script under "${projects[0]?.name}" and start`
                       }
                     >
-                      {busy === t.id ? '…' : isRunning ? 'running' : 'Run'}
-                    </Button>
+                      {busy === t.id ? '…' : isRunning ? 'running' : 'run'}
+                    </button>
                   </li>
                 );
               })}
             </ul>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        ) : running.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-3 text-center text-[11px] text-muted-foreground">
+            No configured tunnels. Run{' '}
+            <code className="rounded bg-muted/50 px-1 py-0.5">cloudflared login</code> to get
+            started.
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }

@@ -5,7 +5,7 @@ import { useLogStream } from '@/hooks/useLogStream';
 import type { LogLine } from '@/api/tauri';
 
 const ansi = new AnsiToHtml({
-  fg: '#e5e5e5',
+  fg: '#d4d4d8',
   bg: '#0a0a0a',
   newline: false,
   escapeXML: true,
@@ -16,21 +16,27 @@ interface Props {
   scriptName?: string;
 }
 
-const ROW_HEIGHT = 18;
+const ROW_HEIGHT = 20;
 
 type RowProps = { lines: LogLine[] };
 
 function Row({ index, style, lines }: RowComponentProps<RowProps>) {
   const line = lines[index];
   if (!line) return null;
-  const color = line.stream === 'stderr' ? '#f87171' : '#e5e5e5';
+  const isErr = line.stream === 'stderr';
   const html = ansi.toHtml(line.text);
   return (
     <div
-      style={{ ...style, color }}
-      className="px-3 font-mono text-[11px] leading-[18px] whitespace-pre"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+      style={style}
+      className={`flex items-center gap-2 px-4 font-mono text-[11px] leading-[20px] whitespace-pre ${
+        isErr ? 'bg-red-500/5 text-red-400' : 'text-zinc-200'
+      } hover:bg-white/5`}
+    >
+      <span className="w-[52px] shrink-0 select-none text-right text-[9px] text-zinc-600 tabular-nums">
+        {line.seq}
+      </span>
+      <span className="flex-1" dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
   );
 }
 
@@ -39,7 +45,6 @@ export function LogPanel({ scriptId, scriptName }: Props) {
   const listRef = useRef<ListImperativeAPI>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  // Auto-tail: scroll to bottom when new lines arrive + autoScroll enabled.
   useEffect(() => {
     if (autoScroll && listRef.current && lines.length > 0) {
       listRef.current.scrollToRow({ index: lines.length - 1, align: 'end' });
@@ -48,32 +53,33 @@ export function LogPanel({ scriptId, scriptName }: Props) {
 
   if (!scriptId) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-[11px] text-zinc-500">
         Select a process to view its logs.
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0a0a] text-[#e5e5e5]">
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/10 px-3 text-xs">
+    <div className="flex h-full flex-col bg-[#0a0a0a]">
+      <div className="flex h-7 shrink-0 items-center justify-between border-b border-white/5 px-3 text-[10px]">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{scriptName ?? scriptId}</span>
-          <span className="text-muted-foreground">{lines.length} lines</span>
+          <span className="font-medium text-zinc-300">{scriptName ?? scriptId}</span>
+          <span className="font-mono text-zinc-500">{lines.length} lines</span>
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <label className="flex cursor-pointer items-center gap-1 text-zinc-500 transition-colors hover:text-zinc-300">
           <input
             type="checkbox"
+            className="h-3 w-3 accent-orange-500"
             checked={autoScroll}
             onChange={(e) => setAutoScroll(e.target.checked)}
           />
-          auto-scroll
+          auto-tail
         </label>
       </div>
       <div className="flex-1 overflow-hidden">
         {lines.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            (no output yet)
+          <div className="flex h-full items-center justify-center text-[11px] text-zinc-600">
+            waiting for output…
           </div>
         ) : (
           <List
