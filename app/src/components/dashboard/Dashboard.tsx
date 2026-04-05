@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { GroupsPanel } from '@/components/group/GroupsPanel';
 
 interface Props {
   projects: Project[];
@@ -120,6 +121,8 @@ export function Dashboard({ projects }: Props) {
             )}
           </CardContent>
         </Card>
+
+        <GroupsPanel projects={projects} />
 
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Auto-refresh every 2s</span>

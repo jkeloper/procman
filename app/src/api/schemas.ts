@@ -55,6 +55,28 @@ export type AppConfig = z.infer<typeof AppConfigSchema>;
 
 // --- Runtime-only types (not persisted) ---
 
+export const RuntimeStatusSchema = z.enum(['running', 'stopped', 'crashed']);
+export type RuntimeStatus = z.infer<typeof RuntimeStatusSchema>;
+
+export const StatusEventSchema = z.object({
+  id: z.string(),
+  status: RuntimeStatusSchema,
+  pid: z.number().int().nullable(),
+  exit_code: z.number().int().nullable(),
+  ts_ms: z.number().int(),
+});
+export type StatusEvent = z.infer<typeof StatusEventSchema>;
+
+export const ProcessSnapshotSchema = z.object({
+  id: z.string(),
+  pid: z.number().int(),
+  status: RuntimeStatusSchema,
+  started_at_ms: z.number().int(),
+  command: z.string(),
+});
+export type ProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
+
+// Legacy (kept for backwards compat during migration)
 export const ProcessStatusSchema = z.enum(['running', 'stopped', 'error']);
 export type ProcessStatus = z.infer<typeof ProcessStatusSchema>;
 
@@ -72,6 +94,7 @@ export const LogStreamSchema = z.enum(['stdout', 'stderr']);
 export type LogStream = z.infer<typeof LogStreamSchema>;
 
 export const LogLineSchema = z.object({
+  seq: z.number().int(),
   ts_ms: z.number().int(),
   stream: LogStreamSchema,
   text: z.string(),

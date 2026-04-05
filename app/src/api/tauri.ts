@@ -1,8 +1,4 @@
 // Typed Tauri invoke wrappers with runtime zod validation.
-//
-// Each function maps to a #[tauri::command] in src-tauri/src/commands/.
-// Output is zod-validated so schema drift fails loudly with command name +
-// error + payload preview.
 
 import { invoke } from '@tauri-apps/api/core';
 import { z } from 'zod';
@@ -10,15 +6,17 @@ import {
   ProjectSchema,
   ScriptSchema,
   ProjectCandidateSchema,
-  ProcessHandleSchema,
   LogLineSchema,
   PortInfoSchema,
+  ProcessSnapshotSchema,
   type Project,
   type Script,
   type ProjectCandidate,
-  type ProcessHandle,
   type LogLine,
   type PortInfo,
+  type ProcessSnapshot,
+  type StatusEvent,
+  type RuntimeStatus,
 } from './schemas';
 
 async function call<T>(
@@ -36,6 +34,11 @@ async function call<T>(
   return parsed.data;
 }
 
+// Untyped call (for commands returning simple primitives / u32)
+async function callRaw<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  return (await invoke(command, args)) as T;
+}
+
 export const api = {
   // Projects
   listProjects: () => call('list_projects', {}, z.array(ProjectSchema)),
@@ -43,8 +46,7 @@ export const api = {
     call('create_project', { name, path }, ProjectSchema),
   updateProject: (id: string, name?: string, path?: string) =>
     call('update_project', { id, name, path }, ProjectSchema),
-  deleteProject: (id: string) =>
-    call('delete_project', { id }, z.void()),
+  deleteProject: (id: string) => call('delete_project', { id }, z.void()),
 
   // Scripts
   listScripts: (projectId: string) =>
@@ -74,21 +76,36 @@ export const api = {
   deleteScript: (projectId: string, id: string) =>
     call('delete_script', { projectId, id }, z.void()),
 
-  // Auto-detection
+  // Scan
   scanDirectory: (path: string) =>
     call('scan_directory', { path }, z.array(ProjectCandidateSchema)),
 
-  // Processes (stubs — wired in Sprint 2)
+  // Processes (runtime control)
   spawnProcess: (projectId: string, scriptId: string) =>
-    call('spawn_process', { projectId, scriptId }, ProcessHandleSchema),
-  killProcess: (processId: string) =>
-    call('kill_process', { processId }, z.void()),
-  getLogs: (processId: string, limit: number) =>
-    call('get_logs', { processId, limit }, z.array(LogLineSchema)),
+    callRaw<number>('spawn_process', { projectId, scriptId }),
+  killProcess: (scriptId: string) =>
+    callRaw<null>('kill_process', { scriptId }),
+  restartProcess: (projectId: string, scriptId: string) =>
+    callRaw<number>('restart_process', { projectId, scriptId }),
+  listProcesses: () =>
+    call('list_processes', {}, z.array(ProcessSnapshotSchema)),
+  logSnapshot: (scriptId: string) =>
+    call('log_snapshot', { scriptId }, z.array(LogLineSchema)),
 
-  // Ports (stubs — wired in Sprint 3)
+  // Groups
+  listGroups: () => callRaw('list_groups', {}),
+  createGroup: (name: string, members: Array<{ project_id: string; script_id: string }>) =>
+    callRaw('create_group', { name, members }),
+  updateGroup: (
+    id: string,
+    patch: { name?: string; members?: Array<{ project_id: string; script_id: string }> },
+  ) => callRaw('update_group', { id, ...patch }),
+  deleteGroup: (id: string) => callRaw<null>('delete_group', { id }),
+  runGroup: (id: string) => callRaw('run_group', { id }),
+
+  // Ports
   listPorts: () => call('list_ports', {}, z.array(PortInfoSchema)),
-  killPort: (port: number) => call('kill_port', { port }, z.void()),
+  killPort: (port: number) => callRaw<null>('kill_port', { port }),
 };
 
-export type { Project, Script, ProjectCandidate, ProcessHandle, LogLine, PortInfo };
+export type { Project, Script, ProjectCandidate, LogLine, PortInfo, ProcessSnapshot, StatusEvent, RuntimeStatus };

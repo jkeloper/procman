@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { api, type Script } from '@/api/tauri';
 import { ScriptEditor } from './ScriptEditor';
+import { StatusBadge } from './StatusBadge';
+import { useProcessStatus } from '@/hooks/useProcessStatus';
 
 interface Props {
   projectId: string;
@@ -16,6 +17,8 @@ export function ProcessGrid({ projectId, onScriptsChanged }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
+  const { statuses, pids } = useProcessStatus();
+  const [busy, setBusy] = useState<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -50,6 +53,21 @@ export function ProcessGrid({ projectId, onScriptsChanged }: Props) {
     }
   }
 
+  async function withBusy(id: string, fn: () => Promise<unknown>) {
+    setBusy((s) => new Set(s).add(id));
+    try {
+      await fn();
+    } catch (e: any) {
+      alert(`${e?.message ?? e}`);
+    } finally {
+      setBusy((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }
+  }
+
   const onSaved = () => {
     reload();
     onScriptsChanged();
@@ -75,27 +93,56 @@ export function ProcessGrid({ projectId, onScriptsChanged }: Props) {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:grid-cols-3">
-            {scripts.map((s) => (
-              <Card key={s.id}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center justify-between text-sm">
-                    <span className="truncate">{s.name}</span>
-                    <Badge variant="secondary">stopped</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-2 truncate font-mono text-xs text-muted-foreground">
-                    {s.command}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      {s.expected_port != null ? `:${s.expected_port}` : 'no port'}
-                      {s.auto_restart && ' · auto-restart'}
-                    </span>
-                    <div className="space-x-1">
-                      <Button size="sm" variant="outline" disabled title="Sprint 2">
-                        Start
-                      </Button>
+            {scripts.map((s) => {
+              const status = statuses[s.id];
+              const pid = pids[s.id];
+              const isRunning = status === 'running';
+              const b = busy.has(s.id);
+              return (
+                <Card key={s.id}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center justify-between text-sm">
+                      <span className="truncate">{s.name}</span>
+                      <StatusBadge status={status} />
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="mb-2 truncate font-mono text-xs text-muted-foreground">
+                      {s.command}
+                    </div>
+                    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      {s.expected_port != null && <span>:{s.expected_port}</span>}
+                      {pid != null && <span>pid {pid}</span>}
+                    </div>
+                    <div className="flex items-center justify-end gap-1">
+                      {isRunning ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={b}
+                            onClick={() => withBusy(s.id, () => api.restartProcess(projectId, s.id))}
+                          >
+                            ↻
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={b}
+                            onClick={() => withBusy(s.id, () => api.killProcess(s.id))}
+                          >
+                            Stop
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={b}
+                          onClick={() => withBusy(s.id, () => api.spawnProcess(projectId, s.id))}
+                        >
+                          Start
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" onClick={() => openEditor(s)}>
                         Edit
                       </Button>
@@ -108,10 +155,10 @@ export function ProcessGrid({ projectId, onScriptsChanged }: Props) {
                         ✕
                       </Button>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>

@@ -10,6 +10,8 @@
 
 mod commands;
 mod config_store;
+mod log_buffer;
+mod process;
 mod state;
 mod types;
 mod watcher;
@@ -20,8 +22,10 @@ mod stress;
 #[allow(dead_code)]
 mod pty;
 
+use process::ProcessManager;
 use state::AppState;
 use std::sync::Arc;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -38,6 +42,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .setup(move |app| {
+            let pm = ProcessManager::new(app.handle().clone());
+            app.manage(pm);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -62,9 +68,18 @@ pub fn run() {
             commands::delete_script,
             // Scan
             commands::scan_directory,
-            // Processes (stubs)
+            // Groups
+            commands::list_groups,
+            commands::create_group,
+            commands::update_group,
+            commands::delete_group,
+            commands::run_group,
+            // Processes
             commands::spawn_process,
             commands::kill_process,
+            commands::restart_process,
+            commands::list_processes,
+            commands::log_snapshot,
             commands::get_logs,
             // Ports (stubs)
             commands::list_ports,

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { api, type Project } from '@/api/tauri';
 
 export function MainLayout() {
-  const [logOpen, setLogOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
 

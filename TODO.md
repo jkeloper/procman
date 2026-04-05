@@ -77,17 +77,17 @@
 - [ ] T09: config.yaml FileSystem watcher
 - [ ] T10: 프로젝트 자동 감지 (package.json 스캔)
 
-## Sprint 2 — 실행 & 로그 (Week 3-4)
-- [ ] T11: ProcessManager spawn (tokio)
-- [ ] T12: Login shell 래핑 (R2 대응)
-- [ ] T13: Kill 로직 (SIGTERM→SIGKILL, pgid)
-- [ ] T14: 상태 이벤트 브로드캐스트
-- [ ] T15: Log ring buffer 5000줄
-- [ ] T16: Log 이벤트 스트림 (log://{id})
-- [ ] T17: Log Viewer UI (react-window)
-- [ ] T18: 시작/중지/재시작 버튼
-- [ ] T19: 그룹 CRUD + Morning Stack 실행
-- [ ] T20: 크래시 감지 & 배지
+## Sprint 2 — 실행 & 로그 (2026-04-05 단일 세션 완료) ✅
+- [x] T11: ProcessManager spawn (tokio::process + DashMap + Arc)
+- [x] T12: Login shell 래핑 (`zsh -l -c`) + FORCE_COLOR/CLICOLOR_FORCE env
+- [x] T13: Kill 로직 (killpg SIGTERM → 1.5s grace → SIGKILL)
+- [x] T14: 상태 이벤트 브로드캐스트 (`process://status`)
+- [x] T15: Log ring buffer 5000줄 + 3 unit tests
+- [x] T16: Log 이벤트 스트림 (`log://{script_id}`)
+- [x] T17: Log Viewer UI (react-window + ansi-to-html, 다중 탭)
+- [x] T18: Start/Stop/Restart 버튼 + StatusBadge 실시간
+- [x] T19: 그룹 CRUD + Morning Stack 순차 실행 (400ms 딜레이)
+- [x] T20: 크래시 감지 & 배지 (exit_code != 0 AND !user_killed)
 
 ## Sprint 3 — 포트 관리 & 완성도 (Week 5-6)
 - [ ] T21: PortScanner (lsof, 1s 폴링)

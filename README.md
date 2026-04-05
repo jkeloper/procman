@@ -3,12 +3,13 @@
 Mac용 프로세스 매니저 GUI. 로컬 개발환경의 여러 서버·tunnel·docker 프로세스를 한 화면에서 관리.
 
 ## 상태
-🟢 **Sprint 1 전체 완료** (2026-04-05)
+🟢 **Sprint 1 + Sprint 2 완료** (2026-04-05)
 
-- Week 0 스파이크 4건 전부 GO (S0/S1/S2/S3), S4 SKIP, **Tauri v2 확정**
-- Sprint 1 T03~T10 단일 세션 완주: Config/ConfigStore + Project/Script CRUD + 3-pane UI + fs watcher + auto-detect
-- 7/7 Rust 단위 테스트 통과
-- 잔여 리스크: R_Rust_Proficiency 미측정 (사용자 자율 진행 override) → Sprint 2 시작 시 재평가
+- Week 0 스파이크 4건 전부 GO (S0/S1/S2/S3), **Tauri v2 확정**
+- Sprint 1 T03~T10: Config/CRUD + 3-pane UI + dashboard + port monitor + fs watcher + multi-stack auto-detect
+- Sprint 2 T11~T20: ProcessManager + login shell 래핑 + pgid kill + log ring buffer (5000) + `log://` stream + react-window LogViewer + Start/Stop/Restart + Groups + crash detection
+- 15/15 Rust 단위 테스트 통과
+- **MVP 코어 기능 전부 동작** — 스크립트 실행/중지/재시작/크래시 감지/로그 실시간 + 포트 충돌 원클릭 해결 + 그룹 배치 실행
 
 ## 핵심 기능 (계획)
 - 스크립트 등록/실행/중지

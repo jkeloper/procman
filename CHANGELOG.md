@@ -99,5 +99,21 @@
 - **Decision** Sprint 1 완료 → Sprint 2(T11-T20 실행&로그) 대기
 - **R_Rust_Proficiency 상태**: 여전히 미측정 — 사용자가 자율 진행 override로 직접 타이핑 게이트 무효화. Sprint 2 시작 시 Manager 재평가 필요
 
+### 2026-04-05 — Sprint 2 전체 완료 (사용자 override, 단일 세션) 🏁
+- **Added** T11 ProcessManager (process.rs) — `tokio::process::Command` + Arc<DashMap<script_id, Managed>>, spawn/kill/restart/list/log_snapshot
+- **Added** T12 login shell wrapping — `/bin/zsh -l -c <cmd>` + FORCE_COLOR=1 + CLICOLOR_FORCE=1 + TERM=xterm-256color
+- **Added** T13 process group kill — `process_group(0)` 설정 + `libc::killpg(pid, SIGTERM)` → 1.5s grace → SIGKILL. 자식 손자까지 모두 정리
+- **Added** T14 status broadcast — `process://status` 이벤트 (Running/Stopped/Crashed + pid + exit_code + ts_ms)
+- **Added** T15 LogBuffer (log_buffer.rs) — VecDeque 5000 capacity, monotonic seq, 3 unit tests
+- **Added** T16 per-process log stream — `log://{script_id}` 이벤트, 2개 reader task (stdout/stderr) async
+- **Added** T17 LogViewer + LogPanel — react-window 가상 스크롤 + ansi-to-html ANSI 컬러 렌더링 + auto-tail 토글
+- **Added** T18 Start/Stop/Restart 버튼 + StatusBadge (Running/Stopped/Crashed) + pid 표시 + Edit/Delete
+- **Added** T19 Groups — Group CRUD + run_group 커맨드 (400ms 딜레이 순차 실행) + GroupsPanel UI (Dashboard에 통합) + NewGroupDialog (멀티스크립트 체크박스 선택)
+- **Added** T20 crash detection — watcher task가 exit_code + killed_by_user 플래그로 Stopped/Crashed 구분, StatusBadge 빨강 표시
+- **Added** React hooks: useProcessStatus (status+pid 실시간), useLogStream (rAF 배치 처리, snapshot prime + 구독)
+- **Deps** 추가: dashmap, libc, react-window, ansi-to-html
+- **Tests** 15/15 Rust unit tests pass
+- **Decision** MVP 코어 기능 전부 구현. Sprint 3(포트 관리)은 이미 Sprint 1에서 완료 → 남은 건 ⌘K 커맨드 팔레트 + DMG 빌드 + 세션 복원 (T24-T28)
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.

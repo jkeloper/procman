@@ -8,12 +8,14 @@
 //     snake_case Rust params.
 //   - Return `Result<T, String>` so the JS side can `.catch(e => …)`.
 
+pub mod group;
 pub mod port;
 pub mod process;
 pub mod project;
 pub mod scan;
 pub mod script;
 
+pub use group::*;
 pub use port::*;
 pub use process::*;
 pub use project::*;
