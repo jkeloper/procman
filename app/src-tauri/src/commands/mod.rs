@@ -10,6 +10,7 @@
 
 pub mod group;
 pub mod port;
+pub mod ports;
 pub mod process;
 pub mod project;
 pub mod scan;
@@ -18,6 +19,7 @@ pub mod session;
 
 pub use group::*;
 pub use port::*;
+pub use ports::*;
 pub use process::*;
 pub use project::*;
 pub use scan::*;

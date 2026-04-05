@@ -88,6 +88,38 @@ export const LogLineSchema = z.object({
 });
 export type LogLine = z.infer<typeof LogLineSchema>;
 
+export const LaunchConfigCandidateSchema = z.object({
+  name: z.string(),
+  command: z.string(),
+  cwd: z.string().nullable(),
+  kind: z.string(),
+  skipped_reason: z.string().nullable(),
+  script: ScriptSchema.nullable(),
+});
+export type LaunchConfigCandidate = z.infer<typeof LaunchConfigCandidateSchema>;
+
+export const NamedTunnelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  created_at: z.string().nullable(),
+  connections: z.number().int(),
+});
+export type NamedTunnel = z.infer<typeof NamedTunnelSchema>;
+
+export const RunningCloudflaredSchema = z.object({
+  pid: z.number().int(),
+  command: z.string(),
+  url: z.string().nullable(),
+  tunnel_name: z.string().nullable(),
+});
+export type RunningCloudflared = z.infer<typeof RunningCloudflaredSchema>;
+
+export const CfInstalledSchema = z.object({
+  installed: z.boolean(),
+  version: z.string().nullable(),
+});
+export type CfInstalled = z.infer<typeof CfInstalledSchema>;
+
 export const ProjectCandidateSchema = z.object({
   name: z.string(),
   path: z.string(),

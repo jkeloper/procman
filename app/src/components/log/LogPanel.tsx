@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-// @ts-ignore - react-window default export types
-import { FixedSizeList } from 'react-window';
+import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
 import AnsiToHtml from 'ansi-to-html';
 import { useLogStream } from '@/hooks/useLogStream';
 import type { LogLine } from '@/api/tauri';
@@ -19,30 +18,33 @@ interface Props {
 
 const ROW_HEIGHT = 18;
 
+type RowProps = { lines: LogLine[] };
+
+function Row({ index, style, lines }: RowComponentProps<RowProps>) {
+  const line = lines[index];
+  if (!line) return null;
+  const color = line.stream === 'stderr' ? '#f87171' : '#e5e5e5';
+  const html = ansi.toHtml(line.text);
+  return (
+    <div
+      style={{ ...style, color }}
+      className="px-3 font-mono text-[11px] leading-[18px] whitespace-pre"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 export function LogPanel({ scriptId, scriptName }: Props) {
   const lines = useLogStream(scriptId);
-  const listRef = useRef<any>(null);
+  const listRef = useRef<ListImperativeAPI>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [height, setHeight] = useState(260);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto-tail: scroll to bottom when new lines arrive + autoScroll enabled.
   useEffect(() => {
     if (autoScroll && listRef.current && lines.length > 0) {
-      listRef.current.scrollToItem(lines.length - 1, 'end');
+      listRef.current.scrollToRow({ index: lines.length - 1, align: 'end' });
     }
   }, [lines.length, autoScroll]);
-
-  // Observe container height
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const el = containerRef.current;
-    const ro = new ResizeObserver(() => {
-      setHeight(Math.max(120, el.clientHeight - 32));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   if (!scriptId) {
     return (
@@ -53,7 +55,7 @@ export function LogPanel({ scriptId, scriptName }: Props) {
   }
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col bg-[#0a0a0a] text-[#e5e5e5]">
+    <div className="flex h-full flex-col bg-[#0a0a0a] text-[#e5e5e5]">
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/10 px-3 text-xs">
         <div className="flex items-center gap-2">
           <span className="font-medium">{scriptName ?? scriptId}</span>
@@ -74,30 +76,17 @@ export function LogPanel({ scriptId, scriptName }: Props) {
             (no output yet)
           </div>
         ) : (
-          <FixedSizeList
-            ref={listRef}
-            height={height}
-            width="100%"
-            itemCount={lines.length}
-            itemSize={ROW_HEIGHT}
+          <List
+            listRef={listRef}
+            style={{ height: '100%', width: '100%' }}
+            rowCount={lines.length}
+            rowHeight={ROW_HEIGHT}
+            rowComponent={Row}
+            rowProps={{ lines }}
             overscanCount={30}
-          >
-            {({ index, style }: any) => <Row style={style} line={lines[index]} />}
-          </FixedSizeList>
+          />
         )}
       </div>
     </div>
-  );
-}
-
-function Row({ style, line }: { style: React.CSSProperties; line: LogLine }) {
-  const color = line.stream === 'stderr' ? '#f87171' : '#e5e5e5';
-  const html = ansi.toHtml(line.text);
-  return (
-    <div
-      style={{ ...style, color }}
-      className="px-3 font-mono text-[11px] leading-[18px] whitespace-pre"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
   );
 }

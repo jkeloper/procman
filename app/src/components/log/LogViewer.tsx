@@ -38,6 +38,13 @@ export function LogViewer() {
       } catch {}
     })();
 
+    // Listen for "jump to this log tab" from Dashboard port click
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.scriptId) setActive(detail.scriptId);
+    };
+    window.addEventListener('procman:focus-log', onFocus);
+
     const un = listen<StatusEvent>('process://status', async (ev) => {
       const { id, status } = ev.payload;
       if (status === 'running') {
@@ -57,6 +64,7 @@ export function LogViewer() {
     });
     return () => {
       un.then((fn) => fn());
+      window.removeEventListener('procman:focus-log', onFocus);
     };
   }, []);
 

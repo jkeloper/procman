@@ -8,6 +8,7 @@
 //     the frontend can call. Missing entries = "command not found" errors.
 //   - `.setup(|app| …)` runs once at startup for initialization.
 
+mod cloudflared;
 mod commands;
 mod config_store;
 mod log_buffer;
@@ -15,6 +16,7 @@ mod process;
 mod runtime_state;
 mod state;
 mod types;
+mod vscode_scanner;
 mod watcher;
 
 // Spike modules retained as reference for Sprint 2-3.
@@ -108,9 +110,17 @@ pub fn run() {
             commands::restart_process,
             commands::list_processes,
             commands::log_snapshot,
-            // Ports (stubs)
+            // Ports
             commands::list_ports,
             commands::kill_port,
+            commands::resolve_pid_to_script,
+            // VSCode scan
+            vscode_scanner::scan_vscode_configs,
+            // Cloudflared
+            cloudflared::cloudflared_installed,
+            cloudflared::list_cf_tunnels,
+            cloudflared::detect_running_cloudflared,
+            cloudflared::kill_cloudflared_pid,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

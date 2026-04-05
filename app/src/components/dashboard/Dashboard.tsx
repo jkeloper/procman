@@ -5,12 +5,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
+import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
 
 interface Props {
   projects: Project[];
+  onSelectProject?: (id: string | null) => void;
 }
 
-export function Dashboard({ projects }: Props) {
+export function Dashboard({ projects, onSelectProject }: Props) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -45,6 +47,31 @@ export function Dashboard({ projects }: Props) {
       alert(`Kill failed: ${e?.message ?? e}`);
     } finally {
       setKilling(null);
+    }
+  }
+
+  async function handlePortClick(p: PortInfo) {
+    // Resolve pid → procman-managed script_id (if any)
+    try {
+      const scriptId = await api.resolvePidToScript(p.pid);
+      if (scriptId) {
+        // Jump to owning project + scroll user intent toward logs.
+        const proj = projects.find((pr) =>
+          pr.scripts.some((s) => s.id === scriptId),
+        );
+        if (proj && onSelectProject) {
+          onSelectProject(proj.id);
+          // Dispatch a custom event so LogViewer can switch to that tab.
+          window.dispatchEvent(new CustomEvent('procman:focus-log', { detail: { scriptId } }));
+          return;
+        }
+      }
+      // External process — show a small info alert
+      alert(
+        `External process\nPID ${p.pid} (${p.process_name})\nPort :${p.port}\n\nprocman has no log stream for this process (not managed by procman).`,
+      );
+    } catch (e: any) {
+      console.error('resolve pid', e);
     }
   }
 
@@ -97,6 +124,7 @@ export function Dashboard({ projects }: Props) {
                 expectedMap={expectedPortMap}
                 killing={killing}
                 onKill={handleKill}
+                onClickRow={handlePortClick}
               />
             )}
           </CardContent>
@@ -117,12 +145,15 @@ export function Dashboard({ projects }: Props) {
                 expectedMap={expectedPortMap}
                 killing={killing}
                 onKill={handleKill}
+                onClickRow={handlePortClick}
               />
             )}
           </CardContent>
         </Card>
 
         <GroupsPanel projects={projects} />
+
+        <CloudflareTunnelsCard projects={projects} onProjectsChanged={() => reload()} />
 
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Auto-refresh every 2s</span>
@@ -137,11 +168,13 @@ export function Dashboard({ projects }: Props) {
 
 function StatCard({ label, value, sub }: { label: string; value: number; sub?: string }) {
   return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className="text-2xl font-semibold">{value}</div>
-        {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+    <Card className="transition-all hover:-translate-y-[1px] hover:shadow-md">
+      <CardContent className="py-3">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </div>
+        <div className="mt-0.5 font-mono text-2xl font-semibold tracking-tight">{value}</div>
+        {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
       </CardContent>
     </Card>
   );
@@ -152,11 +185,13 @@ function PortTable({
   expectedMap,
   killing,
   onKill,
+  onClickRow,
 }: {
   rows: PortInfo[];
   expectedMap: Map<number, { project: string; script: string }>;
   killing: number | null;
   onKill: (port: number) => void;
+  onClickRow: (p: PortInfo) => void;
 }) {
   return (
     <div className="-mx-2 overflow-x-auto">
@@ -174,7 +209,11 @@ function PortTable({
           {rows.map((p) => {
             const match = expectedMap.get(p.port);
             return (
-              <tr key={`${p.pid}-${p.port}`} className="border-t">
+              <tr
+                key={`${p.pid}-${p.port}`}
+                className="cursor-pointer border-t transition-colors hover:bg-accent/50"
+                onClick={() => onClickRow(p)}
+              >
                 <td className="px-2 py-1.5 font-mono">
                   <Badge variant={match ? 'default' : 'secondary'}>:{p.port}</Badge>
                 </td>
@@ -190,7 +229,7 @@ function PortTable({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </td>
-                <td className="px-2 py-1.5 text-right">
+                <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                   <Button
                     size="sm"
                     variant="ghost"

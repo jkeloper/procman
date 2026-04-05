@@ -67,6 +67,8 @@ struct Managed {
 #[derive(Clone)]
 pub struct ProcessManager {
     procs: Arc<DashMap<String, Managed>>,
+    /// pid → script_id reverse index for "click port → jump to logs".
+    pid_index: Arc<DashMap<u32, String>>,
     generation_counter: Arc<AtomicU64>,
     log_capacity: Arc<AtomicU64>,
     app: AppHandle,
@@ -76,10 +78,17 @@ impl ProcessManager {
     pub fn new(app: AppHandle) -> Self {
         Self {
             procs: Arc::new(DashMap::new()),
+            pid_index: Arc::new(DashMap::new()),
             generation_counter: Arc::new(AtomicU64::new(0)),
             log_capacity: Arc::new(AtomicU64::new(LOG_CAPACITY_DEFAULT as u64)),
             app,
         }
+    }
+
+    /// Reverse lookup: given a pid listening on a port, return the
+    /// script_id procman manages it under — or None if not ours.
+    pub fn script_id_by_pid(&self, pid: u32) -> Option<String> {
+        self.pid_index.get(&pid).map(|r| r.value().clone())
     }
 
     /// Update log buffer capacity for new processes. Existing buffers keep
@@ -145,6 +154,7 @@ impl ProcessManager {
                 exited: Arc::clone(&exited),
             },
         );
+        self.pid_index.insert(pid, script.id.clone());
 
         emit_status(
             &self.app,
@@ -160,6 +170,7 @@ impl ProcessManager {
         // Watcher: classify exit + emit + remove (only if generation matches).
         let app = self.app.clone();
         let procs = Arc::clone(&self.procs);
+        let pid_index = Arc::clone(&self.pid_index);
         let id = script.id.clone();
         let killed_for_watcher = Arc::clone(&killed);
         let exited_for_watcher = Arc::clone(&exited);
@@ -184,6 +195,7 @@ impl ProcessManager {
             );
             // Remove entry only if it still matches this generation.
             procs.remove_if(&id, |_, m| m.generation == generation);
+            pid_index.remove(&pid);
         });
 
         Ok(pid)
@@ -237,6 +249,7 @@ impl ProcessManager {
 
         // Ensure entry is removed (watcher may have beat us to it).
         self.procs.remove_if(id, |_, m| m.generation == generation);
+        self.pid_index.remove(&pid);
         Ok(())
     }
 

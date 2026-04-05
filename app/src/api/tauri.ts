@@ -6,12 +6,20 @@ import {
   ProjectSchema,
   ScriptSchema,
   ProjectCandidateSchema,
+  LaunchConfigCandidateSchema,
+  NamedTunnelSchema,
+  RunningCloudflaredSchema,
+  CfInstalledSchema,
   LogLineSchema,
   PortInfoSchema,
   ProcessSnapshotSchema,
   type Project,
   type Script,
   type ProjectCandidate,
+  type LaunchConfigCandidate,
+  type NamedTunnel,
+  type RunningCloudflared,
+  type CfInstalled,
   type LogLine,
   type PortInfo,
   type ProcessSnapshot,
@@ -106,6 +114,32 @@ export const api = {
   // Ports
   listPorts: () => call('list_ports', {}, z.array(PortInfoSchema)),
   killPort: (port: number) => callRaw<null>('kill_port', { port }),
+  resolvePidToScript: (pid: number) =>
+    call('resolve_pid_to_script', { pid }, z.string().nullable()),
+
+  // VSCode
+  scanVscodeConfigs: (projectPath: string) =>
+    call('scan_vscode_configs', { projectPath }, z.array(LaunchConfigCandidateSchema)),
+
+  // Cloudflared
+  cloudflaredInstalled: () => call('cloudflared_installed', {}, CfInstalledSchema),
+  listCfTunnels: () => call('list_cf_tunnels', {}, z.array(NamedTunnelSchema)),
+  detectRunningCloudflared: () =>
+    call('detect_running_cloudflared', {}, z.array(RunningCloudflaredSchema)),
+  killCloudflaredPid: (pid: number) => callRaw<null>('kill_cloudflared_pid', { pid }),
 };
 
-export type { Project, Script, ProjectCandidate, LogLine, PortInfo, ProcessSnapshot, StatusEvent, RuntimeStatus };
+export type {
+  Project,
+  Script,
+  ProjectCandidate,
+  LaunchConfigCandidate,
+  NamedTunnel,
+  RunningCloudflared,
+  CfInstalled,
+  LogLine,
+  PortInfo,
+  ProcessSnapshot,
+  StatusEvent,
+  RuntimeStatus,
+};

@@ -41,27 +41,30 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-12 items-center justify-between border-b px-4">
-        <div className="flex items-center gap-3">
-          <div className="font-semibold">procman</div>
+      <header className="glass flex h-10 items-center justify-between border-b px-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-semibold tracking-tight">procman</span>
           {showingProject && (
             <>
-              <span className="text-muted-foreground">/</span>
+              <span className="text-muted-foreground/50">/</span>
               <button
-                className="text-sm text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => setSelectedProjectId(null)}
               >
-                ← Dashboard
+                dashboard
               </button>
             </>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <kbd className="hidden rounded border px-1.5 py-0.5 text-xs text-muted-foreground sm:inline">
-            ⌘K
-          </kbd>
-          <Button variant="ghost" size="sm" onClick={() => setLogOpen((v) => !v)}>
-            {logOpen ? 'Hide logs' : 'Show logs'}
+          <kbd className="hidden sm:inline">⌘K</kbd>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setLogOpen((v) => !v)}
+          >
+            {logOpen ? 'hide logs' : 'show logs'} <kbd className="ml-1.5">⌘L</kbd>
           </Button>
         </div>
       </header>
@@ -73,7 +76,7 @@ export function MainLayout() {
       <RestorePrompt projects={projects} />
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-[280px] shrink-0 border-r">
+        <aside className="glass w-[240px] shrink-0 border-r">
           <ProjectList
             selectedId={selectedProjectId}
             onSelect={setSelectedProjectId}
@@ -85,9 +88,13 @@ export function MainLayout() {
         <main className="flex flex-1 flex-col overflow-hidden">
           <section className="flex-1 overflow-hidden">
             {showingProject ? (
-              <ProcessGrid projectId={selectedProjectId} onScriptsChanged={reloadProjects} />
+              <ProcessGrid
+                projectId={selectedProjectId}
+                projectPath={projects.find((p) => p.id === selectedProjectId)?.path ?? ''}
+                onScriptsChanged={reloadProjects}
+              />
             ) : (
-              <Dashboard projects={projects} />
+              <Dashboard projects={projects} onSelectProject={setSelectedProjectId} />
             )}
           </section>
 

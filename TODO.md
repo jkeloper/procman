@@ -50,6 +50,14 @@
 - [x] 3-agent 교차점검 (Evaluator 7.0/10, User-tester NPS 5/10, Architecture)
 - [x] Critical Fix Pack (UNI-1~UNI-7 + B4) 전부 적용
 
+## v0.2 Feature Pack (2026-04-06)
+- [x] VSCode launch.json scanner (5 types, 변수 치환, JSONC 파서) + 8 tests
+- [x] VSCode Import Dialog + "VSCode import" 버튼 통합
+- [x] Cloudflare Tunnels 섹션 (installed detect / named list / running detect / Run / Kill)
+- [x] 포트 클릭 → 로그 점프 (pid→script 역인덱스)
+- [x] 디자인 리프레시: JetBrains Mono, glass effect, compact rows, micro-interactions, dot status
+- [x] 30/30 Rust unit tests
+
 ## Critical Fix Pack (2026-04-06)
 - [x] UNI-1: `blocking_lock()` → async `.lock().await` (데드락 위험 제거)
 - [x] UNI-2: generation epoch + try_wait 기반 kill (PID race 방지)

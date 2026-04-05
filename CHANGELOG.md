@@ -138,5 +138,38 @@
 - **Tests** 19/19 Rust unit tests pass (기존 15 + 신규 4: process truncate 2 + runtime_state 2)
 - **Status** MVP 안정화 완료, v0.1.0-rc1 릴리즈 준비
 
+### 2026-04-06 — v0.2 Feature Pack (VSCode + Cloudflare + Port→Log + Design refresh) 🎨
+- **Added** VSCode launch.json 스캐너 ([vscode_scanner.rs](app/src-tauri/src/vscode_scanner.rs)):
+  - 지원: node/python/shell/go/lldb(Rust) 5종
+  - 변수 치환: `${workspaceFolder}`, `${env:VAR}`, env block inline
+  - 지원 안 함: attach, pwa-*, compound, preLaunchTask → skipped_reason 반환
+  - JSONC 주석 (`//`, `/* */`) 스트립 파서 + shell-quote escape
+  - 8 unit tests (JSONC/변수 치환/translate node+python/skip 케이스)
+  - ProcessGrid에 "VSCode import" 버튼 + VSCodeImportDialog (체크박스 선택)
+- **Added** Cloudflare Tunnels 섹션 ([cloudflared.rs](app/src-tauri/src/cloudflared.rs)):
+  - `cloudflared --version` 감지 (미설치 시 카드 자체를 설치 안내로 대체)
+  - `cloudflared tunnel list --output json` 파싱 → Named tunnels 리스트
+  - `ps` 기반 running cloudflared 감지 (tunnel name / URL 추출, grep noise 필터)
+  - "Run" 버튼 → 첫 프로젝트에 스크립트 등록 + 즉시 실행
+  - SIGTERM → 1s → SIGKILL (`libc::kill`)
+  - 3 unit tests (tunnel run / quick tunnel / grep noise 필터)
+- **Added** 포트 클릭 → 로그 점프:
+  - ProcessManager에 `pid_index: Arc<DashMap<u32, String>>` 역인덱스 추가
+  - `resolve_pid_to_script(pid)` 커맨드
+  - Dashboard 포트 row 클릭 시 pid → script_id 조회 → managed면 해당 프로젝트 전환 + `procman:focus-log` 이벤트로 LogViewer가 해당 탭 active
+  - 외부 프로세스는 pid/name/port 정보 dialog
+- **Design refresh (tone-shift)**:
+  - JetBrains Mono 폰트 추가 (code/kbd/command strings)
+  - 전역 focus-visible ring 통일, antialiased, font-feature-settings (ss01/cv11)
+  - `.glass` 유틸리티 (backdrop-blur 12px saturate 160%) → 헤더/사이드바 적용
+  - 헤더 h-12 → h-10, 사이드바 280px → 240px (컴팩트)
+  - StatusBadge: 박스 → 6px dot + 10px uppercase label + running 시 pulse animation
+  - ProcessGrid 카드: hover 1px up-translate + shadow-md, edit/✕ 버튼 hover 시에만 표시 (opacity 전환)
+  - StatCard: 2xl font-mono 숫자 + 10px uppercase label
+  - kbd 요소: 10px 통일 style (radius-sm)
+  - subtle custom scrollbar (10px, color-mix 기반 alpha)
+- **Tests** 30/30 Rust unit tests pass (기존 19 + vscode 8 + cloudflared 3)
+- **Scope override**: Charter의 v0.2 out-of-scope 항목(VSCode/Cloudflare)을 사용자 요청으로 MVP+ 편입
+
 ### 발견된 Critical 이슈
 - **Tauri Issue #7684**: 대용량 stdout(20k+ 라인) 처리 시 라인 유실 + 좀비 프로세스. Week 0 스파이크로 검증 필수.
