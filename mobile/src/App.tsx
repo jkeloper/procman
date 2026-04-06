@@ -1,37 +1,13 @@
 import { useState } from 'react';
 import { PairView } from './PairView';
-import { HomeView } from './HomeView';
-import { LogView } from './LogView';
+import { MainView } from './MainView';
 import { loadPair } from './pair';
 
-type Screen =
-  | { name: 'pair' }
-  | { name: 'home' }
-  | { name: 'logs'; scriptId: string; scriptName: string };
-
 export default function App() {
-  const [screen, setScreen] = useState<Screen>(() =>
-    loadPair() ? { name: 'home' } : { name: 'pair' },
-  );
+  const [paired, setPaired] = useState(() => !!loadPair());
 
-  if (screen.name === 'pair') {
-    return <PairView onPaired={() => setScreen({ name: 'home' })} />;
+  if (!paired) {
+    return <PairView onPaired={() => setPaired(true)} />;
   }
-  if (screen.name === 'logs') {
-    return (
-      <LogView
-        scriptId={screen.scriptId}
-        scriptName={screen.scriptName}
-        onBack={() => setScreen({ name: 'home' })}
-      />
-    );
-  }
-  return (
-    <HomeView
-      onUnpair={() => setScreen({ name: 'pair' })}
-      onOpenLogs={(scriptId, scriptName) =>
-        setScreen({ name: 'logs', scriptId, scriptName })
-      }
-    />
-  );
+  return <MainView onUnpair={() => setPaired(false)} />;
 }

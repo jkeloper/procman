@@ -1,0 +1,302 @@
+import { useCallback, useEffect, useState } from 'react';
+import { api, openStream, type ProcessSnapshot, type ProjectsPayload } from './api';
+import { clearPair, loadPair } from './pair';
+import { LogView } from './LogView';
+import './mobile.css';
+
+interface Props {
+  onUnpair: () => void;
+}
+
+type Screen =
+  | { name: 'list' }
+  | { name: 'logs'; scriptId: string; scriptName: string }
+  | { name: 'settings' };
+
+export function MainView({ onUnpair }: Props) {
+  const [screen, setScreen] = useState<Screen>({ name: 'list' });
+  const [projects, setProjects] = useState<ProjectsPayload['projects']>([]);
+  const [processes, setProcesses] = useState<ProcessSnapshot[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [cfg, procs] = await Promise.all([api.projects(), api.processes()]);
+      setProjects(cfg.projects);
+      setProcesses(procs);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const stop = openStream((ev) => {
+      if (ev.type === 'status') {
+        setProcesses((prev) => {
+          if (ev.status === 'running') {
+            const idx = prev.findIndex((p) => p.id === ev.id);
+            const row: ProcessSnapshot = {
+              id: ev.id,
+              pid: ev.pid ?? 0,
+              status: 'running',
+              started_at_ms: ev.ts_ms,
+              command: idx >= 0 ? prev[idx].command : '',
+            };
+            return idx >= 0
+              ? prev.map((p, i) => (i === idx ? row : p))
+              : [...prev, row];
+          }
+          return prev.filter((p) => p.id !== ev.id);
+        });
+      }
+    }, setConnected);
+    return stop;
+  }, [refresh]);
+
+  async function act(action: 'start' | 'stop' | 'restart', scriptId: string) {
+    setBusy(scriptId);
+    try {
+      if (action === 'start') await api.start(scriptId);
+      else if (action === 'stop') await api.stop(scriptId);
+      else await api.restart(scriptId);
+      setTimeout(refresh, 300);
+    } catch (e: any) {
+      alert(`${action}: ${e?.message ?? e}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const pair = loadPair();
+  const filteredProjects = selectedProject
+    ? projects.filter((p) => p.id === selectedProject)
+    : projects;
+  const totalRunning = processes.length;
+  const selectedName =
+    selectedProject
+      ? projects.find((p) => p.id === selectedProject)?.name ?? 'Project'
+      : 'All projects';
+
+  if (screen.name === 'logs') {
+    return (
+      <LogView
+        scriptId={screen.scriptId}
+        scriptName={screen.scriptName}
+        onBack={() => setScreen({ name: 'list' })}
+      />
+    );
+  }
+
+  if (screen.name === 'settings') {
+    return (
+      <div className="page">
+        <div className="topbar">
+          <button className="btn-ghost" onClick={() => setScreen({ name: 'list' })}>
+            ← Back
+          </button>
+          <span className="topbar-title">Settings</span>
+        </div>
+        <div className="settings-group">
+          <div className="settings-row">
+            <span>Server</span>
+            <span>{pair?.host}:{pair?.port}</span>
+          </div>
+          <div className="settings-row">
+            <span>Connection</span>
+            <span style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>
+              {connected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+          <div className="settings-row">
+            <span>Projects</span>
+            <span>{projects.length}</span>
+          </div>
+          <div className="settings-row">
+            <span>Running</span>
+            <span>{totalRunning}</span>
+          </div>
+        </div>
+        <div style={{ padding: '0 16px' }}>
+          <button
+            className="btn-outline"
+            style={{ width: '100%', padding: 14, marginTop: 20, color: 'var(--red)' }}
+            onClick={() => {
+              if (window.confirm('Disconnect from this server?')) {
+                clearPair();
+                onUnpair();
+              }
+            }}
+          >
+            Disconnect & log out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page">
+      {/* Top bar */}
+      <div className="topbar">
+        <button className="btn-ghost" onClick={() => setDrawerOpen(true)}>
+          ☰
+        </button>
+        <div className="dot dot-green" style={{ opacity: connected ? 1 : 0.3 }} />
+        <span className="topbar-title">{selectedName}</span>
+        <span className="topbar-sub">{totalRunning} running</span>
+        <button className="btn-ghost" onClick={refresh}>↻</button>
+        <button className="btn-ghost" onClick={() => setScreen({ name: 'settings' })}>
+          ⚙
+        </button>
+      </div>
+
+      {/* Script list */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {filteredProjects.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg3)', fontSize: 13 }}>
+            No scripts found.
+          </div>
+        ) : (
+          filteredProjects.map((proj) => (
+            <div key={proj.id}>
+              {/* Project header */}
+              <div
+                style={{
+                  padding: '10px 16px 4px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: 1,
+                  color: 'var(--fg3)',
+                  background: 'var(--bg2)',
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 10,
+                }}
+              >
+                {proj.name}
+              </div>
+              {proj.scripts.map((s) => {
+                const proc = processes.find((x) => x.id === s.id);
+                const isRunning = proc?.status === 'running';
+                const isBusy = busy === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    className="script-row"
+                    onClick={() =>
+                      setScreen({
+                        name: 'logs',
+                        scriptId: s.id,
+                        scriptName: `${proj.name}/${s.name}`,
+                      })
+                    }
+                  >
+                    <div
+                      className={`dot ${
+                        isRunning ? 'dot-green' : proc?.status === 'crashed' ? 'dot-red' : 'dot-gray'
+                      }`}
+                    />
+                    <div className="script-info">
+                      <div className="script-name">{s.name}</div>
+                      <div className="script-meta">$ {s.command}</div>
+                    </div>
+                    <div
+                      className="script-actions"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {isRunning ? (
+                        <>
+                          <button
+                            className="btn-ghost"
+                            disabled={isBusy}
+                            onClick={() => act('restart', s.id)}
+                          >
+                            ↻
+                          </button>
+                          <button
+                            className="btn-stop"
+                            disabled={isBusy}
+                            onClick={() => act('stop', s.id)}
+                          >
+                            stop
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn-start"
+                          disabled={isBusy}
+                          onClick={() => act('start', s.id)}
+                        >
+                          {isBusy ? '…' : 'start'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Drawer */}
+      {drawerOpen && (
+        <>
+          <div className="drawer-overlay" onClick={() => setDrawerOpen(false)} />
+          <div className="drawer">
+            <div style={{ padding: '16px 16px 8px', fontSize: 20, fontWeight: 700 }}>
+              🐸 procman
+            </div>
+            <div className="drawer-section">Projects</div>
+            <div
+              className={`drawer-item ${selectedProject === null ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedProject(null);
+                setDrawerOpen(false);
+              }}
+            >
+              All projects
+              <span className="count">{projects.reduce((n, p) => n + p.scripts.length, 0)}</span>
+            </div>
+            {projects.map((p) => {
+              const running = p.scripts.filter((s) =>
+                processes.some((x) => x.id === s.id),
+              ).length;
+              return (
+                <div
+                  key={p.id}
+                  className={`drawer-item ${selectedProject === p.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedProject(p.id);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <div
+                    className={`dot ${running > 0 ? 'dot-green' : 'dot-gray'}`}
+                    style={{ width: 6, height: 6 }}
+                  />
+                  {p.name}
+                  <span className="count">{p.scripts.length}</span>
+                </div>
+              );
+            })}
+            <div style={{ flex: 1 }} />
+            <div className="drawer-section">Settings</div>
+            <div
+              className="drawer-item"
+              onClick={() => {
+                setDrawerOpen(false);
+                setScreen({ name: 'settings' });
+              }}
+            >
+              ⚙ Settings
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

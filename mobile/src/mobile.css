@@ -1,0 +1,279 @@
+/* ============================================================
+   procman mobile — native-feeling dark green theme
+   ============================================================ */
+
+:root {
+  --bg: #111d16;
+  --bg2: #162119;
+  --bg3: #1c2a22;
+  --fg: #e4efe7;
+  --fg2: #9bb5a4;
+  --fg3: #5a7566;
+  --primary: #4a9d6b;
+  --primary-fg: #fff;
+  --red: #f87171;
+  --green: #65c18c;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ---- Pages ---- */
+.page {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+}
+.center-page {
+  justify-content: center;
+  align-items: center;
+  padding: calc(20px + var(--safe-top)) 20px calc(20px + var(--safe-bottom));
+}
+
+/* ---- Login ---- */
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+.login-logo { font-size: 56px; margin-bottom: 4px; }
+.login-title { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
+.login-sub { font-size: 13px; color: var(--fg2); margin: 6px 0 24px; }
+.login-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+
+/* ---- Fields ---- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg3);
+  flex: 1;
+}
+.field input {
+  background: var(--bg2);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--fg);
+  font-size: 15px;
+  font-family: var(--mono);
+  outline: none;
+}
+.field input:focus { border-color: var(--primary); }
+.row-2 { display: flex; gap: 8px; }
+
+/* ---- Buttons ---- */
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-fg);
+  border: none;
+  border-radius: 12px;
+  padding: 15px;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.btn-primary:disabled { opacity: 0.5; }
+.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-ghost {
+  background: transparent;
+  border: none;
+  color: var(--fg2);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-start {
+  background: var(--primary);
+  color: var(--primary-fg);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.btn-stop {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.error { color: var(--red); font-size: 13px; margin: 0; text-align: center; }
+
+/* ---- Top bar ---- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: calc(10px + var(--safe-top)) 16px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar-title {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.topbar-sub {
+  font-size: 10px;
+  color: var(--fg3);
+  font-family: var(--mono);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.dot-green { background: var(--green); }
+.dot-red { background: var(--red); }
+.dot-gray { background: var(--fg3); }
+
+/* ---- Drawer / sidebar ---- */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0,0,0,0.5);
+  animation: fadeIn 0.15s ease;
+}
+.drawer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 280px;
+  z-index: 100;
+  background: var(--bg2);
+  border-right: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  padding: calc(16px + var(--safe-top)) 0 calc(16px + var(--safe-bottom));
+  animation: slideIn 0.2s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+
+.drawer-section {
+  padding: 8px 16px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--fg3);
+}
+.drawer-item {
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--fg2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.drawer-item:active { background: rgba(255,255,255,0.04); }
+.drawer-item.active {
+  color: var(--fg);
+  font-weight: 600;
+  background: rgba(255,255,255,0.04);
+}
+.drawer-item .count {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--fg3);
+}
+
+/* ---- Script list ---- */
+.script-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+}
+.script-row:active { background: rgba(255,255,255,0.03); }
+.script-info { flex: 1; min-width: 0; }
+.script-name { font-size: 15px; font-weight: 500; }
+.script-meta {
+  font-size: 11px;
+  color: var(--fg3);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.script-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ---- Log view ---- */
+.logbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: calc(8px + var(--safe-top)) 14px 8px;
+  background: #0a0a0a;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.log-line {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-seq {
+  color: #444;
+  flex-shrink: 0;
+  user-select: none;
+  width: 40px;
+  text-align: right;
+}
+
+/* ---- Settings ---- */
+.settings-group { padding: 16px; }
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 14px;
+}
+.settings-row span:last-child {
+  font-size: 12px;
+  color: var(--fg3);
+  font-family: var(--mono);
+}
