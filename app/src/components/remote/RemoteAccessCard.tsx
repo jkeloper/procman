@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import QRCode from 'qrcode';
 import { api } from '@/api/tauri';
 
 type Mode = 'loopback' | 'lan';
@@ -14,8 +13,8 @@ interface Status {
 export function RemoteAccessCard() {
   const [status, setStatus] = useState<Status | null>(null);
   const [ip, setIp] = useState<string>('127.0.0.1');
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [audit, setAudit] = useState<
     Array<{ ts_ms: number; action: string; target: string; ok: boolean; detail: string | null }>
   >([]);
@@ -45,33 +44,12 @@ export function RemoteAccessCard() {
     return () => clearInterval(id);
   }, [reload]);
 
-  // Regenerate QR whenever status/ip changes
-  useEffect(() => {
-    if (!status?.running) {
-      setQrDataUrl(null);
-      return;
-    }
-    const host = status.mode === 'lan' ? ip : '127.0.0.1';
-    const payload = JSON.stringify({
-      host,
-      port: status.port,
-      token: status.token,
-      v: 1,
-    });
-    QRCode.toDataURL(payload, { width: 220, margin: 1, color: { dark: '#1F6B3F', light: '#FFFFFF' } })
-      .then(setQrDataUrl)
-      .catch(() => setQrDataUrl(null));
-  }, [status, ip]);
-
   async function toggle(enable: boolean, mode: Mode = 'lan') {
     setBusy(true);
     setErr(null);
     try {
-      if (enable) {
-        await api.startServer(7777, mode);
-      } else {
-        await api.stopServer();
-      }
+      if (enable) await api.startServer(7777, mode);
+      else await api.stopServer();
       await reload();
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -81,7 +59,7 @@ export function RemoteAccessCard() {
   }
 
   async function rotate() {
-    if (!window.confirm('Rotate token? All paired devices will need to re-scan.')) return;
+    if (!window.confirm('Rotate token? You will need to re-enter on your phone.')) return;
     setBusy(true);
     try {
       await api.rotateToken();
@@ -90,6 +68,17 @@ export function RemoteAccessCard() {
       setBusy(false);
     }
   }
+
+  function copy(text: string, label: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  }
+
+  const url = status?.running
+    ? `http://${status.mode === 'lan' ? ip : '127.0.0.1'}:${status.port}`
+    : null;
 
   return (
     <section>
@@ -114,15 +103,13 @@ export function RemoteAccessCard() {
               className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
               onClick={() => toggle(true, 'loopback')}
               disabled={busy}
-              title="Bind to 127.0.0.1 only (same machine only)"
             >
-              start (local only)
+              local only
             </button>
             <button
               className="rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               onClick={() => toggle(true, 'lan')}
               disabled={busy}
-              title="Bind to LAN (phones on same Wi-Fi can connect)"
             >
               start (LAN)
             </button>
@@ -134,65 +121,71 @@ export function RemoteAccessCard() {
 
       {!status?.running ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-3 text-[11px] text-muted-foreground">
-          Start the server to pair a mobile device.
+          Start the server to control procman from your phone.
           <br />
           <span className="text-muted-foreground/70">
-            ⚠ Only expose LAN on trusted networks — this API can start/stop your processes.
+            Phone → open the URL → enter token → done.
           </span>
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
-          <div className="flex items-start gap-4">
-            {qrDataUrl && (
-              <img
-                src={qrDataUrl}
-                alt="Pairing QR"
-                className="h-32 w-32 shrink-0 rounded border border-border/40"
-              />
-            )}
-            <div className="min-w-0 flex-1 space-y-1.5 text-[11px]">
-              <div className="flex gap-2">
-                <span className="w-10 text-muted-foreground">URL</span>
-                <span className="font-mono">
-                  http://{status.mode === 'lan' ? ip : '127.0.0.1'}:{status.port}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <span className="w-10 text-muted-foreground">mode</span>
-                <span className="font-mono">{status.mode}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="w-10 text-muted-foreground">token</span>
-                <div className="flex min-w-0 flex-1 items-center gap-1">
-                  <span className="truncate font-mono">
-                    {showToken ? status.token : '•'.repeat(20)}
-                  </span>
-                  <button
-                    onClick={() => setShowToken(!showToken)}
-                    className="shrink-0 px-1 text-muted-foreground hover:text-foreground"
-                  >
-                    {showToken ? 'hide' : 'show'}
-                  </button>
-                </div>
-              </div>
-              <div className="pt-1">
-                <button
-                  className="rounded border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={rotate}
-                  disabled={busy}
-                >
-                  rotate token
-                </button>
-              </div>
+          <div className="space-y-1.5 text-[11px]">
+            {/* URL */}
+            <div className="flex items-center gap-2">
+              <span className="w-12 text-muted-foreground">URL</span>
+              <span className="font-mono">{url}</span>
+              <button
+                onClick={() => copy(url!, 'url')}
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {copied === 'url' ? '✓' : 'copy'}
+              </button>
             </div>
+            {/* Token */}
+            <div className="flex items-center gap-2">
+              <span className="w-12 text-muted-foreground">Token</span>
+              <span className="min-w-0 flex-1 truncate font-mono">
+                {showToken ? status.token : '•'.repeat(20)}
+              </span>
+              <button
+                onClick={() => setShowToken(!showToken)}
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {showToken ? 'hide' : 'show'}
+              </button>
+              <button
+                onClick={() => copy(status.token, 'token')}
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {copied === 'token' ? '✓' : 'copy'}
+              </button>
+            </div>
+            {/* Mode */}
+            <div className="flex items-center gap-2">
+              <span className="w-12 text-muted-foreground">Mode</span>
+              <span className="font-mono">{status.mode}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-border/40 pt-2">
+            <button
+              className="rounded border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={rotate}
+              disabled={busy}
+            >
+              rotate token
+            </button>
+            <span className="text-[10px] text-muted-foreground/50">
+              Phone: open {url} → paste token → connect
+            </span>
           </div>
 
           {audit.length > 0 && (
             <div>
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Recent activity
+                Activity
               </div>
-              <ul className="max-h-36 space-y-0.5 overflow-y-auto font-mono text-[10px]">
+              <ul className="max-h-28 space-y-0.5 overflow-y-auto font-mono text-[10px]">
                 {audit.map((a, i) => (
                   <li key={i} className="flex gap-2">
                     <span className="shrink-0 text-muted-foreground/60">
@@ -206,9 +199,6 @@ export function RemoteAccessCard() {
                       {a.action}
                     </span>
                     <span className="truncate text-muted-foreground">{a.target}</span>
-                    {a.detail && (
-                      <span className="shrink-0 text-muted-foreground/70">{a.detail}</span>
-                    )}
                   </li>
                 ))}
               </ul>

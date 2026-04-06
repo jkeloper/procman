@@ -43,3 +43,5 @@ base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 tokio-stream = { version = "0.1", features = ["sync"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+mime_guess = "2"

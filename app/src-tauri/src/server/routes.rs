@@ -39,6 +39,8 @@ pub fn build_router(state: ServerState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .merge(protected)
+        // PWA static files (everything not matched above falls to SPA)
+        .fallback(super::spa::spa_fallback)
         .layer(cors)
         .with_state(state)
 }
