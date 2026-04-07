@@ -9,6 +9,7 @@ pub mod audit;
 pub mod auth;
 pub mod routes;
 pub mod spa;
+pub mod tls;
 pub mod ws;
 
 use crate::process::ProcessManager;

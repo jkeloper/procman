@@ -37,11 +37,16 @@ libc = "0.2"
 dashmap = "6"
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
 rand = "0.8"
 base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 tokio-stream = { version = "0.1", features = ["sync"] }
+tower_governor = "0.4"
+rcgen = "0.13"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = "0.23"
+rustls-pemfile = "2"
 rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"

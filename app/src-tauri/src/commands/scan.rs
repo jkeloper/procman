@@ -204,6 +204,10 @@ fn scripts_from_package_json(path: &Path) -> Vec<Script> {
         .iter()
         .filter_map(|(k, v)| {
             let cmd_str = v.as_str()?;
+            // SEC-05: validate script name — reject shell-injectable keys
+            if !is_safe_script_name(k) {
+                return None;
+            }
             Some(Script {
                 id: Uuid::new_v4().to_string(),
                 name: k.clone(),
@@ -228,6 +232,15 @@ fn detect_pm(dir: &Path) -> &'static str {
 }
 
 /// Heuristic: pull --port N or -p N from a command string.
+/// SEC-05: Only allow alphanumeric + common npm script chars in names.
+fn is_safe_script_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c))
+}
+
 fn infer_port(cmd: &str) -> Option<u16> {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     for i in 0..tokens.len().saturating_sub(1) {

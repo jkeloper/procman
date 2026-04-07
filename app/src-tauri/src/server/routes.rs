@@ -2,23 +2,31 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     middleware,
     response::Json,
     routing::{get, post},
     Router,
 };
 use serde::Serialize;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 
 use super::{auth, ws::ws_handler, ServerState};
 use crate::types::PortInfo;
 
 pub fn build_router(state: ServerState) -> Router {
+    // SEC-08: Restrict CORS to known origins
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_headers(Any)
-        .allow_methods(Any);
+        .allow_origin([
+            "http://localhost:1420".parse::<HeaderValue>().unwrap(),
+            "http://localhost:5174".parse::<HeaderValue>().unwrap(),
+            "http://127.0.0.1:7777".parse::<HeaderValue>().unwrap(),
+            "capacitor://procman".parse::<HeaderValue>().unwrap(),
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS]);
 
     let protected = Router::new()
         .route("/api/ping", get(ping))
@@ -36,12 +44,28 @@ pub fn build_router(state: ServerState) -> Router {
             auth::require_token,
         ));
 
+    // SEC-02: Rate limit — 10 req/s per IP, burst 20
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(20)
+        .finish()
+        .unwrap();
+
     Router::new()
         .route("/api/health", get(health))
         .merge(protected)
-        // PWA static files (everything not matched above falls to SPA)
         .fallback(super::spa::spa_fallback)
         .layer(cors)
+        .layer(GovernorLayer { config: governor_conf.into() })
+        // SEC-10: Security headers
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
         .with_state(state)
 }
 
@@ -70,9 +94,31 @@ async fn list_processes(
     Json(state.pm.list())
 }
 
+/// SEC-14: Return only the fields needed by remote clients (no settings, limited paths).
 async fn list_projects(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let guard = state.app_state.config.lock().await;
-    Json(serde_json::to_value(&*guard).unwrap_or(serde_json::Value::Null))
+    let projects: Vec<serde_json::Value> = guard
+        .projects
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "scripts": p.scripts.iter().map(|s| serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "command": s.command,
+                    "expected_port": s.expected_port,
+                    "auto_restart": s.auto_restart,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "version": guard.version,
+        "projects": projects,
+        "groups": guard.groups,
+    }))
 }
 
 async fn list_ports() -> Result<Json<Vec<PortInfo>>, StatusCode> {

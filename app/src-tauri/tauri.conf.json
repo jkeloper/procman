@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* https://*.trycloudflare.com wss://*.trycloudflare.com; img-src 'self' data:; font-src 'self' data:"
     }
   },
   "bundle": {

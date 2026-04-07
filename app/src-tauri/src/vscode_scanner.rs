@@ -120,8 +120,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
     let cwd = cwd_raw.as_deref().map(substitute).or_else(|| Some(workspace.to_string()));
 
     // env prefix for shell command
+    // SEC-06: validate env keys to prevent injection via env key names
     let env_prefix = env_map
         .iter()
+        .filter(|(k, _)| is_safe_env_key(k))
         .map(|(k, v)| format!("{}={}", k, shell_quote(&substitute(v))))
         .collect::<Vec<_>>()
         .join(" ");
@@ -243,6 +245,14 @@ fn prefix_envfile(env_file: &Option<String>, cmd: &str) -> String {
         Some(path) => format!("set -a; source {}; set +a; {}", shell_quote(path), cmd),
         None => cmd.to_string(),
     }
+}
+
+/// SEC-06: env key must be a valid shell variable name.
+fn is_safe_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 200
+        && key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn shell_quote(s: &str) -> String {

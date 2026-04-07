@@ -128,6 +128,12 @@ impl RuntimeStore {
         std::io::Write::write_all(&mut tmp, json.as_bytes())?;
         tmp.as_file().sync_all()?;
         tmp.persist(&self.path).map_err(|e| ConfigError::Io(e.error))?;
+        // SEC-13: restrict file permissions to owner-only (0600)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600));
+        }
         Ok(())
     }
 }

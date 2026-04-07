@@ -175,6 +175,16 @@ fn extract_tunnel_args(rest: &str) -> (Option<String>, Option<String>) {
 
 #[tauri::command]
 pub async fn kill_cloudflared_pid(pid: u32) -> Result<(), String> {
+    // SEC-12: verify the PID is actually a cloudflared process before killing
+    let check = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .map_err(|e| format!("ps: {}", e))?;
+    let cmd = String::from_utf8_lossy(&check.stdout);
+    let first_token = cmd.trim().split_whitespace().next().unwrap_or("");
+    if first_token != "cloudflared" && !first_token.ends_with("/cloudflared") {
+        return Err(format!("PID {} is not a cloudflared process ({})", pid, cmd.trim()));
+    }
     unsafe {
         libc::kill(pid as i32, libc::SIGTERM);
     }
