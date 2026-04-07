@@ -19,6 +19,14 @@ export function PairView({ onPaired }: Props) {
   const [token, setToken] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [abortCtrl, setAbortCtrl] = useState<AbortController | null>(null);
+
+  function cancel() {
+    abortCtrl?.abort();
+    setAbortCtrl(null);
+    setBusy(false);
+    setErr('Cancelled');
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,21 +65,47 @@ export function PairView({ onPaired }: Props) {
 
     setBusy(true);
     setErr(null);
+    const ctrl = new AbortController();
+    setAbortCtrl(ctrl);
 
     try {
-      const res = await fetch(`${baseUrl}/api/ping`, {
-        headers: { Authorization: `Bearer ${token.trim()}` },
-      });
+      const res = await Promise.race([
+        fetch(`${baseUrl}/api/ping`, {
+          headers: { Authorization: `Bearer ${token.trim()}` },
+          signal: ctrl.signal,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Connection timed out (10s). Check the address and try again.')), 10000),
+        ),
+      ]);
       if (!res.ok) {
-        setErr(res.status === 401 ? 'Invalid token' : `Error: ${res.status}`);
+        const msg =
+          res.status === 401 ? 'Invalid token. Check Remote Access in procman.' :
+          res.status === 403 ? 'Forbidden — token might be expired. Rotate and retry.' :
+          res.status === 404 ? 'Server found but API not available. Check procman version.' :
+          `Server error (${res.status}). Try again later.`;
+        setErr(msg);
         setBusy(false);
+        setAbortCtrl(null);
         return;
       }
     } catch (e: any) {
-      setErr(`Can't reach server: ${e?.message ?? e}`);
+      if (e?.name === 'AbortError') {
+        setBusy(false);
+        setAbortCtrl(null);
+        return;
+      }
+      const msg = e?.message?.includes('timed out')
+        ? e.message
+        : e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')
+        ? `Can't reach ${mode === 'tunnel' ? 'tunnel' : 'server'}. Check:\n• ${mode === 'lan' ? 'Same Wi-Fi network?' : 'Tunnel still running?'}\n• IP address correct?\n• procman server started?`
+        : `Connection failed: ${e?.message ?? e}`;
+      setErr(msg);
       setBusy(false);
+      setAbortCtrl(null);
       return;
     }
+    setAbortCtrl(null);
 
     savePair({ host: pairHost, port: pairPort, token: token.trim() });
     onPaired();
@@ -174,14 +208,25 @@ export function PairView({ onPaired }: Props) {
               autoCorrect="off"
             />
           </label>
-          {err && <p className="error">{err}</p>}
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={busy || !token.trim()}
-          >
-            {busy ? 'Connecting…' : 'Log in'}
-          </button>
+          {err && <p className="error" style={{ whiteSpace: 'pre-line' }}>{err}</p>}
+          {busy ? (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={cancel}
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--fg)' }}
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!token.trim()}
+            >
+              Log in
+            </button>
+          )}
         </form>
       </div>
     </div>
