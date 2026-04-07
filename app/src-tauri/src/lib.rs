@@ -87,6 +87,7 @@ pub fn run() {
                 token
             };
             app.manage(commands::remote::RemoteServerState::new(token));
+            app.manage(commands::tunnel::TunnelState::new());
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -139,6 +140,10 @@ pub fn run() {
             cloudflared::list_cf_tunnels,
             cloudflared::detect_running_cloudflared,
             cloudflared::kill_cloudflared_pid,
+            // Tunnel
+            commands::start_tunnel,
+            commands::stop_tunnel,
+            commands::tunnel_status,
             // Remote server
             commands::server_status,
             commands::start_server,

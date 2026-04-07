@@ -117,6 +117,13 @@ export const api = {
   resolvePidToScript: (pid: number) =>
     call('resolve_pid_to_script', { pid }, z.string().nullable()),
 
+  // Tunnel (external access)
+  startTunnel: (port: number) =>
+    callRaw<{ running: boolean; url: string | null; pid: number | null }>('start_tunnel', { port }),
+  stopTunnel: () => callRaw<null>('stop_tunnel', {}),
+  tunnelStatus: () =>
+    callRaw<{ running: boolean; url: string | null; pid: number | null }>('tunnel_status', {}),
+
   // Remote server
   serverStatus: () =>
     callRaw<{

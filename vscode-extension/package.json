@@ -1,0 +1,67 @@
+{
+  "name": "procman",
+  "displayName": "procman",
+  "description": "Control your local dev processes from VSCode",
+  "version": "0.1.0",
+  "publisher": "procman-dev",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "icon": "icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "procman",
+          "title": "procman",
+          "icon": "$(terminal)"
+        }
+      ]
+    },
+    "views": {
+      "procman": [
+        {
+          "type": "webview",
+          "id": "procman.panel",
+          "name": "Processes"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "procman.configure",
+        "title": "procman: Configure Server"
+      },
+      {
+        "command": "procman.refresh",
+        "title": "procman: Refresh"
+      }
+    ],
+    "configuration": {
+      "title": "procman",
+      "properties": {
+        "procman.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7777",
+          "description": "procman remote server URL"
+        },
+        "procman.token": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for authentication"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --format=cjs --platform=node --watch",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.0.0"
+  }
+}

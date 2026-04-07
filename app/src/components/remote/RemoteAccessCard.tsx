@@ -1,6 +1,101 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/api/tauri';
 
+// ---- Tunnel sub-section ---- //
+function TunnelSection({ serverPort }: { serverPort: number | null }) {
+  const [tunnel, setTunnel] = useState<{ running: boolean; url: string | null; pid: number | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      setTunnel(await api.tunnelStatus());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    reload();
+    const id = setInterval(reload, 3000);
+    return () => clearInterval(id);
+  }, [reload]);
+
+  async function start() {
+    setBusy(true);
+    try {
+      const result = await api.startTunnel(serverPort ?? 7777);
+      setTunnel(result);
+    } catch (e: any) {
+      alert(`Tunnel failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stop() {
+    setBusy(true);
+    try {
+      await api.stopTunnel();
+      setTunnel({ running: false, url: null, pid: null });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copy(text: string) {
+    navigator.clipboard.writeText(text);
+  }
+
+  if (!tunnel) return null;
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
+      <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[11px] font-semibold">Internet Access</span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {tunnel.running ? 'connected' : 'off'}
+          </span>
+        </div>
+        {tunnel.running ? (
+          <button
+            className="rounded px-1.5 py-0.5 text-[10px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+            onClick={stop}
+            disabled={busy}
+          >
+            stop
+          </button>
+        ) : (
+          <button
+            className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            onClick={start}
+            disabled={busy || !serverPort}
+          >
+            {busy ? 'connecting…' : 'expose via Cloudflare'}
+          </button>
+        )}
+      </div>
+
+      {tunnel.running && tunnel.url && (
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="min-w-0 flex-1 truncate font-mono text-primary">{tunnel.url}</span>
+          <button
+            onClick={() => copy(tunnel.url!)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            copy
+          </button>
+        </div>
+      )}
+
+      {!tunnel.running && (
+        <p className="text-[10px] text-muted-foreground/70">
+          Creates a Cloudflare quick tunnel so you can access procman from anywhere.
+          Requires cloudflared installed.
+        </p>
+      )}
+    </div>
+  );
+}
+
 type Mode = 'loopback' | 'lan';
 
 interface Status {
@@ -179,6 +274,8 @@ export function RemoteAccessCard() {
               Phone: open {url} → paste token → connect
             </span>
           </div>
+
+          <TunnelSection serverPort={status.port} />
 
           {audit.length > 0 && (
             <div>
