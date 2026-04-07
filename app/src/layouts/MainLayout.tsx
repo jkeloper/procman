@@ -13,7 +13,7 @@ import { useHotkeys } from '@/hooks/useHotkeys';
 import { useResizable } from '@/hooks/useResizable';
 
 export function MainLayout() {
-  const [logOpen, setLogOpen] = useState(true);
+  const [logOpen, setLogOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const { statuses } = useProcessStatus();
@@ -43,6 +43,18 @@ export function MainLayout() {
     try {
       setProjects(await api.listProjects());
     } catch {}
+  }, []);
+
+  // Auto-open log drawer when a process starts
+  useEffect(() => {
+    const un = listen('process://status', (ev: any) => {
+      if (ev.payload?.status === 'running') {
+        setLogOpen(true);
+      }
+    });
+    return () => {
+      un.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -149,21 +161,22 @@ export function MainLayout() {
             )}
           </section>
 
+          {/* Log drawer — always rendered, slides up/down */}
           {logOpen && (
-            <>
-              {/* Log drawer resize handle */}
-              <div
-                onMouseDown={logDrawer.onMouseDown}
-                className="group relative h-[3px] shrink-0 cursor-row-resize bg-border/60 transition-colors hover:bg-primary/60"
-                title="Drag to resize log drawer"
-              >
-                <div className="absolute inset-x-0 -top-1 -bottom-1" />
-              </div>
-              <section className="shrink-0" style={{ height: logDrawer.size }}>
-                <LogViewer />
-              </section>
-            </>
+            <div
+              onMouseDown={logDrawer.onMouseDown}
+              className="group relative h-[3px] shrink-0 cursor-row-resize bg-border/60 transition-colors hover:bg-primary/60"
+              title="Drag to resize log drawer"
+            >
+              <div className="absolute inset-x-0 -top-1 -bottom-1" />
+            </div>
           )}
+          <section
+            className="shrink-0 overflow-hidden border-t border-border/60 transition-all duration-300 ease-in-out"
+            style={{ height: logOpen ? logDrawer.size : 0 }}
+          >
+            <LogViewer />
+          </section>
         </main>
       </div>
 
