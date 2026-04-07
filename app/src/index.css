@@ -144,7 +144,7 @@
     font-feature-settings: 'calt', 'liga', 'ss01', 'ss02';
   }
   kbd {
-    @apply rounded border border-border/60 bg-muted/40 px-1 py-[1px] text-[10px] font-medium;
+    @apply rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[13px] font-medium;
   }
   /* Subtle scrollbars */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
