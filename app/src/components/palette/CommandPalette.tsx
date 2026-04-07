@@ -1,13 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from '@/components/ui/command';
 import { api, type Project, type RuntimeStatus } from '@/api/tauri';
 
 interface Group {
@@ -22,13 +13,25 @@ interface Props {
   onSelectProject: (id: string | null) => void;
 }
 
-/**
- * ⌘K command palette — fuzzy search across projects, scripts, and
- * quick actions (start/stop/restart).
- */
 export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<Group[]>([]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setOpen((v) => !v);
+        setQuery('');
+      }
+      if (e.key === 'Escape' && open) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -40,19 +43,6 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
     })();
   }, [open]);
 
-  // Global ⌘K / Ctrl+K
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setOpen((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Flattened action list for fuzzy search
   const scriptRows = useMemo(() => {
     const rows: Array<{
       projectId: string;
@@ -77,8 +67,41 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
     return rows;
   }, [projects, statuses]);
 
+  const q = query.toLowerCase();
+
+  // Filter items by query
+  const filteredProjects = projects.filter(
+    (p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q),
+  );
+  const stoppedScripts = scriptRows.filter(
+    (r) =>
+      r.status !== 'running' &&
+      (!q ||
+        r.scriptName.toLowerCase().includes(q) ||
+        r.projectName.toLowerCase().includes(q) ||
+        r.command.toLowerCase().includes(q)),
+  );
+  const runningScripts = scriptRows.filter(
+    (r) =>
+      r.status === 'running' &&
+      (!q ||
+        r.scriptName.toLowerCase().includes(q) ||
+        r.projectName.toLowerCase().includes(q)),
+  );
+  const filteredGroups = groups.filter(
+    (g) => !q || g.name.toLowerCase().includes(q),
+  );
+
+  // Only show sections that have items
+  const hasProjects = filteredProjects.length > 0;
+  const hasGroups = filteredGroups.length > 0;
+  const hasStopped = stoppedScripts.length > 0;
+  const hasRunning = runningScripts.length > 0;
+  const hasAnything = hasProjects || hasGroups || hasStopped || hasRunning;
+
   function close() {
     setOpen(false);
+    setQuery('');
   }
 
   async function runAction(
@@ -105,114 +128,172 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
     }
   }
 
-  return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Type to search projects, scripts, actions…" />
-      <CommandList>
-        <CommandEmpty>No results.</CommandEmpty>
+  if (!open) return null;
 
-        <CommandGroup heading="Navigation">
-          <CommandItem
-            onSelect={() => {
+  return (
+    <>
+      {/* Backdrop — semi-transparent so content is still visible */}
+      <div
+        className="fixed inset-0 z-[200] bg-black/40"
+        onClick={close}
+      />
+      {/* Palette */}
+      <div className="fixed left-1/2 top-[15%] z-[201] w-[560px] max-w-[90vw] -translate-x-1/2 overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
+        {/* Search input */}
+        <div className="flex items-center border-b border-border/60 px-4">
+          <span className="text-[16px] text-muted-foreground">⌘</span>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search projects, scripts, groups…"
+            autoFocus
+            className="flex-1 border-0 bg-transparent px-3 py-4 text-[15px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+          />
+          <kbd className="rounded border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+            esc
+          </kbd>
+        </div>
+
+        {/* Results */}
+        <div className="max-h-[420px] overflow-y-auto p-2">
+          {!hasAnything && (
+            <div className="py-8 text-center text-[14px] text-muted-foreground">
+              No results for "{query}"
+            </div>
+          )}
+
+          {/* Navigation */}
+          <PaletteItem
+            icon="⊞"
+            label="Dashboard"
+            sub=""
+            onClick={() => {
               onSelectProject(null);
               close();
             }}
-          >
-            📊 Go to Dashboard
-          </CommandItem>
-        </CommandGroup>
+            visible={!q || 'dashboard'.includes(q)}
+          />
 
-        {groups.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Groups — Run">
-              {groups.map((g) => (
-                <CommandItem
-                  key={`group-${g.id}`}
-                  value={`group run ${g.name}`}
-                  onSelect={() => runGroupAction(g.id)}
-                >
-                  ▶▶ {g.name}
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {g.members.length} scripts
-                  </span>
-                </CommandItem>
+          {/* Groups */}
+          {hasGroups && (
+            <>
+              <SectionLabel>Groups</SectionLabel>
+              {filteredGroups.map((g) => (
+                <PaletteItem
+                  key={`g-${g.id}`}
+                  icon="▶▶"
+                  label={g.name}
+                  sub={`${g.members.length} scripts`}
+                  onClick={() => runGroupAction(g.id)}
+                />
               ))}
-            </CommandGroup>
-          </>
-        )}
+            </>
+          )}
 
-        {projects.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Projects">
-              {projects.map((p) => (
-                <CommandItem
+          {/* Projects */}
+          {hasProjects && (
+            <>
+              <SectionLabel>Projects</SectionLabel>
+              {filteredProjects.map((p) => (
+                <PaletteItem
                   key={`p-${p.id}`}
-                  value={`project ${p.name} ${p.path}`}
-                  onSelect={() => {
+                  icon="📁"
+                  label={p.name}
+                  sub={`${p.scripts.length} scripts`}
+                  onClick={() => {
                     onSelectProject(p.id);
                     close();
                   }}
-                >
-                  📁 {p.name}
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {p.scripts.length} scripts
-                  </span>
-                </CommandItem>
+                />
               ))}
-            </CommandGroup>
-          </>
-        )}
+            </>
+          )}
 
-        {scriptRows.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Scripts — Start">
-              {scriptRows
-                .filter((r) => r.status !== 'running')
-                .map((r) => (
-                  <CommandItem
-                    key={`start-${r.scriptId}`}
-                    value={`start ${r.projectName} ${r.scriptName} ${r.command}`}
-                    onSelect={() => runAction('start', r.projectId, r.scriptId)}
-                  >
-                    ▶ {r.projectName}/{r.scriptName}
-                    <span className="ml-auto truncate font-mono text-xs text-muted-foreground">
-                      {r.command}
-                    </span>
-                  </CommandItem>
-                ))}
-            </CommandGroup>
-          </>
-        )}
+          {/* Start scripts */}
+          {hasStopped && (
+            <>
+              <SectionLabel>Start</SectionLabel>
+              {stoppedScripts.map((r) => (
+                <PaletteItem
+                  key={`start-${r.scriptId}`}
+                  icon="▶"
+                  label={`${r.projectName} / ${r.scriptName}`}
+                  sub={r.command}
+                  onClick={() => runAction('start', r.projectId, r.scriptId)}
+                />
+              ))}
+            </>
+          )}
 
-        {scriptRows.some((r) => r.status === 'running') && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Scripts — Running">
-              {scriptRows
-                .filter((r) => r.status === 'running')
-                .flatMap((r) => [
-                  <CommandItem
-                    key={`stop-${r.scriptId}`}
-                    value={`stop ${r.projectName} ${r.scriptName}`}
-                    onSelect={() => runAction('stop', r.projectId, r.scriptId)}
-                  >
-                    ■ Stop {r.projectName}/{r.scriptName}
-                  </CommandItem>,
-                  <CommandItem
-                    key={`restart-${r.scriptId}`}
-                    value={`restart ${r.projectName} ${r.scriptName}`}
-                    onSelect={() => runAction('restart', r.projectId, r.scriptId)}
-                  >
-                    ↻ Restart {r.projectName}/{r.scriptName}
-                  </CommandItem>,
-                ])}
-            </CommandGroup>
-          </>
+          {/* Running scripts */}
+          {hasRunning && (
+            <>
+              <SectionLabel>Running</SectionLabel>
+              {runningScripts.map((r) => (
+                <div key={`run-${r.scriptId}`} className="flex gap-1">
+                  <PaletteItem
+                    icon="■"
+                    label={`Stop ${r.projectName}/${r.scriptName}`}
+                    sub=""
+                    onClick={() => runAction('stop', r.projectId, r.scriptId)}
+                    className="flex-1"
+                  />
+                  <PaletteItem
+                    icon="↻"
+                    label="Restart"
+                    sub=""
+                    onClick={() => runAction('restart', r.projectId, r.scriptId)}
+                    className="w-auto shrink-0"
+                  />
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-3 mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </div>
+  );
+}
+
+function PaletteItem({
+  icon,
+  label,
+  sub,
+  onClick,
+  visible = true,
+  className = '',
+}: {
+  icon: string;
+  label: string;
+  sub: string;
+  onClick: () => void;
+  visible?: boolean;
+  className?: string;
+}) {
+  if (!visible) return null;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/60 ${className}`}
+    >
+      <span className="w-5 shrink-0 text-center text-[14px]">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-medium text-foreground">{label}</span>
+        {sub && (
+          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+            {sub}
+          </span>
         )}
-      </CommandList>
-    </CommandDialog>
+      </span>
+    </button>
   );
 }
