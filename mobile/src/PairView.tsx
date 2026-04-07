@@ -50,8 +50,8 @@ export function PairView({ onPaired }: Props) {
         <p className="login-sub">Connect to your Mac</p>
 
         <form onSubmit={submit} className="login-form">
-          <div className="row-2">
-            <label className="field">
+          <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+            <label className="field" style={{ flex: 1, minWidth: 0 }}>
               <span>Host / IP</span>
               <input
                 value={host}
@@ -61,13 +61,14 @@ export function PairView({ onPaired }: Props) {
                 autoCorrect="off"
               />
             </label>
-            <label className="field" style={{ flex: '0 0 80px' }}>
+            <label className="field" style={{ flex: 0, width: 72, minWidth: 72 }}>
               <span>Port</span>
               <input
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
                 placeholder="7777"
                 inputMode="numeric"
+                style={{ width: '100%' }}
               />
             </label>
           </div>
