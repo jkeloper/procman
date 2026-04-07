@@ -35,6 +35,13 @@ export function clearPair() {
 export function baseUrl(p?: PairInfo | null): string {
   const pair = p ?? loadPair();
   if (!pair) throw new Error('not paired');
+  // Tunnel URLs use https on port 443 (no :port suffix needed)
+  if (pair.port === 443) {
+    return `https://${pair.host}`;
+  }
+  if (pair.port === 80) {
+    return `http://${pair.host}`;
+  }
   return `http://${pair.host}:${pair.port}`;
 }
 
