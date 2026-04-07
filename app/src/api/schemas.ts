@@ -133,5 +133,6 @@ export const PortInfoSchema = z.object({
   port: z.number().int().min(1).max(65535),
   pid: z.number().int(),
   process_name: z.string(),
+  command: z.string().default(''),
 });
 export type PortInfo = z.infer<typeof PortInfoSchema>;

@@ -110,6 +110,9 @@ pub struct PortInfo {
     pub port: u16,
     pub pid: u32,
     pub process_name: String,
+    /// Full command line from `ps` (e.g. "node /Users/.../server.js --port 3000")
+    #[serde(default)]
+    pub command: String,
 }
 
 #[cfg(test)]

@@ -267,7 +267,14 @@ function PortTable({
                 <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
                   {p.pid}
                 </td>
-                <td className="px-3 py-2 font-mono text-[11px]">{p.process_name}</td>
+                <td className="px-3 py-2">
+                  <div className="text-[11px] font-medium">{p.process_name}</div>
+                  {p.command && p.command !== p.process_name && (
+                    <div className="mt-0.5 max-w-[400px] truncate font-mono text-[10px] text-muted-foreground/70" title={p.command}>
+                      {p.command}
+                    </div>
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   {match ? (
                     <span>

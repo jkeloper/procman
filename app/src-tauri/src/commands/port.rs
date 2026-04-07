@@ -58,6 +58,7 @@ fn parse_lsof(text: &str) -> Vec<PortInfo> {
                         port,
                         pid,
                         process_name: cmd,
+                        command: String::new(), // filled later via `ps`
                     });
                 }
             }
@@ -66,6 +67,33 @@ fn parse_lsof(text: &str) -> Vec<PortInfo> {
     }
     let mut result: Vec<PortInfo> = seen.into_values().collect();
     result.sort_by_key(|p| p.port);
+
+    // Enrich each entry with the full command line from `ps`.
+    let pids: Vec<String> = result.iter().map(|p| p.pid.to_string()).collect();
+    if !pids.is_empty() {
+        let ps_out = Command::new("ps")
+            .args(["-p", &pids.join(","), "-o", "pid=,command="])
+            .output()
+            .ok();
+        if let Some(out) = ps_out {
+            let ps_text = String::from_utf8_lossy(&out.stdout);
+            let cmd_map: std::collections::HashMap<u32, String> = ps_text
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim_start();
+                    let space = trimmed.find(char::is_whitespace)?;
+                    let pid: u32 = trimmed[..space].trim().parse().ok()?;
+                    let cmd = trimmed[space..].trim().to_string();
+                    Some((pid, cmd))
+                })
+                .collect();
+            for p in &mut result {
+                if let Some(cmd) = cmd_map.get(&p.pid) {
+                    p.command = cmd.clone();
+                }
+            }
+        }
+    }
     result
 }
 
