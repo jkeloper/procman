@@ -138,7 +138,7 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  padding: calc(12px + var(--safe-top)) 16px 12px;
+  padding: calc(6px + var(--safe-top)) 12px 8px;
   background: var(--bg);
   border-bottom: 1px solid rgba(255,255,255,0.06);
   display: flex;
@@ -185,7 +185,7 @@
   border-right: 1px solid rgba(255,255,255,0.06);
   display: flex;
   flex-direction: column;
-  padding: calc(16px + var(--safe-top)) 0 calc(16px + var(--safe-bottom));
+  padding: calc(8px + var(--safe-top)) 0 calc(8px + var(--safe-bottom));
   animation: slideIn 0.2s ease;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

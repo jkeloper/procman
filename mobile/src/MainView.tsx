@@ -99,9 +99,11 @@ export function MainView({ onUnpair }: Props) {
           <span className="topbar-title">Settings</span>
         </div>
         <div className="settings-group">
-          <div className="settings-row">
-            <span>Server</span>
-            <span>{pair?.host}:{pair?.port}</span>
+          <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+            <span style={{ fontSize: 13, color: 'var(--fg3)' }}>Server</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 15, wordBreak: 'break-all' }}>
+              {pair?.host}:{pair?.port}
+            </span>
           </div>
           <div className="settings-row">
             <span>Connection</span>
@@ -118,10 +120,10 @@ export function MainView({ onUnpair }: Props) {
             <span>{totalRunning}</span>
           </div>
         </div>
-        <div style={{ padding: '0 16px' }}>
+        <div style={{ padding: '0 20px' }}>
           <button
             className="btn-outline"
-            style={{ width: '100%', padding: 14, marginTop: 20, color: 'var(--red)' }}
+            style={{ width: '100%', padding: 16, marginTop: 24, color: 'var(--red)', fontSize: 16, minHeight: 52 }}
             onClick={() => {
               if (window.confirm('Disconnect from this server?')) {
                 clearPair();
