@@ -9,7 +9,17 @@ interface Props {
   onSelectProject?: (id: string | null) => void;
 }
 
+type Tab = 'overview' | 'ports' | 'groups' | 'network';
+
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: 'overview', label: 'Overview', icon: '⊞' },
+  { key: 'ports', label: 'Ports', icon: '🔌' },
+  { key: 'groups', label: 'Groups', icon: '▶▶' },
+  { key: 'network', label: 'Network', icon: '🌐' },
+];
+
 export function Dashboard({ projects, onSelectProject }: Props) {
+  const [tab, setTab] = useState<Tab>('overview');
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -51,7 +61,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   async function handlePortClick(p: PortInfo) {
     try {
       const scriptId = await api.resolvePidToScript(p.pid);
-      if (!scriptId) return; // External process — no-op (row is visually disabled)
+      if (!scriptId) return;
       const proj = projects.find((pr) =>
         pr.scripts.some((s) => s.id === scriptId),
       );
@@ -80,74 +90,128 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   const totalScripts = projects.reduce((n, p) => n + p.scripts.length, 0);
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-5xl space-y-5 p-6">
-        {/* Title + stats */}
-        <div>
-          <h1 className="text-[22px] font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-0.5 text-[12px] text-muted-foreground">
-            {projects.length} projects · {totalScripts} scripts · {ports.length} listening ports
-            {loading && ' · loading…'}
-          </p>
-        </div>
+    <div className="flex h-full flex-col">
+      {/* Tab ribbon */}
+      <div className="flex shrink-0 items-center gap-0 border-b border-border/60 bg-card/30 px-3">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-[13px] font-medium transition-colors ${
+              tab === t.key
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <span className="text-[14px]">{t.icon}</span>
+            {t.label}
+            {t.key === 'ports' && (
+              <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono">
+                {ports.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-        {/* 3-column stat strip */}
-        <div className="grid grid-cols-3 gap-3">
-          <StatPill label="Projects" value={projects.length} accent="muted" />
-          <StatPill label="Scripts" value={totalScripts} accent="muted" />
-          <StatPill label="Listening" value={ports.length} accent="primary" />
-        </div>
+      {/* Tab content */}
+      <div className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-5xl p-6">
 
-        {/* Matched ports — hero table */}
-        <section>
-          <SectionHeader
-            title="Matched ports"
-            sub="ports bound by your registered scripts"
-            count={matched.length}
-          />
-          {matched.length === 0 ? (
-            <EmptyHint>
-              None of your scripts' expected ports are currently listening.
-            </EmptyHint>
-          ) : (
-            <PortTable
-              rows={matched}
-              expectedMap={expectedPortMap}
-              managedPids={managedPids}
-              killing={killing}
-              onKill={handleKill}
-              onClickRow={handlePortClick}
-              variant="matched"
-            />
+          {tab === 'overview' && (
+            <div className="space-y-5">
+              <div>
+                <h1 className="text-[22px] font-semibold tracking-tight">Overview</h1>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                  {projects.length} projects · {totalScripts} scripts · {ports.length} listening ports
+                  {loading && ' · loading…'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <StatPill label="Projects" value={projects.length} accent="muted" />
+                <StatPill label="Scripts" value={totalScripts} accent="muted" />
+                <StatPill label="Listening" value={ports.length} accent="primary" />
+              </div>
+
+              {/* Quick port summary — matched only */}
+              {matched.length > 0 && (
+                <section>
+                  <SectionHeader title="Active ports" count={matched.length} />
+                  <PortTable
+                    rows={matched}
+                    expectedMap={expectedPortMap}
+                    managedPids={managedPids}
+                    killing={killing}
+                    onKill={handleKill}
+                    onClickRow={handlePortClick}
+                    variant="matched"
+                  />
+                </section>
+              )}
+            </div>
           )}
-        </section>
 
-        {/* Groups */}
-        <GroupsPanel projects={projects} />
+          {tab === 'ports' && (
+            <div className="space-y-5">
+              <h1 className="text-[22px] font-semibold tracking-tight">Ports</h1>
 
-        {/* Cloudflare */}
-        <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
+              <section>
+                <SectionHeader
+                  title="Matched ports"
+                  sub="bound by your registered scripts"
+                  count={matched.length}
+                />
+                {matched.length === 0 ? (
+                  <EmptyHint>None of your scripts' expected ports are currently listening.</EmptyHint>
+                ) : (
+                  <PortTable
+                    rows={matched}
+                    expectedMap={expectedPortMap}
+                    managedPids={managedPids}
+                    killing={killing}
+                    onKill={handleKill}
+                    onClickRow={handlePortClick}
+                    variant="matched"
+                  />
+                )}
+              </section>
 
-        {/* Remote access for mobile */}
-        <RemoteAccessCard />
-
-        {/* Other ports */}
-        <section>
-          <SectionHeader title="Other listening ports" count={others.length} />
-          {others.length === 0 ? (
-            <EmptyHint>No other ports.</EmptyHint>
-          ) : (
-            <PortTable
-              rows={others}
-              expectedMap={expectedPortMap}
-              managedPids={managedPids}
-              killing={killing}
-              onKill={handleKill}
-              onClickRow={handlePortClick}
-              variant="other"
-            />
+              <section>
+                <SectionHeader title="Other listening ports" count={others.length} />
+                {others.length === 0 ? (
+                  <EmptyHint>No other ports.</EmptyHint>
+                ) : (
+                  <PortTable
+                    rows={others}
+                    expectedMap={expectedPortMap}
+                    managedPids={managedPids}
+                    killing={killing}
+                    onKill={handleKill}
+                    onClickRow={handlePortClick}
+                    variant="other"
+                  />
+                )}
+              </section>
+            </div>
           )}
-        </section>
+
+          {tab === 'groups' && (
+            <div className="space-y-5">
+              <h1 className="text-[22px] font-semibold tracking-tight">Groups</h1>
+              <GroupsPanel projects={projects} />
+            </div>
+          )}
+
+          {tab === 'network' && (
+            <div className="space-y-5">
+              <h1 className="text-[22px] font-semibold tracking-tight">Network</h1>
+              <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
+              <RemoteAccessCard />
+            </div>
+          )}
+
+        </div>
       </div>
     </div>
   );
@@ -193,7 +257,7 @@ function StatPill({
   accent: 'muted' | 'primary';
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-card p-3">
+    <div className="rounded-lg border border-border/60 bg-card p-3 transition-all hover:-translate-y-[1px] hover:shadow-md">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
@@ -249,7 +313,7 @@ function PortTable({
                     ? 'cursor-pointer hover:bg-accent/50'
                     : 'cursor-default'
                 }`}
-                title={managed ? 'Click to jump to logs' : 'External process — procman has no log stream'}
+                title={managed ? 'Click to jump to logs' : 'External process'}
                 onClick={() => managed && onClickRow(p)}
               >
                 <td className="px-3 py-2">
