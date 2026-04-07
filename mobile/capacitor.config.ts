@@ -5,7 +5,6 @@ const config: CapacitorConfig = {
   appName: 'procman',
   webDir: 'dist',
   server: {
-    // Allow HTTP connections to the procman desktop server on LAN
     cleartext: true,
     androidScheme: 'http',
   },
@@ -13,6 +12,8 @@ const config: CapacitorConfig = {
     contentInset: 'automatic',
     preferredContentMode: 'mobile',
     scheme: 'procman',
+    // Fix touch offset issue — prevent WKWebView from scaling content
+    scrollEnabled: true,
   },
 };
 
