@@ -9,10 +9,10 @@ const config: CapacitorConfig = {
     androidScheme: 'http',
   },
   ios: {
-    contentInset: 'automatic',
+    // 'always' = WebView sits below status bar, no coordinate offset
+    contentInset: 'always',
     preferredContentMode: 'mobile',
     scheme: 'procman',
-    // Fix touch offset issue — prevent WKWebView from scaling content
     scrollEnabled: true,
   },
 };
