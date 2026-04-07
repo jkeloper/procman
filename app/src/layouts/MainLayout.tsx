@@ -6,6 +6,7 @@ import { LogViewer } from '@/components/log/LogViewer';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { RestorePrompt } from '@/components/session/RestorePrompt';
+import { QuitGuard } from '@/components/QuitGuard';
 import { api, type Project } from '@/api/tauri';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { useHotkeys } from '@/hooks/useHotkeys';
@@ -172,6 +173,7 @@ export function MainLayout() {
         onSelectProject={setSelectedProjectId}
       />
       <RestorePrompt projects={projects} />
+      <QuitGuard />
     </div>
   );
 }

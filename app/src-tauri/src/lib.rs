@@ -152,6 +152,19 @@ pub fn run() {
             commands::get_audit_log,
             commands::local_ip,
         ])
+        .on_window_event(|window, event| {
+            use tauri::Emitter;
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if let Some(pm) = window.try_state::<ProcessManager>() {
+                    let running = pm.list();
+                    if !running.is_empty() {
+                        api.prevent_close();
+                        let count = running.len();
+                        let _ = window.emit("procman://confirm-quit", count);
+                    }
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
