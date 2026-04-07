@@ -20,4 +20,4 @@ pnpm exec electron ./dist/main.js
 - `index.html` — minimal test UI
 
 ## Transition Trigger
-See `/Users/jeonghwankim/projects/procman/docs/06-decision.md` §전환 트리거.
+See `docs/06-decision.md` §전환 트리거.

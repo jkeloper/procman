@@ -1,4 +1,6 @@
-# procman
+# 🐸 procman
+
+한국어 | [English](README.en.md)
 
 Mac용 프로세스 매니저 GUI. 로컬 개발환경의 여러 서버·tunnel·docker 프로세스를 한 화면에서 관리.
 

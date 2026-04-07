@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          brew install pnpm
+          cd app && pnpm install
+      - name: Cargo test
+        working-directory: app/src-tauri
+        run: cargo test --lib
+      - name: Cargo clippy
+        working-directory: app/src-tauri
+        run: cargo clippy -- -D warnings || true
+
+  typescript:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install pnpm
+        run: npm install -g pnpm
+      - name: Install & type-check (desktop)
+        working-directory: app
+        run: |
+          pnpm install
+          pnpm tsc -b --noEmit
+      - name: Install & type-check (mobile)
+        working-directory: mobile
+        run: |
+          pnpm install
+          pnpm tsc --noEmit

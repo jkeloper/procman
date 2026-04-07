@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### 2026-04-05 — 프로젝트 착수 (기획 단계)
-- **Added** 프로젝트 디렉토리 구조 생성 (`/Users/jeonghwankim/projects/procman/`)
+- **Added** 프로젝트 디렉토리 구조 생성 (the project directory)
 - **Added** 5-Agent 시스템 운영 (Manager / Planner / Worker / Evaluator / User-tester)
 - **Added** 기획 문서 6종 작성:
   - `docs/01-charter.md` — Manager의 프로젝트 차터 (비전, KPI, 범위, 리스크)

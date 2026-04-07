@@ -21,10 +21,6 @@ mod vscode_scanner;
 mod watcher;
 
 // Spike modules retained as reference for Sprint 2-3.
-#[allow(dead_code)]
-mod stress;
-#[allow(dead_code)]
-mod pty;
 
 use process::ProcessManager;
 use runtime_state::RuntimeStore;

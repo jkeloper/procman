@@ -102,7 +102,7 @@ pub fn save_report(filename: String, content: String) -> Result<String, String> 
     use std::path::PathBuf;
     // Resolve path relative to spikes/s1-stdout/results, but allow ".." to escape.
     let base = PathBuf::from(
-        "/Users/jeonghwankim/projects/procman/spikes/s1-stdout/results",
+        "./results",
     );
     let path = base.join(&filename);
     let canonical_parent = path
