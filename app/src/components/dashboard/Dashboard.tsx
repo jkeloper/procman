@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type PortInfo, type Project } from '@/api/tauri';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
 import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
 import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
+import { IconOverview, IconPorts, IconGroups, IconNetwork } from '@/components/icons/TabIcons';
 
 interface Props {
   projects: Project[];
@@ -11,11 +12,11 @@ interface Props {
 
 type Tab = 'overview' | 'ports' | 'groups' | 'network';
 
-const TABS: { key: Tab; label: string; icon: string }[] = [
-  { key: 'overview', label: 'Overview', icon: '⊞' },
-  { key: 'ports', label: 'Ports', icon: '🔌' },
-  { key: 'groups', label: 'Groups', icon: '▶▶' },
-  { key: 'network', label: 'Network', icon: '🌐' },
+const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
+  { key: 'overview', label: 'Overview', icon: <IconOverview /> },
+  { key: 'ports', label: 'Ports', icon: <IconPorts /> },
+  { key: 'groups', label: 'Groups', icon: <IconGroups /> },
+  { key: 'network', label: 'Network', icon: <IconNetwork /> },
 ];
 
 export function Dashboard({ projects, onSelectProject }: Props) {
@@ -103,7 +104,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            <span className="text-[14px]">{t.icon}</span>
+            <span className="flex items-center">{t.icon}</span>
             {t.label}
             {t.key === 'ports' && (
               <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono">
