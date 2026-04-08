@@ -141,7 +141,7 @@ export function PairView({ onPaired }: Props) {
               color: mode === 'lan' ? '#fff' : 'var(--fg2)',
             }}
           >
-            📶 LAN
+            LAN
           </button>
           <button
             type="button"
@@ -158,7 +158,7 @@ export function PairView({ onPaired }: Props) {
               color: mode === 'tunnel' ? '#fff' : 'var(--fg2)',
             }}
           >
-            🌐 Tunnel
+            Tunnel
           </button>
         </div>
 
