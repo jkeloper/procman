@@ -44,19 +44,11 @@ pub fn build_router(state: ServerState) -> Router {
             auth::require_token,
         ));
 
-    // SEC-02: Rate limit — 10 req/s per IP, burst 20
-    let governor_conf = GovernorConfigBuilder::default()
-        .per_second(10)
-        .burst_size(20)
-        .finish()
-        .unwrap();
-
     Router::new()
         .route("/api/health", get(health))
         .merge(protected)
         .fallback(super::spa::spa_fallback)
         .layer(cors)
-        .layer(GovernorLayer { config: governor_conf.into() })
         // SEC-10: Security headers
         .layer(SetResponseHeaderLayer::overriding(
             header::X_FRAME_OPTIONS,
