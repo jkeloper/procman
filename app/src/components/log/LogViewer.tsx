@@ -81,14 +81,14 @@ export function LogViewer() {
   return (
     <div className="flex h-full flex-col bg-[#0a0a0a]">
       {/* Tab bar — compact, dark */}
-      <div className="flex h-8 shrink-0 items-center gap-0 border-b border-white/10 bg-[#0f0f0f] px-2 text-[11px]">
-        {/* Close drawer button */}
+      <div className="flex h-8 shrink-0 items-center gap-0 border-b border-white/10 bg-[#161b18] px-2 text-[11px]">
+        {/* Minimize drawer button */}
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('procman:close-logs'))}
           className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200"
-          title="Close log drawer (⌘L)"
+          title="Minimize (⌘L)"
         >
-          ✕
+          ▾
         </button>
         {tabs.map((t) => {
           const isActive = t.scriptId === activeTab?.scriptId;
@@ -100,7 +100,11 @@ export function LogViewer() {
                   ? 'border-primary bg-[#0a0a0a] text-zinc-100'
                   : 'border-transparent text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
               }`}
-              onClick={() => setActive(t.scriptId)}
+              onClick={() => {
+                setActive(t.scriptId);
+                // If minimized, re-open the drawer
+                window.dispatchEvent(new CustomEvent('procman:open-logs'));
+              }}
             >
               <span className="font-mono">{t.name}</span>
               <button

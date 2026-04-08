@@ -52,12 +52,14 @@ export function MainLayout() {
         setLogOpen(true);
       }
     });
-    // Close-logs event from LogViewer ✕ button
     const onClose = () => setLogOpen(false);
+    const onOpen = () => setLogOpen(true);
     window.addEventListener('procman:close-logs', onClose);
+    window.addEventListener('procman:open-logs', onOpen);
     return () => {
       un.then((fn) => fn());
       window.removeEventListener('procman:close-logs', onClose);
+      window.removeEventListener('procman:open-logs', onOpen);
     };
   }, []);
 
