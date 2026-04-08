@@ -10,17 +10,17 @@ interface Props {
   onSelectProject?: (id: string | null) => void;
 }
 
-type Tab = 'overview' | 'ports' | 'groups' | 'network';
+type Tab = 'dashboard' | 'ports' | 'groups' | 'network';
 
 const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
-  { key: 'overview', label: 'Overview', icon: <IconOverview /> },
+  { key: 'dashboard', label: 'Dashboard', icon: <IconOverview /> },
   { key: 'ports', label: 'Ports', icon: <IconPorts /> },
   { key: 'groups', label: 'Groups', icon: <IconGroups /> },
   { key: 'network', label: 'Network', icon: <IconNetwork /> },
 ];
 
 export function Dashboard({ projects, onSelectProject }: Props) {
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('dashboard');
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -92,34 +92,42 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Tab ribbon */}
-      <div className="flex shrink-0 items-center gap-0 border-b border-border/60 bg-card/30 px-3">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-[13px] font-medium transition-colors ${
-              tab === t.key
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <span className="flex items-center">{t.icon}</span>
-            {t.label}
-            {t.key === 'ports' && (
-              <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono">
-                {ports.length}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Tab ribbon — also serves as macOS drag area for Dashboard view */}
+      <div
+        className="flex shrink-0 items-center gap-0 border-b border-border/60 bg-card/30 pl-3"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <div
+          className="flex items-center gap-0"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-[13px] font-medium transition-colors ${
+                tab === t.key
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span className="flex items-center">{t.icon}</span>
+              {t.label}
+              {t.key === 'ports' && (
+                <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono">
+                  {ports.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-5xl px-6 py-4">
 
-          {tab === 'overview' && (
+          {tab === 'dashboard' && (
             <div className="space-y-5">
               <div>
                 <p className="text-[12px] text-muted-foreground">

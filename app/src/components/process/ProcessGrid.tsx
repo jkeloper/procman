@@ -256,13 +256,37 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         </button>
                       </>
                     ) : (
-                      <button
-                        className="rounded bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
-                        disabled={b}
-                        onClick={() => handleStart(s)}
-                      >
-                        {b ? '…' : 'Start'}
-                      </button>
+                      <>
+                        <button
+                          className="rounded bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
+                          disabled={b}
+                          onClick={() => handleStart(s)}
+                        >
+                          {b ? '…' : 'Start'}
+                        </button>
+                        {s.expected_port != null && (
+                          <button
+                            className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
+                            disabled={b}
+                            title={`Tunnel :${s.expected_port} via Cloudflare`}
+                            onClick={() =>
+                              withBusy(s.id, async () => {
+                                try {
+                                  const result = await api.startTunnel(s.expected_port!);
+                                  if (result.url) {
+                                    navigator.clipboard.writeText(result.url);
+                                    alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
+                                  }
+                                } catch (e: any) {
+                                  alert(`Tunnel failed: ${e?.message ?? e}`);
+                                }
+                              })
+                            }
+                          >
+                            <IconTunnel />
+                          </button>
+                        )}
+                      </>
                     )}
                     <span className="w-1" />
                     <button

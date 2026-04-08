@@ -65,7 +65,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl" style={{ maxHeight: '66vh', display: 'flex', flexDirection: 'column' }}>
+      <DialogContent className="max-w-4xl" style={{ height: '75vh', maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
         {/* Header — name + port inline */}
         <div className="flex items-center gap-3 border-b border-border/60 pb-3">
           <div className="flex-1 min-w-0">
@@ -100,7 +100,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
         </div>
 
         {/* Command — large editor-like textarea */}
-        <div className="flex-1">
+        <div className="flex flex-1 flex-col min-h-0">
           <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
             Command
           </div>
@@ -109,7 +109,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
             onChange={(e) => setCommand(e.target.value)}
             placeholder="pnpm dev&#10;# or multi-line script..."
             disabled={busy}
-            rows={10}
+            style={{ flex: 1, minHeight: 200 }}
             className="w-full resize-none rounded-lg border border-border/60 bg-[#0a0a0a] p-4 font-mono text-[13px] leading-relaxed text-foreground placeholder:text-muted-foreground/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
             spellCheck={false}
           />

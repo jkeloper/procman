@@ -72,7 +72,7 @@ export function LogViewer() {
 
   if (tabs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#0a0a0a] text-[11px] text-zinc-600">
+      <div className="flex items-center justify-center bg-[#161b18] text-[11px] text-zinc-600" style={{ height: 32, minHeight: 32 }}>
         No active processes. Start a script to see its logs.
       </div>
     );

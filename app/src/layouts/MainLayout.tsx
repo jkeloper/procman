@@ -77,14 +77,17 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* No separate titlebar — traffic lights sit on the tab bar */}
-
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar */}
         <aside
           className="flex shrink-0 flex-col border-r border-border/60 bg-sidebar"
           style={{ width: sidebar.size }}
         >
+          {/* macOS traffic light drag area */}
+          <div
+            className="h-9 shrink-0"
+            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          />
           <ProjectList
             selectedId={selectedProjectId}
             onSelect={setSelectedProjectId}
@@ -103,52 +106,39 @@ export function MainLayout() {
 
         {/* Main content */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          {/* Top bar — draggable + breadcrumb + controls */}
-          <div
-            className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 pl-20 pr-3 text-[12px]"
-            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-          >
+          {/* Top bar — draggable, only shows project name when inside a project */}
+          {showingProject && (
             <div
-              className="flex items-center gap-1"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 pl-20 pr-3 text-[12px]"
+              style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
             >
-              <button
-                className={`rounded px-2 py-1 transition-colors ${
-                  !showingProject
-                    ? 'bg-accent font-medium text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setSelectedProjectId(null)}
+              <div
+                className="flex items-center gap-1"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
-                Dashboard
-              </button>
-              {currentProject && (
-                <>
-                  <span className="text-border">/</span>
-                  <button className="rounded bg-accent px-2 py-1 font-medium text-foreground">
-                    {currentProject.name}
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="flex-1" />
-            <div
-              className="flex items-center gap-2"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            >
-              {runningCount > 0 && (
-                <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                  {runningCount} running
+                <button
+                  className="rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => setSelectedProjectId(null)}
+                >
+                  ←
+                </button>
+                <span className="font-medium text-foreground">
+                  {currentProject?.name}
                 </span>
-              )}
-              <button
-                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={() => setLogOpen((v) => !v)}
+              </div>
+              <div className="flex-1" />
+              <div
+                className="flex items-center gap-2"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
-                {logOpen ? 'hide logs' : 'show logs'}
-              </button>
+                {runningCount > 0 && (
+                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                    {runningCount} running
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <section className="flex-1 overflow-hidden">
             {showingProject && currentProject ? (
@@ -174,7 +164,7 @@ export function MainLayout() {
           )}
           <section
             className="shrink-0 overflow-hidden border-t border-border/60 transition-all duration-300 ease-in-out"
-            style={{ height: logOpen ? logDrawer.size : 32 }}
+            style={{ height: logOpen ? logDrawer.size : 31 }}
           >
             <LogViewer />
           </section>
