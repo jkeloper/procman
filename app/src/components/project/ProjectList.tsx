@@ -124,9 +124,19 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
         </div>
       </ScrollArea>
 
-      {/* Footer hint — fixed at bottom */}
-      <div className="shrink-0 border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground/60">
-        <kbd>⌘K</kbd> search · <kbd>⌘L</kbd> logs · <kbd>⌘,</kbd> dashboard
+      {/* Footer — status summary */}
+      <div className="shrink-0 space-y-1 border-t border-border/60 px-3 py-2">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground/60">
+            {projects.reduce((n, p) => n + p.scripts.filter((s) => statuses[s.id] === 'running').length, 0)} running
+            {' · '}
+            {projects.reduce((n, p) => n + p.scripts.length, 0)} scripts
+          </span>
+          <span className="font-mono text-muted-foreground/40">v0.1.0</span>
+        </div>
+        <div className="flex gap-2 text-[9px] text-muted-foreground/40">
+          <kbd>⌘K</kbd><kbd>⌘L</kbd><kbd>⌘,</kbd>
+        </div>
       </div>
 
       <NewProjectDialog

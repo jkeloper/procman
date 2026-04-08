@@ -98,7 +98,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-[13px] font-medium transition-colors ${
+            className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-[13px] font-medium transition-colors ${
               tab === t.key
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -122,8 +122,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
           {tab === 'overview' && (
             <div className="space-y-5">
               <div>
-                <h1 className="text-[22px] font-semibold tracking-tight">Overview</h1>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                <p className="text-[12px] text-muted-foreground">
                   {projects.length} projects · {totalScripts} scripts · {ports.length} listening ports
                   {loading && ' · loading…'}
                 </p>
@@ -155,7 +154,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
           {tab === 'ports' && (
             <div className="space-y-5">
-              <h1 className="text-[22px] font-semibold tracking-tight">Ports</h1>
+              
 
               <section>
                 <SectionHeader
@@ -199,14 +198,14 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
           {tab === 'groups' && (
             <div className="space-y-5">
-              <h1 className="text-[22px] font-semibold tracking-tight">Groups</h1>
+              
               <GroupsPanel projects={projects} />
             </div>
           )}
 
           {tab === 'network' && (
             <div className="space-y-5">
-              <h1 className="text-[22px] font-semibold tracking-tight">Network</h1>
+              
               <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
               <RemoteAccessCard />
             </div>

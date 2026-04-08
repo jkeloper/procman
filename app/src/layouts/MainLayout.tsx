@@ -81,8 +81,6 @@ export function MainLayout() {
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex items-center gap-2 font-medium tracking-tight">
-          <span className="text-[14px]">🐸</span>
-          <span>procman</span>
           {runningCount > 0 && (
             <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
               {runningCount} running
