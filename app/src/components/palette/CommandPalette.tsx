@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Project, type RuntimeStatus } from '@/api/tauri';
+import { IconOverview, IconGroups, IconFolder, IconPlay, IconStop, IconRestart } from '@/components/icons/TabIcons';
 
 interface Group {
   id: string;
@@ -165,7 +166,7 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
 
           {/* Navigation */}
           <PaletteItem
-            icon="⊞"
+            icon="grid"
             label="Dashboard"
             sub=""
             onClick={() => {
@@ -182,7 +183,7 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
               {filteredGroups.map((g) => (
                 <PaletteItem
                   key={`g-${g.id}`}
-                  icon="▶▶"
+                  icon="play-double"
                   label={g.name}
                   sub={`${g.members.length} scripts`}
                   onClick={() => runGroupAction(g.id)}
@@ -198,7 +199,7 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
               {filteredProjects.map((p) => (
                 <PaletteItem
                   key={`p-${p.id}`}
-                  icon="📁"
+                  icon="folder"
                   label={p.name}
                   sub={`${p.scripts.length} scripts`}
                   onClick={() => {
@@ -217,7 +218,7 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
               {stoppedScripts.map((r) => (
                 <PaletteItem
                   key={`start-${r.scriptId}`}
-                  icon="▶"
+                  icon="play"
                   label={`${r.projectName} / ${r.scriptName}`}
                   sub={r.command}
                   onClick={() => runAction('start', r.projectId, r.scriptId)}
@@ -233,14 +234,14 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
               {runningScripts.map((r) => (
                 <div key={`run-${r.scriptId}`} className="flex gap-1">
                   <PaletteItem
-                    icon="■"
+                    icon="stop"
                     label={`Stop ${r.projectName}/${r.scriptName}`}
                     sub=""
                     onClick={() => runAction('stop', r.projectId, r.scriptId)}
                     className="flex-1"
                   />
                   <PaletteItem
-                    icon="↻"
+                    icon="restart"
                     label="Restart"
                     sub=""
                     onClick={() => runAction('restart', r.projectId, r.scriptId)}
@@ -285,7 +286,15 @@ function PaletteItem({
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/60 ${className}`}
     >
-      <span className="w-5 shrink-0 text-center text-[14px]">{icon}</span>
+      <span className="flex w-5 shrink-0 items-center justify-center">
+        {icon === 'grid' ? <IconOverview /> :
+         icon === 'play-double' ? <IconGroups /> :
+         icon === 'folder' ? <IconFolder /> :
+         icon === 'play' ? <IconPlay /> :
+         icon === 'stop' ? <IconStop /> :
+         icon === 'restart' ? <IconRestart /> :
+         <span className="text-[14px]">{icon}</span>}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-medium text-foreground">{label}</span>
         {sub && (

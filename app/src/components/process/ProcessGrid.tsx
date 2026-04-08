@@ -218,28 +218,37 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                   <div className="flex shrink-0 items-center gap-1">
                     {isRunning ? (
                       <>
-                        {s.expected_port != null && (
-                          <button
-                            className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
-                            disabled={b}
-                            title={`Tunnel :${s.expected_port} via Cloudflare`}
-                            onClick={() =>
-                              withBusy(s.id, async () => {
-                                try {
-                                  const result = await api.startTunnel(s.expected_port!);
-                                  if (result.url) {
-                                    navigator.clipboard.writeText(result.url);
-                                    alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
-                                  }
-                                } catch (e: any) {
-                                  alert(`Tunnel failed: ${e?.message ?? e}`);
+                        <button
+                          className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
+                          disabled={b}
+                          title={s.expected_port ? `Tunnel :${s.expected_port}` : 'Tunnel via Cloudflare'}
+                          onClick={() =>
+                            withBusy(s.id, async () => {
+                              try {
+                                let port = s.expected_port;
+                                if (!port && pid) {
+                                  // Find port this process opened
+                                  const ports = await api.listPorts();
+                                  const found = ports.find((p) => p.pid === pid);
+                                  port = found?.port ?? null;
                                 }
-                              })
-                            }
-                          >
-                            <IconTunnel />
-                          </button>
-                        )}
+                                if (!port) {
+                                  alert('No port detected for this script. Set expected_port in edit.');
+                                  return;
+                                }
+                                const result = await api.startTunnel(port);
+                                if (result.url) {
+                                  navigator.clipboard.writeText(result.url);
+                                  alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
+                                }
+                              } catch (e: any) {
+                                alert(`Tunnel failed: ${e?.message ?? e}`);
+                              }
+                            })
+                          }
+                        >
+                          <IconTunnel />
+                        </button>
                         <button
                           className="rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                           disabled={b}
@@ -275,28 +284,37 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         >
                           {b ? '…' : 'Start'}
                         </button>
-                        {s.expected_port != null && (
-                          <button
-                            className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
-                            disabled={b}
-                            title={`Tunnel :${s.expected_port} via Cloudflare`}
-                            onClick={() =>
-                              withBusy(s.id, async () => {
-                                try {
-                                  const result = await api.startTunnel(s.expected_port!);
-                                  if (result.url) {
-                                    navigator.clipboard.writeText(result.url);
-                                    alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
-                                  }
-                                } catch (e: any) {
-                                  alert(`Tunnel failed: ${e?.message ?? e}`);
+                        <button
+                          className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
+                          disabled={b}
+                          title={s.expected_port ? `Tunnel :${s.expected_port}` : 'Tunnel via Cloudflare'}
+                          onClick={() =>
+                            withBusy(s.id, async () => {
+                              try {
+                                let port = s.expected_port;
+                                if (!port && pid) {
+                                  // Find port this process opened
+                                  const ports = await api.listPorts();
+                                  const found = ports.find((p) => p.pid === pid);
+                                  port = found?.port ?? null;
                                 }
-                              })
-                            }
-                          >
-                            <IconTunnel />
-                          </button>
-                        )}
+                                if (!port) {
+                                  alert('No port detected for this script. Set expected_port in edit.');
+                                  return;
+                                }
+                                const result = await api.startTunnel(port);
+                                if (result.url) {
+                                  navigator.clipboard.writeText(result.url);
+                                  alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
+                                }
+                              } catch (e: any) {
+                                alert(`Tunnel failed: ${e?.message ?? e}`);
+                              }
+                            })
+                          }
+                        >
+                          <IconTunnel />
+                        </button>
                       </>
                     )}
                     <span className="w-1" />

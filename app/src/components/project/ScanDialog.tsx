@@ -156,7 +156,7 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
         <DialogFooter>
           {candidates && (
             <Button variant="outline" onClick={resetToPicker} disabled={busy}>
-              ← Back
+              Back
             </Button>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>

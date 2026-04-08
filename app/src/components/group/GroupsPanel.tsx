@@ -91,7 +91,7 @@ export function GroupsPanel({ projects }: Props) {
                     disabled={busy === g.id || g.members.length === 0}
                     onClick={() => handleRun(g.id)}
                   >
-                    {busy === g.id ? 'launching…' : '▶ Run'}
+                    {busy === g.id ? 'launching…' : 'Run'}
                   </button>
                   <button
                     className="close-circle opacity-0 group-hover:opacity-100"
