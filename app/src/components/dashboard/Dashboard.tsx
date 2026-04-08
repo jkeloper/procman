@@ -47,7 +47,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   }, [reload]);
 
   async function handleKill(port: number) {
-    if (!window.confirm(`Kill process on port :${port}?`)) return;
+    if (!window.confirm(`Kill process on port :${port}?\n\nThis will forcefully terminate the process. This action cannot be undone.`)) return;
     setKilling(port);
     try {
       await api.killPort(port);
@@ -362,11 +362,11 @@ function PortTable({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
-                    className="rounded px-2 py-0.5 text-[11px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+                    className="rounded bg-red-600 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                     disabled={killing === p.port}
                     onClick={() => onKill(p.port)}
                   >
-                    {killing === p.port ? 'killing…' : 'kill'}
+                    {killing === p.port ? 'killing…' : 'Kill'}
                   </button>
                 </td>
               </tr>
