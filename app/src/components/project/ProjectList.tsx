@@ -18,8 +18,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
   const [scanOpen, setScanOpen] = useState(false);
   const { statuses } = useProcessStatus();
   const confirm = useConfirm();
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
@@ -33,20 +32,13 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
     }
   }
 
-  async function handleDrop(targetId: string) {
-    if (!dragId || dragId === targetId) {
-      setDragId(null);
-      setDropTarget(null);
-      return;
-    }
+  async function moveProject(id: string, direction: 'up' | 'down') {
     const ids = projects.map((p) => p.id);
-    const fromIdx = ids.indexOf(dragId);
-    const toIdx = ids.indexOf(targetId);
-    if (fromIdx < 0 || toIdx < 0) return;
-    ids.splice(fromIdx, 1);
-    ids.splice(toIdx, 0, dragId);
-    setDragId(null);
-    setDropTarget(null);
+    const idx = ids.indexOf(id);
+    if (idx < 0) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= ids.length) return;
+    [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
     try {
       await api.reorderProjects(ids);
       onProjectsChanged();
@@ -87,6 +79,17 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
               </span>
               <div className="flex items-center gap-0.5">
                 <button
+                  className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+                    reorderMode
+                      ? 'bg-primary/20 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                  onClick={() => setReorderMode((v) => !v)}
+                  title="Reorder projects"
+                >
+                  {reorderMode ? 'done' : '⇅'}
+                </button>
+                <button
                   className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => setScanOpen(true)}
                   title="Scan folder for projects"
@@ -108,77 +111,54 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
               </p>
             ) : (
               <ul className="space-y-px">
-                {projects.map((p) => {
+                {projects.map((p, idx) => {
                   const running = projectRunningCount(p);
                   const isSelected = selectedId === p.id;
-                  const isDragging = dragId === p.id;
-                  const isDropHere = dropTarget === p.id && dragId !== p.id;
                   return (
                     <li
                       key={p.id}
-                      className="relative"
-                      onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
-                      onDragLeave={() => setDropTarget(null)}
-                      onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+                      className={`group flex items-center gap-1.5 rounded-md px-1.5 py-2 text-[13px] transition-all duration-200 ${
+                        isSelected
+                          ? 'bg-accent font-medium text-foreground'
+                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                      }`}
+                      onClick={() => onSelect(p.id)}
                     >
-                      {/* Drop indicator — iOS style gap */}
-                      <div
-                        className={`transition-all duration-200 ease-out ${
-                          isDropHere ? 'h-8 opacity-100' : 'h-0 opacity-0'
-                        } flex items-center overflow-hidden`}
-                      >
-                        <div className="mx-3 h-[2px] w-full rounded-full bg-primary/60" />
-                      </div>
-
-                      <div
-                        className={`group flex items-center gap-1.5 rounded-md px-1.5 py-2 text-[13px] transition-all duration-200 ${
-                          isSelected
-                            ? 'bg-accent font-medium text-foreground'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                        } ${isDragging ? 'scale-[1.03] bg-card shadow-xl ring-1 ring-primary/30 opacity-80 z-20' : ''}`}
-                        style={{
-                          opacity: dragId && !isDragging ? 0.45 : undefined,
-                          transition: 'all 0.2s cubic-bezier(0.25,0.1,0.25,1)',
-                        }}
-                        onClick={() => !dragId && onSelect(p.id)}
-                      >
-                        {/* Drag handle — 3 bars, iOS style */}
-                        <span
-                          draggable
-                          onDragStart={(e) => {
-                            setDragId(p.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                          }}
-                          onDragEnd={() => { setDragId(null); setDropTarget(null); }}
-                          className="flex shrink-0 cursor-grab flex-col gap-[2px] px-1 py-1 active:cursor-grabbing"
-                          title="Drag to reorder"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
-                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
-                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
-                        </span>
-
-                        <span className="min-w-0 flex-1 truncate">{p.name}</span>
-
-                        <div className="flex items-center gap-1 shrink-0">
-                          {running > 0 && (
-                            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                              {running}
-                            </span>
-                          )}
-                          <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-                            {p.scripts.length}
-                          </span>
+                      {/* Reorder buttons */}
+                      {reorderMode && (
+                        <div className="flex shrink-0 flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="flex h-4 w-4 items-center justify-center rounded text-[8px] text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-20"
+                            disabled={idx === 0}
+                            onClick={() => moveProject(p.id, 'up')}
+                          >▲</button>
+                          <button
+                            className="flex h-4 w-4 items-center justify-center rounded text-[8px] text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-20"
+                            disabled={idx === projects.length - 1}
+                            onClick={() => moveProject(p.id, 'down')}
+                          >▼</button>
                         </div>
+                      )}
 
-                        <button
-                          className="close-circle opacity-0 group-hover:opacity-100"
-                          onClick={(e) => { e.stopPropagation(); handleDelete(e, p.id); }}
-                        >
-                          ✕
-                        </button>
+                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {running > 0 && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {running}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                          {p.scripts.length}
+                        </span>
                       </div>
+
+                      <button
+                        className="close-circle opacity-0 group-hover:opacity-100"
+                        onClick={(e) => { e.stopPropagation(); handleDelete(e, p.id); }}
+                      >
+                        ✕
+                      </button>
                     </li>
                   );
                 })}

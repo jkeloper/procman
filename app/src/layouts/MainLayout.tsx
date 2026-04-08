@@ -54,12 +54,15 @@ export function MainLayout() {
     });
     const onClose = () => setLogOpen(false);
     const onOpen = () => setLogOpen(true);
+    const onToggle = () => setLogOpen((v) => !v);
     window.addEventListener('procman:close-logs', onClose);
     window.addEventListener('procman:open-logs', onOpen);
+    window.addEventListener('procman:toggle-logs', onToggle);
     return () => {
       un.then((fn) => fn());
       window.removeEventListener('procman:close-logs', onClose);
       window.removeEventListener('procman:open-logs', onOpen);
+      window.removeEventListener('procman:toggle-logs', onToggle);
     };
   }, []);
 
@@ -160,7 +163,7 @@ export function MainLayout() {
             className="shrink-0 overflow-hidden border-t border-border/60 transition-all duration-300 ease-in-out"
             style={{ height: logOpen ? logDrawer.size : 31 }}
           >
-            <LogViewer />
+            <LogViewer isExpanded={logOpen} />
           </section>
         </main>
       </div>

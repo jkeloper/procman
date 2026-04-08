@@ -8,7 +8,7 @@ interface Tab {
   name: string;
 }
 
-export function LogViewer() {
+export function LogViewer({ isExpanded = true }: { isExpanded?: boolean }) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
 
@@ -82,16 +82,23 @@ export function LogViewer() {
     <div className="flex h-full flex-col bg-[#0a0a0a]">
       {/* Tab bar — compact, dark */}
       <div className="flex h-8 shrink-0 items-center gap-0 border-b border-white/10 bg-[#161b18] px-2 text-[11px]">
-        {/* Minimize drawer button */}
+        {/* Toggle minimize/maximize */}
         <button
-          onClick={() => window.dispatchEvent(new CustomEvent('procman:close-logs'))}
+          onClick={() => window.dispatchEvent(new CustomEvent('procman:toggle-logs'))}
           className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200"
-          title="Minimize (⌘L)"
+          title="Toggle logs (⌘L)"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <line x1="3" y1="11" x2="11" y2="11" />
-            <polyline points="4,7 7,10 10,7" />
-          </svg>
+          {isExpanded ? (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="3" y1="11" x2="11" y2="11" />
+              <polyline points="4,7 7,10 10,7" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="3" y1="3" x2="11" y2="3" />
+              <polyline points="4,7 7,4 10,7" />
+            </svg>
+          )}
         </button>
         {tabs.map((t) => {
           const isActive = t.scriptId === activeTab?.scriptId;
