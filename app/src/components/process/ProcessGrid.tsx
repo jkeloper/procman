@@ -25,6 +25,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editingScript, setEditingScript] = useState<Script | null>(null);
   const { statuses, pids } = useProcessStatus();
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [tunnels, setTunnels] = useState<Record<string, { url: string; port: number }>>({});
   const confirm = useConfirm();
   const [conflict, setConflict] = useState<{
     script: Script;
@@ -177,11 +178,13 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
               const pid = pids[s.id];
               const isRunning = status === 'running';
               const b = busy.has(s.id);
+              const tunnel = tunnels[s.id];
               return (
                 <li
                   key={s.id}
-                  className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40"
+                  className="group transition-colors hover:bg-accent/40"
                 >
+                <div className="flex items-center gap-3 px-4 py-2.5">
                   {/* Status dot */}
                   <div className="shrink-0 w-[70px]">
                     <StatusBadge status={status} />
@@ -235,17 +238,16 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                               await confirm({ title: 'No port detected', description: `Could not find a listening port for "${s.name}".\nSet the expected port in Edit.`, confirmLabel: 'OK' });
                               return;
                             }
-                            // Show immediate feedback
-                            const tunnelPort = port;
-                            await confirm({ title: 'Starting tunnel...', description: `Creating Cloudflare tunnel for port :${tunnelPort}.\nThis may take up to 15 seconds.`, confirmLabel: 'Start' });
+                            setBusy((prev) => new Set(prev).add(s.id));
                             try {
-                              const result = await api.startTunnel(tunnelPort);
+                              const result = await api.startTunnel(port);
                               if (result.url) {
-                                navigator.clipboard.writeText(result.url);
-                                await confirm({ title: 'Tunnel active', description: `${result.url}\n\nURL copied to clipboard.`, confirmLabel: 'OK' });
+                                setTunnels((prev) => ({ ...prev, [s.id]: { url: result.url!, port } }));
                               }
                             } catch (e: any) {
                               await confirm({ title: 'Tunnel failed', description: e?.message ?? String(e), confirmLabel: 'OK', destructive: true });
+                            } finally {
+                              setBusy((prev) => { const n = new Set(prev); n.delete(s.id); return n; });
                             }
                           }}
                         >
@@ -300,6 +302,40 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                       ✕
                     </button>
                   </div>
+                </div>
+                {/* Inline tunnel bar */}
+                {tunnel && (
+                  <div className="flex items-center gap-2 border-t border-border/20 bg-primary/5 px-4 py-1.5 text-[11px] transition-all duration-200">
+                    <IconTunnel />
+                    <span className="min-w-0 flex-1 truncate font-mono text-primary">
+                      {tunnel.url}
+                    </span>
+                    <span className="shrink-0 font-mono text-muted-foreground/60">
+                      :{tunnel.port}
+                    </span>
+                    <button
+                      className="rounded px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => navigator.clipboard.writeText(tunnel.url)}
+                    >
+                      copy
+                    </button>
+                    <button
+                      className="rounded bg-red-800/80 px-2 py-0.5 text-[10px] font-medium text-red-100 transition-colors hover:bg-red-700"
+                      onClick={async () => {
+                        try {
+                          await api.stopTunnel();
+                          setTunnels((prev) => {
+                            const n = { ...prev };
+                            delete n[s.id];
+                            return n;
+                          });
+                        } catch {}
+                      }}
+                    >
+                      Stop tunnel
+                    </button>
+                  </div>
+                )}
                 </li>
               );
             })}
