@@ -3,6 +3,7 @@ import { api, type PortInfo, type Project } from '@/api/tauri';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
 import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
 import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { IconOverview, IconPorts, IconGroups, IconNetwork } from '@/components/icons/TabIcons';
 
 interface Props {
@@ -25,6 +26,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [killing, setKilling] = useState<number | null>(null);
+  const confirm = useConfirm();
 
   const reload = useCallback(async () => {
     try {
@@ -47,7 +49,8 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   }, [reload]);
 
   async function handleKill(port: number) {
-    if (!window.confirm(`Kill process on port :${port}?\n\nThis will forcefully terminate the process. This action cannot be undone.`)) return;
+    const ok = await confirm({ title: `Kill process on port :${port}?`, description: 'This will forcefully terminate the process.\nThis action cannot be undone.', confirmLabel: 'Kill', destructive: true });
+    if (!ok) return;
     setKilling(port);
     try {
       await api.killPort(port);

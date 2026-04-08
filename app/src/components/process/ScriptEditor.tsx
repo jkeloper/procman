@@ -7,6 +7,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { api, type Script } from '@/api/tauri';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 interface Props {
   open: boolean;
@@ -66,6 +67,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [autoRestart, setAutoRestart] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
 
   useEffect(() => {
     if (open) {
@@ -77,10 +79,10 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
     }
   }, [open, existing]);
 
-  function applyTemplate(t: Template) {
+  async function applyTemplate(t: Template) {
     const hasContent = name.trim() || command.trim();
     if (hasContent) {
-      if (!window.confirm('현재 편집 중인 내용을 템플릿으로 대체하시겠습니까?\n\n입력한 내용이 사라집니다.')) {
+      const ok = await confirm({ title: '템플릿 적용', description: '현재 편집 중인 내용이 템플릿으로 대체됩니다.', confirmLabel: '대체', destructive: false }); if (!ok) {
         return;
       }
     }

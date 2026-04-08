@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { VSCodeImportDialog } from './VSCodeImportDialog';
 import { PortConflictDialog } from './PortConflictDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { IconTunnel } from '@/components/icons/TabIcons';
 import type { PortInfo } from '@/api/tauri';
 
@@ -24,6 +25,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editingScript, setEditingScript] = useState<Script | null>(null);
   const { statuses, pids } = useProcessStatus();
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const confirm = useConfirm();
   const [conflict, setConflict] = useState<{
     script: Script;
     port: number;
@@ -53,7 +55,8 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   }
 
   async function handleDelete(scriptId: string) {
-    if (!window.confirm('Delete this script?')) return;
+    const ok = await confirm({ title: 'Delete script?', description: 'This script will be removed.', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     try {
       await api.deleteScript(projectId, scriptId);
       reload();
@@ -248,11 +251,16 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           ↻
                         </button>
                         <button
-                          className="rounded border border-border/60 px-2.5 py-1 text-[11px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                          className="rounded bg-red-800/80 px-2.5 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
                           disabled={b}
-                          onClick={() => {
-                            if (!window.confirm(`Stop "${s.name}"?\n\nThe process will be terminated.`)) return;
-                            withBusy(s.id, () => api.killProcess(s.id));
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: `Stop "${s.name}"?`,
+                              description: 'The process will be terminated. This cannot be undone.',
+                              confirmLabel: 'Stop',
+                              destructive: true,
+                            });
+                            if (ok) withBusy(s.id, () => api.killProcess(s.id));
                           }}
                         >
                           Stop

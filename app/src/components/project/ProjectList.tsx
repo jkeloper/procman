@@ -4,6 +4,7 @@ import { api, type Project } from '@/api/tauri';
 import { NewProjectDialog } from './NewProjectDialog';
 import { ScanDialog } from './ScanDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 interface Props {
   selectedId: string | null;
@@ -16,12 +17,13 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const { statuses } = useProcessStatus();
+  const confirm = useConfirm();
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
-    if (!window.confirm('Delete this project?')) return;
+    const ok = await confirm({ title: 'Delete project?', description: 'This project and all its scripts will be removed.', confirmLabel: 'Delete', destructive: true }); if (!ok) return;
     try {
       await api.deleteProject(id);
       if (selectedId === id) onSelect(null);
@@ -115,7 +117,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                     <li key={p.id} className="relative">
                       {/* Drop guide line */}
                       {isDropHere && (
-                        <div className="absolute -top-[1px] left-2 right-2 h-[3px] rounded-full bg-primary shadow-[0_0_6px_rgba(74,157,107,0.6)] z-10" />
+                        <div className="absolute -top-[1px] left-2 right-2 h-[2px] rounded-full bg-white/70 shadow-[0_0_8px_rgba(255,255,255,0.4)] z-10" />
                       )}
                       <div
                         draggable
