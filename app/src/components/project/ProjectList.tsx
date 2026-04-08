@@ -112,22 +112,26 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                   const isDragging = dragId === p.id;
                   const isDropHere = dropTarget === p.id && dragId !== p.id;
                   return (
-                    <li
-                      key={p.id}
-                      draggable
-                      onDragStart={() => setDragId(p.id)}
-                      onDragEnd={() => { setDragId(null); setDropTarget(null); }}
-                      onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
-                      onDragLeave={() => setDropTarget(null)}
-                      onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
-                      className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1.5 text-[13px] transition-all ${
-                        isSelected
-                          ? 'bg-accent font-medium text-foreground'
-                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                      } ${isDragging ? 'opacity-40' : ''} ${isDropHere ? 'border-t-2 border-primary' : 'border-t-2 border-transparent'}`}
-                      style={{ opacity: dragId && !isDragging ? 0.6 : undefined }}
-                      onClick={() => onSelect(p.id)}
-                    >
+                    <li key={p.id} className="relative">
+                      {/* Drop guide line */}
+                      {isDropHere && (
+                        <div className="absolute -top-[1px] left-2 right-2 h-[3px] rounded-full bg-primary shadow-[0_0_6px_rgba(74,157,107,0.6)] z-10" />
+                      )}
+                      <div
+                        draggable
+                        onDragStart={() => setDragId(p.id)}
+                        onDragEnd={() => { setDragId(null); setDropTarget(null); }}
+                        onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
+                        onDragLeave={() => setDropTarget(null)}
+                        onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+                        className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1.5 text-[13px] transition-all ${
+                          isSelected
+                            ? 'bg-accent font-medium text-foreground'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                        } ${isDragging ? 'scale-105 opacity-40 shadow-lg' : ''}`}
+                        style={{ opacity: dragId && !isDragging ? 0.5 : undefined }}
+                        onClick={() => onSelect(p.id)}
+                      >
                       {/* Drag handle */}
                       <span
                         className="shrink-0 cursor-grab text-[10px] text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
@@ -152,6 +156,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                       >
                         ✕
                       </button>
+                      </div>
                     </li>
                   );
                 })}

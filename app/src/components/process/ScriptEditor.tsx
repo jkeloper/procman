@@ -78,8 +78,9 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   }, [open, existing]);
 
   function applyTemplate(t: Template) {
-    if (command.trim() && command.trim() !== existing?.command) {
-      if (!window.confirm('현재 편집 중인 내용을 템플릿으로 대체하시겠습니까?')) {
+    const hasContent = name.trim() || command.trim();
+    if (hasContent) {
+      if (!window.confirm('현재 편집 중인 내용을 템플릿으로 대체하시겠습니까?\n\n입력한 내용이 사라집니다.')) {
         return;
       }
     }
@@ -125,14 +126,13 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           <div className="mt-4 flex items-center gap-2 border-b border-border/60 pb-3">
             <span className="shrink-0 text-[12px] font-medium text-muted-foreground">Template</span>
             <select
+              value=""
               onChange={(e) => {
                 const idx = parseInt(e.target.value, 10);
                 if (!isNaN(idx) && TEMPLATES[idx]) {
                   applyTemplate(TEMPLATES[idx]);
                 }
-                e.target.value = '';
               }}
-              defaultValue=""
               className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-[13px] text-foreground focus:border-primary/50 focus:outline-none"
             >
               <option value="" disabled>Select a template...</option>
