@@ -125,7 +125,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
       </ScrollArea>
 
       {/* Footer — status summary */}
-      <div className="shrink-0 space-y-1 border-t border-border/60 px-3 py-2">
+      <div className="shrink-0 space-y-1 border-t border-border/60 px-3 pb-4 pt-2">
         <div className="flex items-center justify-between text-[10px]">
           <span className="text-muted-foreground/60">
             {projects.reduce((n, p) => n + p.scripts.filter((s) => statuses[s.id] === 'running').length, 0)} running
