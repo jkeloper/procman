@@ -109,7 +109,7 @@ export function LogViewer() {
               <span className="font-mono">{t.name}</span>
               <button
                 onClick={(e) => closeTab(t.scriptId, e)}
-                className={`ml-0.5 rounded px-1 text-zinc-600 hover:text-zinc-100 ${
+                className={`close-circle ml-0.5 ${
                   isActive ? '' : 'opacity-0 group-hover:opacity-100'
                 }`}
               >

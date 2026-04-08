@@ -148,7 +148,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                         </span>
                       </div>
                       <button
-                        className="opacity-0 transition-opacity text-muted-foreground hover:text-red-500 group-hover:opacity-100"
+                        className="close-circle opacity-0 group-hover:opacity-100"
                         onClick={(e) => handleDelete(e, p.id)}
                       >
                         ✕

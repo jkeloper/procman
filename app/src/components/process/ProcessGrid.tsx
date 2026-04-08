@@ -296,7 +296,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                       edit
                     </button>
                     <button
-                      className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                      className="close-circle opacity-0 group-hover:opacity-100"
                       onClick={() => handleDelete(s.id)}
                     >
                       ✕

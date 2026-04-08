@@ -181,4 +181,25 @@
     border-radius: 9999px;
     margin-right: 6px;
   }
+  .close-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    background: color-mix(in oklch, var(--primary) 25%, rgba(255,255,255,0.15));
+    color: var(--muted-foreground);
+    font-size: 10px;
+    line-height: 1;
+    transition: all 0.15s;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .close-circle:hover {
+    background: color-mix(in oklch, var(--primary) 40%, rgba(255,255,255,0.2));
+    color: var(--foreground);
+  }
 }

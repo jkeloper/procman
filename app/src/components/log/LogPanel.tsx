@@ -173,7 +173,7 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="absolute right-1 top-1/2 -translate-y-1/2 px-1 text-zinc-500 hover:text-zinc-300"
+              className="close-circle absolute right-1 top-1/2 -translate-y-1/2" style={{width:16,height:16,fontSize:8}}
             >
               ✕
             </button>
