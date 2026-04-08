@@ -83,11 +83,7 @@ export function MainLayout() {
           className="flex shrink-0 flex-col border-r border-border/60 bg-sidebar"
           style={{ width: sidebar.size }}
         >
-          {/* macOS traffic light drag area */}
-          <div
-            className="h-9 shrink-0"
-            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-          />
+          {/* macOS traffic light — inline with sidebar content */}
           <ProjectList
             selectedId={selectedProjectId}
             onSelect={setSelectedProjectId}
@@ -109,20 +105,20 @@ export function MainLayout() {
           {/* Top bar — draggable, only shows project name when inside a project */}
           {showingProject && (
             <div
-              className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 pl-20 pr-3 text-[12px]"
+              className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 px-3 text-[14px]"
               style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
             >
               <div
-                className="flex items-center gap-1"
+                className="flex items-center gap-2"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
                 <button
-                  className="rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                  className="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground"
                   onClick={() => setSelectedProjectId(null)}
                 >
                   ←
                 </button>
-                <span className="font-medium text-foreground">
+                <span className="font-semibold text-foreground">
                   {currentProject?.name}
                 </span>
               </div>
