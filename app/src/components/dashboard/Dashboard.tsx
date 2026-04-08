@@ -362,7 +362,7 @@ function PortTable({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
-                    className="rounded bg-red-600 px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                    className="rounded bg-red-800/80 px-3 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
                     disabled={killing === p.port}
                     onClick={() => onKill(p.port)}
                   >
