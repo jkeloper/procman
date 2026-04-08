@@ -135,7 +135,6 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                       >
                         ≡
                       </span>
-                      <span className={`status-dot ${running > 0 ? 'bg-emerald-500' : 'bg-border'}`} style={{ marginRight: 0 }} />
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       <div className="flex items-center gap-1 shrink-0">
                         {running > 0 && (

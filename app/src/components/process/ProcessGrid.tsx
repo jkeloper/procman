@@ -250,7 +250,10 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         <button
                           className="rounded border border-border/60 px-2.5 py-1 text-[11px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
                           disabled={b}
-                          onClick={() => withBusy(s.id, () => api.killProcess(s.id))}
+                          onClick={() => {
+                            if (!window.confirm(`Stop "${s.name}"?\n\nThe process will be terminated.`)) return;
+                            withBusy(s.id, () => api.killProcess(s.id));
+                          }}
                         >
                           Stop
                         </button>

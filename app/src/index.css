@@ -181,6 +181,15 @@
     border-radius: 9999px;
     margin-right: 6px;
   }
+  /* Drag and drop animation */
+  [draggable] {
+    transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  }
+  [draggable]:active {
+    transform: scale(1.02);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    z-index: 10;
+  }
   .close-circle {
     display: inline-flex;
     align-items: center;
