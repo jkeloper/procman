@@ -34,7 +34,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
   }
 
   return (
-    <>
+    <div className="flex h-full flex-col">
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">
           {/* Dashboard */}
@@ -99,14 +99,16 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                     >
                       <span className={`status-dot ${running > 0 ? 'bg-emerald-500' : 'bg-border'}`} style={{ marginRight: 0 }} />
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                      {running > 0 && (
-                        <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
-                          {running}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {running > 0 && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {running}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                          {p.scripts.length}
                         </span>
-                      )}
-                      <span className="text-[10px] font-mono text-muted-foreground/60">
-                        {p.scripts.length}
-                      </span>
+                      </div>
                       <button
                         className="opacity-0 transition-opacity text-muted-foreground hover:text-red-500 group-hover:opacity-100"
                         onClick={(e) => handleDelete(e, p.id)}
@@ -122,9 +124,9 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
         </div>
       </ScrollArea>
 
-      {/* Footer hint */}
-      <div className="border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground/60">
-        <kbd>⌘K</kbd> to search · <kbd>⌘,</kbd> dashboard
+      {/* Footer hint — fixed at bottom */}
+      <div className="shrink-0 border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground/60">
+        <kbd>⌘K</kbd> search · <kbd>⌘L</kbd> logs · <kbd>⌘,</kbd> dashboard
       </div>
 
       <NewProjectDialog
@@ -137,6 +139,6 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
         onOpenChange={setScanOpen}
         onImported={onProjectsChanged}
       />
-    </>
+    </div>
   );
 }

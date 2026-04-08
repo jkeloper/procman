@@ -52,8 +52,12 @@ export function MainLayout() {
         setLogOpen(true);
       }
     });
+    // Close-logs event from LogViewer ✕ button
+    const onClose = () => setLogOpen(false);
+    window.addEventListener('procman:close-logs', onClose);
     return () => {
       un.then((fn) => fn());
+      window.removeEventListener('procman:close-logs', onClose);
     };
   }, []);
 
