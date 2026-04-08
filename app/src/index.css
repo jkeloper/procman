@@ -133,6 +133,8 @@
     @apply bg-background text-foreground;
     font-family: 'Noto Sans KR', 'Geist Variable', -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: 'ss01', 'ss02', 'cv01', 'cv11';
+    font-size: 14px;
+    line-height: 1.5;
   }
   html {
     @apply font-sans antialiased;

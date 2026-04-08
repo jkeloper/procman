@@ -102,6 +102,7 @@ pub fn run() {
             commands::create_project,
             commands::update_project,
             commands::delete_project,
+            commands::reorder_projects,
             // Scripts
             commands::list_scripts,
             commands::create_script,

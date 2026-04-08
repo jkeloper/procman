@@ -55,6 +55,7 @@ export const api = {
   updateProject: (id: string, name?: string, path?: string) =>
     call('update_project', { id, name, path }, ProjectSchema),
   deleteProject: (id: string) => call('delete_project', { id }, z.void()),
+  reorderProjects: (ids: string[]) => callRaw<null>('reorder_projects', { ids }),
 
   // Scripts
   listScripts: (projectId: string) =>

@@ -16,6 +16,8 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const { statuses } = useProcessStatus();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
@@ -27,6 +29,26 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
     } catch (e: any) {
       alert(`Failed to delete: ${e?.message ?? e}`);
     }
+  }
+
+  async function handleDrop(targetId: string) {
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      setDropTarget(null);
+      return;
+    }
+    const ids = projects.map((p) => p.id);
+    const fromIdx = ids.indexOf(dragId);
+    const toIdx = ids.indexOf(targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, dragId);
+    setDragId(null);
+    setDropTarget(null);
+    try {
+      await api.reorderProjects(ids);
+      onProjectsChanged();
+    } catch {}
   }
 
   function projectRunningCount(p: Project) {
@@ -87,16 +109,32 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                 {projects.map((p) => {
                   const running = projectRunningCount(p);
                   const isSelected = selectedId === p.id;
+                  const isDragging = dragId === p.id;
+                  const isDropHere = dropTarget === p.id && dragId !== p.id;
                   return (
                     <li
                       key={p.id}
-                      className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-all ${
+                      draggable
+                      onDragStart={() => setDragId(p.id)}
+                      onDragEnd={() => { setDragId(null); setDropTarget(null); }}
+                      onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+                      className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1.5 text-[13px] transition-all ${
                         isSelected
                           ? 'bg-accent font-medium text-foreground'
                           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                      }`}
+                      } ${isDragging ? 'opacity-40' : ''} ${isDropHere ? 'border-t-2 border-primary' : 'border-t-2 border-transparent'}`}
+                      style={{ opacity: dragId && !isDragging ? 0.6 : undefined }}
                       onClick={() => onSelect(p.id)}
                     >
+                      {/* Drag handle */}
+                      <span
+                        className="shrink-0 cursor-grab text-[10px] text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        ≡
+                      </span>
                       <span className={`status-dot ${running > 0 ? 'bg-emerald-500' : 'bg-border'}`} style={{ marginRight: 0 }} />
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       <div className="flex items-center gap-1 shrink-0">

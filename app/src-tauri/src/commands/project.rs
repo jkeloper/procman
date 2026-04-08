@@ -141,3 +141,25 @@ pub async fn delete_project(
     }
     Ok(())
 }
+
+#[tauri::command]
+pub async fn reorder_projects(
+    ids: Vec<String>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .mutate(|cfg| {
+            let mut reordered = Vec::with_capacity(ids.len());
+            for id in &ids {
+                if let Some(pos) = cfg.projects.iter().position(|p| p.id == *id) {
+                    reordered.push(cfg.projects.remove(pos));
+                }
+            }
+            // Append any projects not in the ids list (safety)
+            reordered.append(&mut cfg.projects);
+            cfg.projects = reordered;
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
