@@ -225,21 +225,28 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           onClick={async () => {
                             let port = s.expected_port;
                             if (!port && pid) {
-                              const ports = await api.listPorts();
-                              const found = ports.find((p) => p.pid === pid);
-                              port = found?.port ?? null;
+                              try {
+                                const ports = await api.listPorts();
+                                const found = ports.find((p) => p.pid === pid);
+                                port = found?.port ?? null;
+                              } catch {}
                             }
                             if (!port) {
-                              await confirm({ title: 'No port detected', description: 'Set expected_port in edit to use tunnel.', confirmLabel: 'OK' });
+                              await confirm({ title: 'No port detected', description: `Could not find a listening port for "${s.name}".\nSet the expected port in Edit.`, confirmLabel: 'OK' });
                               return;
                             }
-                            withBusy(s.id, async () => {
-                              const result = await api.startTunnel(port!);
+                            // Show immediate feedback
+                            const tunnelPort = port;
+                            await confirm({ title: 'Starting tunnel...', description: `Creating Cloudflare tunnel for port :${tunnelPort}.\nThis may take up to 15 seconds.`, confirmLabel: 'Start' });
+                            try {
+                              const result = await api.startTunnel(tunnelPort);
                               if (result.url) {
                                 navigator.clipboard.writeText(result.url);
                                 await confirm({ title: 'Tunnel active', description: `${result.url}\n\nURL copied to clipboard.`, confirmLabel: 'OK' });
                               }
-                            });
+                            } catch (e: any) {
+                              await confirm({ title: 'Tunnel failed', description: e?.message ?? String(e), confirmLabel: 'OK', destructive: true });
+                            }
                           }}
                         >
                           <IconTunnel />
