@@ -129,7 +129,7 @@ export function VSCodeImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-4xl w-[90vw]">
+      <DialogContent className="!max-w-3xl" style={{ width: 'min(90vw, 768px)', overflow: 'hidden' }}>
         <DialogHeader>
           <DialogTitle>Import from VSCode launch.json</DialogTitle>
           <DialogDescription className="truncate font-mono text-[11px]">

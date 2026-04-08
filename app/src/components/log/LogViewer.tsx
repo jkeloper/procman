@@ -88,7 +88,10 @@ export function LogViewer() {
           className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200"
           title="Minimize (⌘L)"
         >
-          ▾
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <line x1="3" y1="11" x2="11" y2="11" />
+            <polyline points="4,7 7,10 10,7" />
+          </svg>
         </button>
         {tabs.map((t) => {
           const isActive = t.scriptId === activeTab?.scriptId;

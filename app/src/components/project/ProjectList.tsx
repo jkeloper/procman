@@ -107,57 +107,77 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                 No projects yet. <button className="text-primary hover:underline" onClick={() => setScanOpen(true)}>Scan a folder</button> to start.
               </p>
             ) : (
-              <ul className="space-y-0.5">
+              <ul className="space-y-px">
                 {projects.map((p) => {
                   const running = projectRunningCount(p);
                   const isSelected = selectedId === p.id;
                   const isDragging = dragId === p.id;
                   const isDropHere = dropTarget === p.id && dragId !== p.id;
                   return (
-                    <li key={p.id} className="relative">
-                      {/* Drop guide line */}
-                      {isDropHere && (
-                        <div className="absolute -top-[1px] left-2 right-2 h-[2px] rounded-full bg-white/70 shadow-[0_0_8px_rgba(255,255,255,0.4)] z-10" />
-                      )}
+                    <li
+                      key={p.id}
+                      className="relative"
+                      onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+                    >
+                      {/* Drop indicator — iOS style gap */}
                       <div
-                        draggable
-                        onDragStart={() => setDragId(p.id)}
-                        onDragEnd={() => { setDragId(null); setDropTarget(null); }}
-                        onDragOver={(e) => { e.preventDefault(); setDropTarget(p.id); }}
-                        onDragLeave={() => setDropTarget(null)}
-                        onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
-                        className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1.5 text-[13px] transition-all ${
+                        className={`transition-all duration-200 ease-out ${
+                          isDropHere ? 'h-8 opacity-100' : 'h-0 opacity-0'
+                        } flex items-center overflow-hidden`}
+                      >
+                        <div className="mx-3 h-[2px] w-full rounded-full bg-primary/60" />
+                      </div>
+
+                      <div
+                        className={`group flex items-center gap-1.5 rounded-md px-1.5 py-2 text-[13px] transition-all duration-200 ${
                           isSelected
                             ? 'bg-accent font-medium text-foreground'
                             : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                        } ${isDragging ? 'scale-105 opacity-40 shadow-lg' : ''}`}
-                        style={{ opacity: dragId && !isDragging ? 0.5 : undefined }}
-                        onClick={() => onSelect(p.id)}
+                        } ${isDragging ? 'scale-[1.03] bg-card shadow-xl ring-1 ring-primary/30 opacity-80 z-20' : ''}`}
+                        style={{
+                          opacity: dragId && !isDragging ? 0.45 : undefined,
+                          transition: 'all 0.2s cubic-bezier(0.25,0.1,0.25,1)',
+                        }}
+                        onClick={() => !dragId && onSelect(p.id)}
                       >
-                      {/* Drag handle */}
-                      <span
-                        className="shrink-0 cursor-grab text-[10px] text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        ≡
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {running > 0 && (
-                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {running}
-                          </span>
-                        )}
-                        <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-                          {p.scripts.length}
+                        {/* Drag handle — 3 bars, iOS style */}
+                        <span
+                          draggable
+                          onDragStart={(e) => {
+                            setDragId(p.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragEnd={() => { setDragId(null); setDropTarget(null); }}
+                          className="flex shrink-0 cursor-grab flex-col gap-[2px] px-1 py-1 active:cursor-grabbing"
+                          title="Drag to reorder"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
+                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
+                          <span className="block h-[1.5px] w-3 rounded-full bg-muted-foreground/30" />
                         </span>
-                      </div>
-                      <button
-                        className="close-circle opacity-0 group-hover:opacity-100"
-                        onClick={(e) => handleDelete(e, p.id)}
-                      >
-                        ✕
-                      </button>
+
+                        <span className="min-w-0 flex-1 truncate">{p.name}</span>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {running > 0 && (
+                            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                              {running}
+                            </span>
+                          )}
+                          <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                            {p.scripts.length}
+                          </span>
+                        </div>
+
+                        <button
+                          className="close-circle opacity-0 group-hover:opacity-100"
+                          onClick={(e) => { e.stopPropagation(); handleDelete(e, p.id); }}
+                        >
+                          ✕
+                        </button>
                       </div>
                     </li>
                   );

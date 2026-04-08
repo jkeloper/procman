@@ -181,6 +181,13 @@
     border-radius: 9999px;
     margin-right: 6px;
   }
+  /* Dialog children must not exceed dialog width */
+  [data-slot="dialog-content"] > * {
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
   /* Drag and drop animation */
   [draggable] {
     transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;

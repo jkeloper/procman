@@ -4,19 +4,21 @@
    ============================================================ */
 
 :root {
-  --bg: #111d16;
-  --bg2: #162119;
-  --bg3: #1c2a22;
+  /* Synced with desktop forest green theme */
+  --bg: #1a2b20;
+  --bg2: #1f3328;
+  --bg3: #253d2e;
   --fg: #e4efe7;
   --fg2: #9bb5a4;
   --fg3: #5a7566;
   --primary: #4a9d6b;
   --primary-fg: #fff;
-  --red: #f87171;
+  --red: #9f3030;
   --green: #65c18c;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --font-sans: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* ---- Pages ---- */
@@ -121,13 +123,13 @@
   min-height: 44px;
 }
 .btn-stop {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.12);
-  color: var(--fg);
+  background: var(--red);
+  border: none;
+  color: #fecaca;
   border-radius: 10px;
   padding: 10px 18px;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
   min-height: 44px;
 }
 
