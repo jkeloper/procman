@@ -1,4 +1,4 @@
-// Minimal pictogram icons for dashboard tabs.
+// Minimal pictogram icons for dashboard tabs + actions.
 // 16×16 viewBox, stroke-based, currentColor.
 
 const s = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -42,6 +42,18 @@ export function IconNetwork() {
       <line x1="2" y1="8" x2="14" y2="8" />
       <line x1="3.5" y1="5" x2="12.5" y2="5" />
       <line x1="3.5" y1="11" x2="12.5" y2="11" />
+    </svg>
+  );
+}
+
+/** Tunnel icon — mountain with hole (like a road tunnel) */
+export function IconTunnel() {
+  return (
+    <svg {...s}>
+      {/* Mountain outline */}
+      <path d="M1 14 L5 4 L8 8 L11 4 L15 14" />
+      {/* Tunnel hole (arch) */}
+      <path d="M6 14 Q6 10 8 10 Q10 10 10 14" />
     </svg>
   );
 }

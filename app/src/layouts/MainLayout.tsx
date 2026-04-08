@@ -75,32 +75,7 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* Titlebar — draggable on macOS */}
-      <header
-        className="glass flex h-9 items-center justify-between border-b border-border/60 pl-20 pr-2 text-[11px]"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      >
-        <div className="flex items-center gap-2 font-medium tracking-tight">
-          {runningCount > 0 && (
-            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-              {runningCount} running
-            </span>
-          )}
-        </div>
-        <div
-          className="flex items-center gap-2 text-muted-foreground"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <kbd>⌘K</kbd>
-          <span className="text-border">·</span>
-          <button
-            className="rounded px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-foreground"
-            onClick={() => setLogOpen((v) => !v)}
-          >
-            {logOpen ? 'hide logs' : 'show logs'} <kbd className="ml-0.5">⌘L</kbd>
-          </button>
-        </div>
-      </header>
+      {/* No separate titlebar — traffic lights sit on the tab bar */}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar */}
@@ -126,29 +101,51 @@ export function MainLayout() {
 
         {/* Main content */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar / breadcrumb */}
-          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 px-3 text-[12px]">
-            <button
-              className={`rounded px-2 py-1 transition-colors ${
-                !showingProject
-                  ? 'bg-accent font-medium text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setSelectedProjectId(null)}
+          {/* Top bar — draggable + breadcrumb + controls */}
+          <div
+            className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 pl-20 pr-3 text-[12px]"
+            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          >
+            <div
+              className="flex items-center gap-1"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              Dashboard
-            </button>
-            {currentProject && (
-              <>
-                <span className="text-border">/</span>
-                <button className="rounded bg-accent px-2 py-1 font-medium text-foreground">
-                  {currentProject.name}
-                </button>
-                <span className="ml-2 font-mono text-[10px] text-muted-foreground">
-                  {currentProject.path}
+              <button
+                className={`rounded px-2 py-1 transition-colors ${
+                  !showingProject
+                    ? 'bg-accent font-medium text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setSelectedProjectId(null)}
+              >
+                Dashboard
+              </button>
+              {currentProject && (
+                <>
+                  <span className="text-border">/</span>
+                  <button className="rounded bg-accent px-2 py-1 font-medium text-foreground">
+                    {currentProject.name}
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="flex-1" />
+            <div
+              className="flex items-center gap-2"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              {runningCount > 0 && (
+                <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  {runningCount} running
                 </span>
-              </>
-            )}
+              )}
+              <button
+                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => setLogOpen((v) => !v)}
+              >
+                {logOpen ? 'hide logs' : 'show logs'}
+              </button>
+            </div>
           </div>
 
           <section className="flex-1 overflow-hidden">
@@ -163,7 +160,7 @@ export function MainLayout() {
             )}
           </section>
 
-          {/* Log drawer — always rendered, slides up/down */}
+          {/* Log drawer — minimizes to tab bar only when closed */}
           {logOpen && (
             <div
               onMouseDown={logDrawer.onMouseDown}
@@ -175,7 +172,7 @@ export function MainLayout() {
           )}
           <section
             className="shrink-0 overflow-hidden border-t border-border/60 transition-all duration-300 ease-in-out"
-            style={{ height: logOpen ? logDrawer.size : 0 }}
+            style={{ height: logOpen ? logDrawer.size : 32 }}
           >
             <LogViewer />
           </section>

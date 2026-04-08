@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { VSCodeImportDialog } from './VSCodeImportDialog';
 import { PortConflictDialog } from './PortConflictDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { IconTunnel } from '@/components/icons/TabIcons';
 import type { PortInfo } from '@/api/tauri';
 
 interface Props {
@@ -211,9 +212,31 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                   </div>
 
                   {/* Actions */}
-                  <div className="flex shrink-0 items-center gap-0.5">
+                  <div className="flex shrink-0 items-center gap-1">
                     {isRunning ? (
                       <>
+                        {s.expected_port != null && (
+                          <button
+                            className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 disabled:opacity-50"
+                            disabled={b}
+                            title={`Tunnel :${s.expected_port} via Cloudflare`}
+                            onClick={() =>
+                              withBusy(s.id, async () => {
+                                try {
+                                  const result = await api.startTunnel(s.expected_port!);
+                                  if (result.url) {
+                                    navigator.clipboard.writeText(result.url);
+                                    alert(`Tunnel active!\n${result.url}\n\nURL copied to clipboard.`);
+                                  }
+                                } catch (e: any) {
+                                  alert(`Tunnel failed: ${e?.message ?? e}`);
+                                }
+                              })
+                            }
+                          >
+                            <IconTunnel />
+                          </button>
+                        )}
                         <button
                           className="rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                           disabled={b}
@@ -241,6 +264,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         {b ? '…' : 'Start'}
                       </button>
                     )}
+                    <span className="w-1" />
                     <button
                       className="rounded px-2 py-1 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
                       onClick={() => openEditor(s)}
