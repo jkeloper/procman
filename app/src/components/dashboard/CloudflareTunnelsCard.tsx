@@ -6,6 +6,7 @@ import {
   type RunningCloudflared,
   type Project,
 } from '@/api/tauri';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 interface Props {
   projects: Project[];
@@ -18,6 +19,7 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
   const [running, setRunning] = useState<RunningCloudflared[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const reload = useCallback(async () => {
     try {
@@ -70,12 +72,19 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
   }
 
   async function kill(pid: number) {
+    const ok = await confirm({
+      title: `Kill cloudflared (pid ${pid})?`,
+      description: 'This will terminate the tunnel process.\nThis action cannot be undone.',
+      confirmLabel: 'Kill',
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(`pid-${pid}`);
     try {
       await api.killCloudflaredPid(pid);
       await reload();
     } catch (e: any) {
-      alert(`Kill failed: ${e?.message ?? e}`);
+      await confirm({ title: 'Kill failed', description: e?.message ?? String(e), confirmLabel: 'OK', destructive: true });
     } finally {
       setBusy(null);
     }
@@ -142,11 +151,11 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
                       : r.command}
                   </span>
                   <button
-                    className="rounded px-2 py-0.5 text-[11px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+                    className="rounded bg-red-800/80 px-3 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
                     disabled={busy === `pid-${r.pid}`}
                     onClick={() => kill(r.pid)}
                   >
-                    {busy === `pid-${r.pid}` ? 'killing…' : 'kill'}
+                    {busy === `pid-${r.pid}` ? 'killing…' : 'Kill'}
                   </button>
                 </li>
               ))}
