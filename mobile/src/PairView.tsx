@@ -114,7 +114,7 @@ export function PairView({ onPaired }: Props) {
   return (
     <div className="page center-page">
       <div className="login-card">
-        <div className="login-logo">🐸</div>
+        <div className="login-logo"><img src="/icon-192.png" alt="procman" style={{width:72,height:72,borderRadius:16}} /></div>
         <h1 className="login-title">procman</h1>
         <p className="login-sub">Connect to your Mac</p>
 

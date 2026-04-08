@@ -80,17 +80,33 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     }
   }
 
+  // Build match map: expected_port OR managed pid
   const expectedPortMap = new Map<number, { project: string; script: string }>();
   for (const p of projects) {
-    for (const s of p.scripts) {
-      if (s.expected_port != null) {
-        expectedPortMap.set(s.expected_port, { project: p.name, script: s.name });
+    for (const sc of p.scripts) {
+      if (sc.expected_port != null) {
+        expectedPortMap.set(sc.expected_port, { project: p.name, script: sc.name });
+      }
+    }
+  }
+  // Also match by managed pid — if procman spawned a process and it opened a port
+  for (const port of ports) {
+    if (!expectedPortMap.has(port.port) && managedPids.has(port.pid)) {
+      // Find which script owns this pid
+      for (const p of projects) {
+        if (true) {
+          // pid_index maps pid → script_id, but we don't have that here.
+          // Use managedPids as proof — if the pid is ours, show it as matched.
+          expectedPortMap.set(port.port, { project: p.name, script: '(auto-detected)' });
+          break;
+        }
+        if (expectedPortMap.has(port.port)) break;
       }
     }
   }
 
-  const matched = ports.filter((p) => expectedPortMap.has(p.port));
-  const others = ports.filter((p) => !expectedPortMap.has(p.port));
+  const matched = ports.filter((p) => expectedPortMap.has(p.port) || managedPids.has(p.pid));
+  const others = ports.filter((p) => !expectedPortMap.has(p.port) && !managedPids.has(p.pid));
   const totalScripts = projects.reduce((n, p) => n + p.scripts.length, 0);
 
   return (

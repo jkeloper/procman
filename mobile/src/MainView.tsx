@@ -170,7 +170,7 @@ export function MainView({ onUnpair }: Props) {
       {drawerOpen && (<>
         <div className="drawer-overlay" onClick={() => setDrawerOpen(false)} />
         <div className="drawer">
-          <div style={{ padding: '16px 20px 8px', fontSize: 22, fontWeight: 700 }}>🐸 procman</div>
+          <div style={{ padding: '16px 20px 8px', fontSize: 22, fontWeight: 700 }}><img src='/icon-192.png' alt='' style={{width:28,height:28,borderRadius:6,marginRight:8,verticalAlign:'middle'}} />procman</div>
           <div className="drawer-section">Projects</div>
           <div className={'drawer-item ' + (selectedProject === null ? 'active' : '')} onClick={() => { setSelectedProject(null); setDrawerOpen(false); }}>All projects<span className="count">{projects.reduce((n, p) => n + p.scripts.length, 0)}</span></div>
           {projects.map((p) => {

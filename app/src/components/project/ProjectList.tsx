@@ -5,6 +5,7 @@ import { NewProjectDialog } from './NewProjectDialog';
 import { ScanDialog } from './ScanDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { IconOverview, IconReorder, IconChevronUp, IconChevronDown } from '@/components/icons/TabIcons';
 
 interface Props {
   selectedId: string | null;
@@ -66,7 +67,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
               }`}
               onClick={() => onSelect(null)}
             >
-              <span className="text-sm">⊞</span>
+              <IconOverview />
               <span className="flex-1">Dashboard</span>
             </button>
           </div>
@@ -87,7 +88,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                   onClick={() => setReorderMode((v) => !v)}
                   title="Reorder projects"
                 >
-                  {reorderMode ? 'done' : '⇅'}
+                  {reorderMode ? 'done' : <IconReorder />}
                 </button>
                 <button
                   className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -131,12 +132,12 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
                             className="flex h-4 w-4 items-center justify-center rounded text-[8px] text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-20"
                             disabled={idx === 0}
                             onClick={() => moveProject(p.id, 'up')}
-                          >▲</button>
+                          ><IconChevronUp /></button>
                           <button
                             className="flex h-4 w-4 items-center justify-center rounded text-[8px] text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-20"
                             disabled={idx === projects.length - 1}
                             onClick={() => moveProject(p.id, 'down')}
-                          >▼</button>
+                          ><IconChevronDown /></button>
                         </div>
                       )}
 

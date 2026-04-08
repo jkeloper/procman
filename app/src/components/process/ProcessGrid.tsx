@@ -7,7 +7,7 @@ import { VSCodeImportDialog } from './VSCodeImportDialog';
 import { PortConflictDialog } from './PortConflictDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { useConfirm } from '@/components/ConfirmDialog';
-import { IconTunnel } from '@/components/icons/TabIcons';
+import { IconTunnel, IconRestart } from '@/components/icons/TabIcons';
 import type { PortInfo } from '@/api/tauri';
 
 interface Props {
@@ -248,7 +248,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                             withBusy(s.id, () => api.restartProcess(projectId, s.id))
                           }
                         >
-                          ↻
+                          <IconRestart />
                         </button>
                         <button
                           className="rounded bg-red-800/80 px-2.5 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
