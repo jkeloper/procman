@@ -54,7 +54,7 @@ export function NewGroupDialog({ open, onOpenChange, projects, onCreated }: Prop
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>New Group</DialogTitle>
         </DialogHeader>
@@ -71,7 +71,7 @@ export function NewGroupDialog({ open, onOpenChange, projects, onCreated }: Prop
           </div>
           <div>
             <Label>Members</Label>
-            <ScrollArea className="mt-1 h-56 rounded border">
+            <ScrollArea className="mt-1 h-72 rounded border">
               <div className="space-y-2 p-2">
                 {projects.map((p) => (
                   <div key={p.id}>
@@ -86,17 +86,20 @@ export function NewGroupDialog({ open, onOpenChange, projects, onCreated }: Prop
                         return (
                           <label
                             key={key}
-                            className="ml-3 flex cursor-pointer items-center gap-2 py-0.5 text-sm"
+                            className="ml-3 flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-sm hover:bg-accent/40"
                           >
                             <input
                               type="checkbox"
                               checked={checked.has(key)}
                               onChange={() => toggle(key)}
+                              className="mt-0.5 shrink-0 accent-primary"
                             />
-                            <span>{s.name}</span>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {s.command}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium">{s.name}</div>
+                              <div className="truncate font-mono text-[11px] text-muted-foreground">
+                                $ {s.command}
+                              </div>
+                            </div>
                           </label>
                         );
                       })

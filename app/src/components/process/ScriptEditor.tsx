@@ -66,8 +66,8 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl" style={{ height: '75vh', maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
-        {/* Header — name + port inline */}
-        <div className="flex items-center gap-3 border-b border-border/60 pb-3">
+        {/* Header — name + port inline, mt-4 pushes below the ✕ close button */}
+        <div className="mt-4 flex items-center gap-3 border-b border-border/60 pb-3">
           <div className="flex-1 min-w-0">
             <Input
               value={name}

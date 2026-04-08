@@ -1,0 +1,83 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A9D5D"/>
+      <stop offset="1" stop-color="#1F6B3F"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B8E29A"/>
+      <stop offset="1" stop-color="#5FB668"/>
+    </linearGradient>
+    <linearGradient id="eye" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D4EDB2"/>
+      <stop offset="1" stop-color="#8ECB85"/>
+    </linearGradient>
+    <linearGradient id="tongue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E85C82"/>
+      <stop offset="1" stop-color="#FF9EB6"/>
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- macOS rounded-square background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229"
+        fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="4"/>
+
+  <!-- Cute frog — slight right lean so it reads as `>`, tongue sticking out right as `_` -->
+  <g filter="url(#shadow)" transform="translate(-40 0) rotate(-6 512 512)">
+
+    <!-- Body (big round blob, the `>` chunk) -->
+    <ellipse cx="512" cy="560" rx="340" ry="300" fill="url(#body)"/>
+
+    <!-- Belly highlight -->
+    <ellipse cx="490" cy="680" rx="240" ry="140" fill="#F6FBE8" opacity="0.35"/>
+
+    <!-- Two big eye bulges on top -->
+    <g>
+      <ellipse cx="370" cy="310" rx="150" ry="150" fill="url(#eye)"/>
+      <ellipse cx="370" cy="310" rx="150" ry="150" fill="none"
+               stroke="rgba(0,0,0,0.08)" stroke-width="3"/>
+      <ellipse cx="654" cy="310" rx="150" ry="150" fill="url(#eye)"/>
+      <ellipse cx="654" cy="310" rx="150" ry="150" fill="none"
+               stroke="rgba(0,0,0,0.08)" stroke-width="3"/>
+    </g>
+
+    <!-- Eyes: white + pupil + highlight -->
+    <g>
+      <!-- Left eye -->
+      <circle cx="370" cy="320" r="85" fill="#FFFFFF"/>
+      <ellipse cx="388" cy="330" rx="30" ry="60" fill="#0D1B14"/>
+      <circle cx="375" cy="296" r="20" fill="#FFFFFF" opacity="0.95"/>
+      <circle cx="410" cy="360" r="8" fill="#FFFFFF" opacity="0.7"/>
+      <!-- Right eye -->
+      <circle cx="654" cy="320" r="85" fill="#FFFFFF"/>
+      <ellipse cx="672" cy="330" rx="30" ry="60" fill="#0D1B14"/>
+      <circle cx="659" cy="296" r="20" fill="#FFFFFF" opacity="0.95"/>
+      <circle cx="694" cy="360" r="8" fill="#FFFFFF" opacity="0.7"/>
+    </g>
+
+    <!-- Cheek blush -->
+    <ellipse cx="220" cy="570" rx="70" ry="40" fill="#F4A7B9" opacity="0.4"/>
+    <ellipse cx="800" cy="570" rx="70" ry="40" fill="#F4A7B9" opacity="0.4"/>
+
+    <!-- Smile -->
+    <path d="M 300 600 Q 512 780 724 600"
+          stroke="#1B3E26" stroke-width="20" fill="none"
+          stroke-linecap="round"/>
+
+    <!-- Tongue sticking out right (the `_`) -->
+    <g transform="translate(620 660) rotate(8)">
+      <rect x="0" y="-42" width="280" height="84" rx="42" ry="42" fill="url(#tongue)"/>
+      <line x1="30" y1="0" x2="260" y2="0"
+            stroke="rgba(0,0,0,0.22)" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="100" cy="-18" rx="60" ry="8" fill="rgba(255,255,255,0.55)"/>
+    </g>
+
+    <!-- Nostrils -->
+    <circle cx="480" cy="470" r="10" fill="#1B3E26" opacity="0.55"/>
+    <circle cx="544" cy="470" r="10" fill="#1B3E26" opacity="0.55"/>
+  </g>
+</svg>

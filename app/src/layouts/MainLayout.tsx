@@ -109,18 +109,16 @@ export function MainLayout() {
               style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
             >
               <div
-                className="flex items-center gap-2"
+                className="flex items-center gap-0"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
                 <button
-                  className="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                  className="flex items-center gap-2 rounded-md px-3 py-1.5 font-bold text-foreground transition-colors hover:bg-accent/60"
                   onClick={() => setSelectedProjectId(null)}
                 >
-                  ←
+                  <span className="text-muted-foreground">←</span>
+                  <span>{currentProject?.name}</span>
                 </button>
-                <span className="font-semibold text-foreground">
-                  {currentProject?.name}
-                </span>
               </div>
               <div className="flex-1" />
               <div
