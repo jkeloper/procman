@@ -125,17 +125,14 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
       </ScrollArea>
 
       {/* Footer — status summary */}
-      <div className="shrink-0 space-y-1 border-t border-border/60 px-3 pb-4 pt-2">
-        <div className="flex items-center justify-between text-[10px]">
+      <div className="shrink-0 border-t border-border/60 px-3 py-1.5">
+        <div className="flex items-center justify-between text-[10px] leading-tight">
           <span className="text-muted-foreground/60">
             {projects.reduce((n, p) => n + p.scripts.filter((s) => statuses[s.id] === 'running').length, 0)} running
             {' · '}
             {projects.reduce((n, p) => n + p.scripts.length, 0)} scripts
           </span>
           <span className="font-mono text-muted-foreground/40">v0.1.0</span>
-        </div>
-        <div className="flex gap-2 text-[9px] text-muted-foreground/40">
-          <kbd>⌘K</kbd><kbd>⌘L</kbd><kbd>⌘,</kbd>
         </div>
       </div>
 

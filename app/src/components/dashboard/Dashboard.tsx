@@ -117,7 +117,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-5xl p-6">
+        <div className="mx-auto max-w-5xl px-6 py-4">
 
           {tab === 'overview' && (
             <div className="space-y-5">
