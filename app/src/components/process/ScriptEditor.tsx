@@ -16,6 +16,49 @@ interface Props {
   onSaved: () => void;
 }
 
+interface Template {
+  label: string;
+  category: string;
+  name: string;
+  command: string;
+  port: string;
+}
+
+const TEMPLATES: Template[] = [
+  // Node.js
+  { category: 'Node.js', label: 'Dev server (pnpm)', name: 'dev', command: 'pnpm dev', port: '5173' },
+  { category: 'Node.js', label: 'Dev server (npm)', name: 'dev', command: 'npm run dev', port: '3000' },
+  { category: 'Node.js', label: 'Build (pnpm)', name: 'build', command: 'pnpm build', port: '' },
+  { category: 'Node.js', label: 'Build (npm)', name: 'build', command: 'npm run build', port: '' },
+  { category: 'Node.js', label: 'Start (production)', name: 'start', command: 'npm start', port: '3000' },
+  { category: 'Node.js', label: 'Test (vitest)', name: 'test', command: 'pnpm vitest', port: '' },
+  { category: 'Node.js', label: 'Next.js dev', name: 'next-dev', command: 'npx next dev', port: '3000' },
+  { category: 'Node.js', label: 'Vite preview', name: 'preview', command: 'pnpm preview', port: '4173' },
+  // Python
+  { category: 'Python', label: 'Django runserver', name: 'django', command: 'python manage.py runserver', port: '8000' },
+  { category: 'Python', label: 'FastAPI (uvicorn)', name: 'fastapi', command: 'uvicorn main:app --reload', port: '8000' },
+  { category: 'Python', label: 'Streamlit', name: 'streamlit', command: 'streamlit run app.py', port: '8501' },
+  { category: 'Python', label: 'Flask', name: 'flask', command: 'flask run', port: '5000' },
+  { category: 'Python', label: 'Pytest', name: 'test', command: 'pytest -v', port: '' },
+  // Rust
+  { category: 'Rust', label: 'Cargo run', name: 'run', command: 'cargo run', port: '' },
+  { category: 'Rust', label: 'Cargo test', name: 'test', command: 'cargo test', port: '' },
+  { category: 'Rust', label: 'Cargo watch', name: 'watch', command: 'cargo watch -x run', port: '' },
+  // Go
+  { category: 'Go', label: 'Go run', name: 'run', command: 'go run .', port: '' },
+  { category: 'Go', label: 'Go test', name: 'test', command: 'go test ./...', port: '' },
+  { category: 'Go', label: 'Air (hot reload)', name: 'air', command: 'air', port: '8080' },
+  // Docker
+  { category: 'Docker', label: 'Docker Compose up', name: 'compose-up', command: 'docker compose up', port: '' },
+  { category: 'Docker', label: 'Docker Compose down', name: 'compose-down', command: 'docker compose down', port: '' },
+  { category: 'Docker', label: 'Docker Compose build', name: 'compose-build', command: 'docker compose build', port: '' },
+  // Shell
+  { category: 'Shell', label: 'Custom shell script', name: 'script', command: './run.sh', port: '' },
+  { category: 'Shell', label: 'Watch files (fswatch)', name: 'watch', command: 'fswatch -o src/ | xargs -n1 -I{} make build', port: '' },
+];
+
+const CATEGORIES = [...new Set(TEMPLATES.map((t) => t.category))];
+
 export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved }: Props) {
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
@@ -33,6 +76,17 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setErr(null);
     }
   }, [open, existing]);
+
+  function applyTemplate(t: Template) {
+    if (command.trim() && command.trim() !== existing?.command) {
+      if (!window.confirm('현재 편집 중인 내용을 템플릿으로 대체하시겠습니까?')) {
+        return;
+      }
+    }
+    setName(t.name);
+    setCommand(t.command);
+    setExpectedPort(t.port);
+  }
 
   async function submit() {
     setErr(null);
@@ -66,8 +120,39 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl" style={{ height: '75vh', maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
-        {/* Header — name + port inline, mt-4 pushes below the ✕ close button */}
-        <div className="mt-4 flex items-center gap-3 border-b border-border/60 pb-3">
+        {/* Template selector — only for new scripts */}
+        {!existing && (
+          <div className="mt-4 flex items-center gap-2 border-b border-border/60 pb-3">
+            <span className="shrink-0 text-[12px] font-medium text-muted-foreground">Template</span>
+            <select
+              onChange={(e) => {
+                const idx = parseInt(e.target.value, 10);
+                if (!isNaN(idx) && TEMPLATES[idx]) {
+                  applyTemplate(TEMPLATES[idx]);
+                }
+                e.target.value = '';
+              }}
+              defaultValue=""
+              className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-[13px] text-foreground focus:border-primary/50 focus:outline-none"
+            >
+              <option value="" disabled>Select a template...</option>
+              {CATEGORIES.map((cat) => (
+                <optgroup key={cat} label={cat}>
+                  {TEMPLATES.map((t, i) =>
+                    t.category === cat ? (
+                      <option key={i} value={i}>
+                        {t.label}
+                      </option>
+                    ) : null,
+                  )}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Header — name + port inline */}
+        <div className={`flex items-center gap-3 border-b border-border/60 pb-3 ${existing ? 'mt-4' : ''}`}>
           <div className="flex-1 min-w-0">
             <Input
               value={name}
