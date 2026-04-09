@@ -17,14 +17,21 @@ use super::{auth, ws::ws_handler, ServerState};
 use crate::types::PortInfo;
 
 pub fn build_router(state: ServerState) -> Router {
-    // SEC-08: Restrict CORS to known origins
+    // SEC-08: CORS — allow known origins + any trycloudflare.com subdomain
+    // Native app uses capacitor:// scheme, tunnel uses https://*.trycloudflare.com
     let cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:1420".parse::<HeaderValue>().unwrap(),
-            "http://localhost:5174".parse::<HeaderValue>().unwrap(),
-            "http://127.0.0.1:7777".parse::<HeaderValue>().unwrap(),
-            "capacitor://procman".parse::<HeaderValue>().unwrap(),
-        ])
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(
+            |origin: &HeaderValue, _req: &axum::http::request::Parts| {
+                let s = origin.to_str().unwrap_or("");
+                s.starts_with("http://localhost:")
+                    || s.starts_with("http://127.0.0.1:")
+                    || s.starts_with("capacitor://")
+                    || s.ends_with(".trycloudflare.com")
+                    || s.contains("trycloudflare.com")
+                    || s.starts_with("http://192.168.")
+                    || s.starts_with("http://10.")
+            },
+        ))
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS]);
 
