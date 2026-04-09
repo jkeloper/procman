@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { VSCodeImportDialog } from './VSCodeImportDialog';
 import { PortConflictDialog } from './PortConflictDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { UptimeLabel } from '@/hooks/useUptime';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { IconTunnel, IconRestart } from '@/components/icons/TabIcons';
 import type { PortInfo } from '@/api/tauri';
@@ -23,7 +24,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editorOpen, setEditorOpen] = useState(false);
   const [vscodeOpen, setVscodeOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
-  const { statuses, pids } = useProcessStatus();
+  const { statuses, pids, startTimes } = useProcessStatus();
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [tunnels, setTunnels] = useState<Record<string, { url: string; port: number }>>({});
   const confirm = useConfirm();
@@ -208,7 +209,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                       )}
                       {pid != null && (
                         <span className="font-mono text-[10px] text-muted-foreground/70">
-                          pid {pid}
+                          pid {pid} · {startTimes[s.id] && statuses[s.id] === "running" ? <UptimeLabel ms={startTimes[s.id]} /> : null}
                         </span>
                       )}
                     </div>

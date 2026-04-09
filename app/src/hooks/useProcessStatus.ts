@@ -11,18 +11,21 @@ import { api, type RuntimeStatus, type StatusEvent } from '@/api/tauri';
 export function useProcessStatus() {
   const [statuses, setStatuses] = useState<Record<string, RuntimeStatus>>({});
   const [pids, setPids] = useState<Record<string, number>>({});
+  const [startTimes, setStartTimes] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    // Prime from snapshot
     api.listProcesses().then((snap) => {
       const s: Record<string, RuntimeStatus> = {};
       const p: Record<string, number> = {};
+      const t: Record<string, number> = {};
       for (const row of snap) {
         s[row.id] = row.status;
         p[row.id] = row.pid;
+        t[row.id] = row.started_at_ms;
       }
       setStatuses(s);
       setPids(p);
+      setStartTimes(t);
     }).catch(() => {});
 
     const un = listen<StatusEvent>('process://status', (ev) => {
@@ -30,8 +33,13 @@ export function useProcessStatus() {
       setStatuses((prev) => ({ ...prev, [id]: status }));
       if (status === 'running' && pid != null) {
         setPids((prev) => ({ ...prev, [id]: pid }));
+        setStartTimes((prev) => ({ ...prev, [id]: ev.payload.ts_ms }));
       } else if (status !== 'running') {
         setPids((prev) => {
+          const { [id]: _, ...rest } = prev;
+          return rest;
+        });
+        setStartTimes((prev) => {
           const { [id]: _, ...rest } = prev;
           return rest;
         });
@@ -44,5 +52,5 @@ export function useProcessStatus() {
     };
   }, []);
 
-  return { statuses, pids };
+  return { statuses, pids, startTimes };
 }
