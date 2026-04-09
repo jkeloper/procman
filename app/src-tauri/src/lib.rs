@@ -56,6 +56,7 @@ pub fn run() {
     let watch_path = config_path.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(app_state)
         .manage(runtime_store)
         .setup(move |app| {

@@ -42,8 +42,24 @@ impl ConfigStore {
             return Ok(AppConfig::default());
         }
         let bytes = fs::read(path)?;
-        let cfg: AppConfig = serde_yaml::from_slice(&bytes)?;
+        let mut cfg: AppConfig = serde_yaml::from_slice(&bytes)?;
+        // E5: Schema migration — bump version + apply changes
+        cfg = Self::migrate(cfg);
         Ok(cfg)
+    }
+
+    /// Apply schema migrations sequentially.
+    fn migrate(mut cfg: AppConfig) -> AppConfig {
+        // v1 → v2: (placeholder for future migrations)
+        // if cfg.version == "1" {
+        //     // ... migrate fields ...
+        //     cfg.version = "2".to_string();
+        // }
+        // Ensure version is set
+        if cfg.version.is_empty() {
+            cfg.version = "1".to_string();
+        }
+        cfg
     }
 
     /// Atomically write config to `path`. Creates parent directories if needed.

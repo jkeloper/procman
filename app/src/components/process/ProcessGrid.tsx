@@ -184,6 +184,15 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                 <li
                   key={s.id}
                   className="group transition-colors hover:bg-accent/40"
+                  onDoubleClick={async () => {
+                    if (b) return;
+                    if (isRunning) {
+                      const ok = await confirm({ title: `Stop "${s.name}"?`, description: 'Double-click detected. Stop this process?', confirmLabel: 'Stop', destructive: true });
+                      if (ok) withBusy(s.id, () => api.killProcess(s.id));
+                    } else {
+                      handleStart(s);
+                    }
+                  }}
                 >
                 <div className="flex items-center gap-3 px-4 py-2.5">
                   {/* Status dot */}

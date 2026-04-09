@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { api, type RuntimeStatus, type StatusEvent } from '@/api/tauri';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 /**
  * Tracks the current runtime status of each script_id based on
@@ -31,6 +32,19 @@ export function useProcessStatus() {
     const un = listen<StatusEvent>('process://status', (ev) => {
       const { id, status, pid } = ev.payload;
       setStatuses((prev) => ({ ...prev, [id]: status }));
+      // M3: Send macOS notification on crash
+      if (status === 'crashed') {
+        (async () => {
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            const perm = await requestPermission();
+            granted = perm === 'granted';
+          }
+          if (granted) {
+            sendNotification({ title: 'procman — Process Crashed', body: `Script ${id.slice(0, 8)} crashed (exit code: ${ev.payload.exit_code ?? 'unknown'})` });
+          }
+        })();
+      }
       if (status === 'running' && pid != null) {
         setPids((prev) => ({ ...prev, [id]: pid }));
         setStartTimes((prev) => ({ ...prev, [id]: ev.payload.ts_ms }));

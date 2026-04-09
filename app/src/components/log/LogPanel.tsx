@@ -191,6 +191,23 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           />
           auto-tail
         </label>
+        <button
+          onClick={async () => {
+            try {
+              const { save } = await import('@tauri-apps/plugin-dialog');
+              const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+              const path = await save({ defaultPath: `${scriptName ?? 'log'}.log`, filters: [{ name: 'Log', extensions: ['log', 'txt'] }] });
+              if (path) {
+                const content = lines.map((l) => `[${l.stream}] ${l.text}`).join('\n');
+                await writeTextFile(path, content);
+              }
+            } catch {}
+          }}
+          className="rounded px-1.5 py-0.5 text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200"
+          title="Export logs"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2v6M3 5l3 3 3-3M2 10h8"/></svg>
+        </button>
       </div>
 
       {/* Body */}
