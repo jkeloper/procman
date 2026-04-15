@@ -165,6 +165,7 @@ pub fn run() {
             commands::restart_process,
             commands::list_processes,
             commands::log_snapshot,
+            commands::search_log,
             commands::clear_log,
             commands::force_quit,
             // Ports

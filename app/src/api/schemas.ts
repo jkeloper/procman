@@ -89,6 +89,9 @@ export const ProcessSnapshotSchema = z.object({
   status: RuntimeStatusSchema,
   started_at_ms: z.number().int(),
   command: z.string(),
+  // S3: Observability metrics (nullable when ps failed).
+  cpu_pct: z.number().nullable().default(null),
+  rss_kb: z.number().int().nullable().default(null),
 });
 export type ProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 

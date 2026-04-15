@@ -6,7 +6,8 @@
       remainders: VSCode scanner `extract_ports_from_launch`, Dashboard script-grouped view
 - [x] **S2** 포트 v3 소유권 + 헬스체크 — **2026-04-16 완료** (TCP probe + reachable 필드 + 3s 폴링 + liveness dot. 80 tests)
       deferred: 진짜 ownership proof (wrapper_pid + bound_at_ms 기록)
-- [ ] **S3** 관측성 (로그 검색/파일/메트릭) — 5일
+- [x] **S3** 관측성 (로그 검색/파일/메트릭) — **2026-04-16 완료** (CPU%/RSS 메트릭 + LogBuffer::search + search_log 커맨드 + 84 tests)
+      deferred: 로그 파일 영속화, 로그 검색 UI backend 재배선
 - [ ] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — 5일
 - [ ] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — 7일
 

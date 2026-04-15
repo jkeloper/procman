@@ -13,25 +13,39 @@ export function useProcessStatus() {
   const [statuses, setStatuses] = useState<Record<string, RuntimeStatus>>({});
   const [pids, setPids] = useState<Record<string, number>>({});
   const [startTimes, setStartTimes] = useState<Record<string, number>>({});
+  const [restartCounts, setRestartCounts] = useState<Record<string, number>>({});
+  // S3: observability metrics per script. Polled every 2s via list_processes.
+  const [metrics, setMetrics] = useState<Record<string, { cpu: number | null; rss: number | null }>>({});
 
   useEffect(() => {
-    api.listProcesses().then((snap) => {
-      const s: Record<string, RuntimeStatus> = {};
-      const p: Record<string, number> = {};
-      const t: Record<string, number> = {};
-      for (const row of snap) {
-        s[row.id] = row.status;
-        p[row.id] = row.pid;
-        t[row.id] = row.started_at_ms;
-      }
-      setStatuses(s);
-      setPids(p);
-      setStartTimes(t);
-    }).catch(() => {});
+    async function refreshSnapshot() {
+      try {
+        const snap = await api.listProcesses();
+        const s: Record<string, RuntimeStatus> = {};
+        const p: Record<string, number> = {};
+        const t: Record<string, number> = {};
+        const m: Record<string, { cpu: number | null; rss: number | null }> = {};
+        for (const row of snap) {
+          s[row.id] = row.status;
+          p[row.id] = row.pid;
+          t[row.id] = row.started_at_ms;
+          m[row.id] = { cpu: row.cpu_pct, rss: row.rss_kb };
+        }
+        setStatuses((prev) => ({ ...prev, ...s }));
+        setPids((prev) => ({ ...prev, ...p }));
+        setStartTimes((prev) => ({ ...prev, ...t }));
+        setMetrics(m);
+      } catch {}
+    }
+    refreshSnapshot();
+    const iv = setInterval(refreshSnapshot, 2000);
 
     const un = listen<StatusEvent>('process://status', (ev) => {
-      const { id, status, pid } = ev.payload;
+      const { id, status, pid, restart_count } = ev.payload;
       setStatuses((prev) => ({ ...prev, [id]: status }));
+      if (restart_count != null) {
+        setRestartCounts((prev) => ({ ...prev, [id]: restart_count }));
+      }
       // M3: Send macOS notification on crash
       if (status === 'crashed') {
         (async () => {
@@ -63,8 +77,9 @@ export function useProcessStatus() {
     });
     return () => {
       un.then((fn) => fn());
+      clearInterval(iv);
     };
   }, []);
 
-  return { statuses, pids, startTimes };
+  return { statuses, pids, startTimes, restartCounts, metrics };
 }

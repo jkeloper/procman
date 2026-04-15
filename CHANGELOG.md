@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 2026-04-16 — S3 관측성 (CPU/RSS + 로그 검색 커맨드)
+- **Added** `ProcessSnapshot.cpu_pct: Option<f32>` / `rss_kb: Option<u64>`. `list()`가
+  한 번의 `ps -p <pids> -o pid=,pcpu=,rss=` 호출로 모든 managed pid의 메트릭을 일괄
+  수집 (`sample_metrics` 헬퍼).
+- **Added** FE: `useProcessStatus`가 2초마다 `listProcesses`로 재폴링해 `metrics`
+  맵을 갱신. 시작 시 status/pid/startTime은 덮어쓰지 않고 merge하여 status
+  이벤트와 경쟁하지 않음.
+- **Added** ProcessGrid 행에 `pid · uptime · N% cpu · M MB` 인라인 표시.
+- **Added** `LogBuffer::search(query, case_sensitive, limit)` — 링 버퍼 내
+  substring 검색. case-insensitive 기본. limit caps 결과 수.
+- **Added** `search_log(script_id, query, case_sensitive?, limit?)` Tauri 커맨드.
+- **Added** LogBuffer 검색 유닛 테스트 4건 (기본 case-insensitive / sensitive /
+  limit / empty query). 총 84 lib test 통과.
+- **Note** 로그 파일 영속화 및 로그 검색 UI 재배선 (현재 FE는 링 버퍼에 대해
+  in-memory filter 사용)은 후속. `search_log` 커맨드는 추후 파일 기반 검색으로
+  확장할 때 사용될 예정.
+
 ### 2026-04-16 — S2 포트 v3 (TCP liveness probe)
 - **Added** `tcp_probe(bind, port, timeout_ms)` — tokio 기반 비동기 TCP connect
   프로브. `0.0.0.0` → `127.0.0.1`, `::` → `::1` 리라이트. 400ms 타임아웃 기본.

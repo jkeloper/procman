@@ -70,6 +70,38 @@ impl LogBuffer {
     pub fn clear(&mut self) {
         self.buf.clear();
     }
+
+    /// S3: Case-sensitive or case-insensitive substring search over the
+    /// buffer. Returns matching lines in chronological order (oldest
+    /// first) up to `limit` hits. Match is O(n * m) which is fine for
+    /// ring-buffer sizes (<= 50k lines).
+    pub fn search(&self, query: &str, case_sensitive: bool, limit: usize) -> Vec<LogLine> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let needle: String = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+        let mut out = Vec::new();
+        for line in &self.buf {
+            let hay_owned: String;
+            let hay: &str = if case_sensitive {
+                &line.text
+            } else {
+                hay_owned = line.text.to_lowercase();
+                &hay_owned
+            };
+            if hay.contains(&needle) {
+                out.push(line.clone());
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+        out
+    }
 }
 
 fn chrono_like_now_ms() -> i64 {
@@ -106,6 +138,44 @@ mod tests {
         assert_eq!(snap[0].text, "line-2");
         assert_eq!(snap[2].seq, 5);
         assert_eq!(snap[2].text, "line-4");
+    }
+
+    #[test]
+    fn search_case_insensitive_by_default() {
+        let mut b = LogBuffer::new(100);
+        b.push(LogStream::Stdout, "Server started on :3000".into());
+        b.push(LogStream::Stderr, "ERROR failed to connect".into());
+        b.push(LogStream::Stdout, "[info] user logged in".into());
+        let hits = b.search("error", false, 100);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].text.contains("ERROR"));
+    }
+
+    #[test]
+    fn search_case_sensitive_respects_case() {
+        let mut b = LogBuffer::new(100);
+        b.push(LogStream::Stdout, "ERROR: a".into());
+        b.push(LogStream::Stdout, "error: b".into());
+        let hits = b.search("error", true, 100);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].text, "error: b");
+    }
+
+    #[test]
+    fn search_respects_limit() {
+        let mut b = LogBuffer::new(100);
+        for i in 0..20 {
+            b.push(LogStream::Stdout, format!("hit {}", i));
+        }
+        let hits = b.search("hit", false, 5);
+        assert_eq!(hits.len(), 5);
+    }
+
+    #[test]
+    fn search_empty_query_returns_empty() {
+        let mut b = LogBuffer::new(100);
+        b.push(LogStream::Stdout, "abc".into());
+        assert!(b.search("", false, 100).is_empty());
     }
 
     #[test]

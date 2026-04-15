@@ -66,3 +66,41 @@ pub async fn log_snapshot(
 ) -> Result<Vec<LogLine>, String> {
     Ok(pm.log_snapshot(&script_id))
 }
+
+/// S3: Substring search over the in-memory ring buffer. `limit` caps
+/// the number of hits returned. `case_sensitive` defaults to false.
+#[tauri::command]
+pub async fn search_log(
+    script_id: String,
+    query: String,
+    case_sensitive: Option<bool>,
+    limit: Option<usize>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<Vec<LogLine>, String> {
+    Ok(pm.log_search(
+        &script_id,
+        &query,
+        case_sensitive.unwrap_or(false),
+        limit.unwrap_or(500),
+    ))
+}
+
+#[tauri::command]
+pub async fn clear_log(
+    script_id: String,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<(), String> {
+    pm.log_clear(&script_id);
+    Ok(())
+}
+
+/// E1: Kill all running processes and exit the app.
+#[tauri::command]
+pub async fn force_quit(
+    pm: tauri::State<'_, ProcessManager>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    pm.kill_all().await;
+    app.exit(0);
+    Ok(())
+}
