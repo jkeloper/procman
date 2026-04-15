@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 2026-04-16 — S5 마감 (테스트 하드닝 + README)
+- **Added** S1~S4 invariant 테스트 2건: `build_declared_status_sets_reachable_none_initially`
+  (S2 레이어링), `migrate_preserves_depends_on_when_already_v2` (S4 필드가 v1→v2
+  마이그레이션에 의해 손상되지 않음).
+- **Changed** README.md 상태 섹션을 Post-MVP S1~S4 완료로 갱신 + 각 스프린트의
+  주요 기능 요약 추가.
+- **Note** 온보딩 플로우, Cmd+K 전체 커버리지 확장, 60% 테스트 커버리지 목표는
+  후속 작업으로 이관. 현재 86 lib tests 통과.
+
 ### 2026-04-16 — S4 크래시/복구 UX (depends_on)
 - **Added** `Script.depends_on: Vec<String>` — 시작 전에 반드시 running + reachable
   이어야 하는 다른 스크립트 ID 리스트. `#[serde(default)]`로 하위호환.

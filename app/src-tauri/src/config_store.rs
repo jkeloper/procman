@@ -253,6 +253,39 @@ mod tests {
     }
 
     #[test]
+    fn migrate_preserves_depends_on_when_already_v2() {
+        // S4 invariant: v1→v2 migrate must not touch depends_on (it's
+        // a v2-era field and shouldn't get reset).
+        let cfg = AppConfig {
+            version: "1".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![Script {
+                    id: "s".into(),
+                    name: "s".into(),
+                    command: "cmd".into(),
+                    expected_port: Some(3000),
+                    ports: Vec::new(),
+                    auto_restart: false,
+                    env_file: None,
+                    depends_on: vec!["dep1".into(), "dep2".into()],
+                }],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "2");
+        assert_eq!(
+            out.projects[0].scripts[0].depends_on,
+            vec!["dep1".to_string(), "dep2".to_string()]
+        );
+        // ports[0] was synthesized from expected_port
+        assert_eq!(out.projects[0].scripts[0].ports.len(), 1);
+    }
+
+    #[test]
     fn migrate_is_idempotent_on_v2() {
         let cfg = AppConfig {
             version: "2".into(),

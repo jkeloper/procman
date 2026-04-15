@@ -10,7 +10,9 @@
       deferred: 로그 파일 영속화, 로그 검색 UI backend 재배선
 - [x] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — **2026-04-16 완료** (depends_on + 30s TCP probe 대기 + ScriptEditor chip picker)
       deferred: auto-restart 정책 UI (max retries / delay), graceful shutdown order
-- [ ] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — 7일
+- [x] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — **2026-04-16 완료 (부분)**
+      완료: 테스트 하드닝 (86 tests), README Post-MVP 요약
+      deferred: 온보딩 플로우, Cmd+K 전체 커버리지 확장, 60% 커버리지 목표
 
 ## 🔮 병렬 선택지 (Post-S5 재평가)
 - [ ] Docker Compose 네이티브 통합 (v0.2 원래 범위)

@@ -5,9 +5,20 @@
 Mac용 프로세스 매니저 GUI. 로컬 개발환경의 여러 서버·tunnel·docker 프로세스를 한 화면에서 관리.
 
 ## 상태
-🟢 **MVP 완료** (2026-04-05)
+🟢 **Post-MVP S1~S4 완료** (2026-04-16)
 
-Week 0 스파이크 + Sprint 1-3 전부 단일 세션 완주. **Tauri v2** 기반.
+Week 0 스파이크 + Sprint 1-3 단일 세션 완주 후, Post-MVP 로드맵 S1-S4까지 추가
+완료. S5(마감)은 테스트 하드닝/문서 위주로 진행 중. **Tauri v2** 기반.
+
+### Post-MVP 주요 추가
+- **S1 포트 관리 v2** — `Script.ports: Vec<PortSpec>`로 멀티 포트 선언. 이름/번호/
+  bind/optional/note 편집. v1→v2 자동 마이그레이션.
+- **S2 TCP liveness probe** — 선언된 각 포트에 대해 400ms 타임아웃 TCP connect로
+  실제 bind 여부 확인. ProcessGrid 행 배지에 초록/빨강/회색 dot.
+- **S3 관측성** — CPU%/RSS MB를 `ps`로 2초마다 수집, pid 옆에 인라인 표시. 로그
+  버퍼 substring 검색 커맨드.
+- **S4 depends_on** — 스크립트 시작 전에 의존 스크립트의 선언 포트가 전부 TCP
+  probe를 통과할 때까지 30초까지 대기. "Backend → Frontend" 순차 실행.
 
 ## 기능
 

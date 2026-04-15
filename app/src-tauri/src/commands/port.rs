@@ -742,6 +742,18 @@ mod tests {
         assert!(ok, "probe should succeed against a live listener on :{}", port);
     }
 
+    #[test]
+    fn build_declared_status_sets_reachable_none_initially() {
+        // S2 invariant: build_declared_status never fills reachable.
+        // Reachable gets populated by the command layer after probe.
+        let specs = vec![spec("http", 8080, false)];
+        let listing = vec![info(8080, 42, "node")];
+        let mut mp = std::collections::HashSet::new();
+        mp.insert(42);
+        let out = build_declared_status(&specs, &listing, &mp);
+        assert!(out[0].reachable.is_none());
+    }
+
     #[tokio::test]
     async fn tcp_probe_maps_zero_bind_to_loopback() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
