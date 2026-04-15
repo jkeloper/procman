@@ -2,6 +2,57 @@
 
 ## [Unreleased]
 
+### 2026-04-16 — S1 포트 관리 v2 (선언 기반)
+- **Added** `types.rs`에 `PortSpec` / `PortProto::Tcp` 도입. `Script.ports: Vec<PortSpec>` 필드 추가.
+  각 스펙은 `name`, `number`, `bind`, `proto`, `optional`, `note`를 가진다.
+- **Added** `config_store::migrate`가 v1 → v2 마이그레이션을 수행. `expected_port`가
+  `ports[0] = {name: "default", ...}`로 승격되고 `version`이 `"2"`로 올라간다. 멱등.
+- **Added** `ConfigStore::sync_expected_port`가 save 시점마다 `expected_port = ports[0].number`로
+  double-write. 기존 orphan cleanup 로직이 v2 파일에서도 그대로 동작.
+- **Added** 선언-포트 백엔드 커맨드 3종:
+  - `port_status_for_script(projectId, scriptId) -> Vec<DeclaredPortStatus>`
+  - `check_port_conflicts(projectId, scriptId) -> Vec<PortConflict>` (`Blocking`/`Warning` 분리)
+  - `list_ports_for_script(projectId, scriptId) -> Vec<PortInfo>` (declared ∪ descendant 합집합)
+- **Added** `create_script` / `update_script`가 `ports: Option<Vec<PortSpec>>`를 받아 저장.
+  `validate_ports`가 이름 유일성, 1–65535 범위, 프로토콜 tcp-only를 검증.
+- **Added** FE: `PortSpecSchema` / `DeclaredPortStatusSchema` / `PortConflictSchema` zod 정의,
+  `api.portStatusForScript` / `api.checkPortConflicts` / `api.listPortsForScript` 래퍼.
+- **Added** `ScriptEditor`에 "Declared ports" 섹션 — 이름/번호/bind 드롭다운(127.0.0.1/0.0.0.0/::1)/
+  optional 체크박스/note 편집 + add/remove. 빈 배열이면 legacy `expected_port` 필드 사용.
+- **Changed** `ProcessGrid.handleStart`가 `ports[]`가 있을 때 `check_port_conflicts`로 충돌 프리체크.
+  `blocking` 충돌은 첫 항목을 `PortConflictDialog`로 노출, 나머지는 무경고로 진행.
+- **Changed** `ProcessGrid.handleTunnelClick`이 선언 포트를 최우선. 1개면 즉시 터널, 다수면
+  PortPicker에 declared 항목을 띄운다. 없을 때만 legacy expected_port / 트리 스캔 fallback.
+- **Changed** 스크립트 행 배지에 `name:port` 형태로 선언 포트를 모두 표시.
+- **Added** 마이그레이션/라운드트립 테스트 5건 (`migrate_v1_with_expected_port_promotes_to_ports`,
+  `migrate_v1_without_expected_port_yields_empty_ports`, `migrate_v2_already_has_ports_is_noop`,
+  `migrate_is_idempotent_on_v2`, `save_hook_syncs_expected_port_from_first_port`) + PortSpec
+  default fill + Script 다중 포트 라운드트립. 총 77 lib test 전부 통과.
+
+### 2026-04-12 — VSCode tasks.json `dependsOn` 지원
+- **Added** `parse_tasks`가 `command` 없이 `dependsOn`만 있는 합성 태스크를 처리.
+  - `dependsOrder: "sequence"` (또는 미지정) → `cmd1 && cmd2 && cmd3`
+  - `dependsOrder: "parallel"` → background 태스크는 `( cmd ) &`로 띄우고
+    foreground 태스크에 `wait`를 거는 형태로 합성
+- **Fixed** 컴파운드 launch의 `preLaunchTask`가 `Full Stack: Prepare` 같은
+  dependsOn 합성 태스크일 때 빌드가 누락되던 문제. 이제 `npm run build:backend`
+  + `webpack serve`(background) 조합이 정상적으로 launch 앞에 붙는다.
+- **Changed** 컴파운드 명령 구조: `trap 'kill 0' EXIT`가 preLaunchTask까지
+  포함하도록 가장 앞으로 이동 → 종료 시 background dev server도 함께 정리.
+- **Added** scanner 단위 테스트 2건. 총 21개 모두 통과.
+
+### 2026-04-11 — VSCode preLaunchTask 지원
+- **Added** `vscode_scanner.rs`에서 `.vscode/tasks.json` 파싱 (`parse_tasks`).
+  shell/process 태스크의 label → command 매핑 빌드, args + options.cwd 처리.
+- **Added** `translate_config_with_tasks`: launch config의 `preLaunchTask`를
+  찾아 `<task> && <launch>` 형태로 명령 앞에 자동 prepend.
+- **Added** compound config의 `preLaunchTask` 지원 (parallel 실행 전 빌드 1회).
+- **Why** budgetbook 같은 프로젝트에서 `npm run build:backend` 후 `dist/server.js`
+  를 띄우는 VS Code workflow를 procman이 그대로 재현하지 못해, stale dist를
+  매번 수동 빌드해야 했음. 이제 VS Code "Run and Debug" 동작과 1:1.
+- **Added** scanner 단위 테스트 2건 (`pre_launch_task_prepended`,
+  `task_with_args_and_cwd`). 총 19개 테스트 모두 통과.
+
 ### 2026-04-05 — 프로젝트 착수 (기획 단계)
 - **Added** 프로젝트 디렉토리 구조 생성 (the project directory)
 - **Added** 5-Agent 시스템 운영 (Manager / Planner / Worker / Evaluator / User-tester)

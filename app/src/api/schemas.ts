@@ -4,12 +4,27 @@ import { z } from 'zod';
 
 // --- Persisted config types ---
 
+export const PortProtoSchema = z.enum(['tcp']);
+export type PortProto = z.infer<typeof PortProtoSchema>;
+
+export const PortSpecSchema = z.object({
+  name: z.string(),
+  number: z.number().int().min(1).max(65535),
+  bind: z.string().default('127.0.0.1'),
+  proto: PortProtoSchema.default('tcp'),
+  optional: z.boolean().default(false),
+  note: z.string().nullable().default(null),
+});
+export type PortSpec = z.infer<typeof PortSpecSchema>;
+
 export const ScriptSchema = z.object({
   id: z.string(),
   name: z.string(),
   command: z.string(),
   expected_port: z.number().int().min(1).max(65535).nullable().default(null),
+  ports: z.array(PortSpecSchema).default([]),
   auto_restart: z.boolean().default(false),
+  env_file: z.string().nullable().default(null),
 });
 export type Script = z.infer<typeof ScriptSchema>;
 
@@ -64,6 +79,7 @@ export const StatusEventSchema = z.object({
   pid: z.number().int().nullable(),
   exit_code: z.number().int().nullable(),
   ts_ms: z.number().int(),
+  restart_count: z.number().int().default(0),
 });
 export type StatusEvent = z.infer<typeof StatusEventSchema>;
 
@@ -128,6 +144,31 @@ export const ProjectCandidateSchema = z.object({
   scripts: z.array(ScriptSchema),
 });
 export type ProjectCandidate = z.infer<typeof ProjectCandidateSchema>;
+
+// --- S1: declared-port status + conflict types ---
+
+export const PortStateSchema = z.enum(['free', 'listening_managed', 'taken_by_other']);
+export type PortState = z.infer<typeof PortStateSchema>;
+
+export const DeclaredPortStatusSchema = z.object({
+  spec: PortSpecSchema,
+  state: PortStateSchema,
+  holder_pid: z.number().int().nullable().default(null),
+  holder_command: z.string().nullable().default(null),
+  owned_by_script: z.boolean().default(false),
+});
+export type DeclaredPortStatus = z.infer<typeof DeclaredPortStatusSchema>;
+
+export const ConflictSeveritySchema = z.enum(['blocking', 'warning']);
+export type ConflictSeverity = z.infer<typeof ConflictSeveritySchema>;
+
+export const PortConflictSchema = z.object({
+  spec: PortSpecSchema,
+  severity: ConflictSeveritySchema,
+  holder_pid: z.number().int(),
+  holder_command: z.string(),
+});
+export type PortConflict = z.infer<typeof PortConflictSchema>;
 
 export const PortInfoSchema = z.object({
   port: z.number().int().min(1).max(65535),

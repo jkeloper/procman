@@ -13,8 +13,13 @@ import {
   LogLineSchema,
   PortInfoSchema,
   ProcessSnapshotSchema,
+  DeclaredPortStatusSchema,
+  PortConflictSchema,
   type Project,
   type Script,
+  type PortSpec,
+  type DeclaredPortStatus,
+  type PortConflict,
   type ProjectCandidate,
   type LaunchConfigCandidate,
   type NamedTunnel,
@@ -66,10 +71,20 @@ export const api = {
     command: string,
     expectedPort: number | null,
     autoRestart: boolean,
+    envFile?: string | null,
+    ports?: PortSpec[],
   ) =>
     call(
       'create_script',
-      { projectId, name, command, expectedPort, autoRestart },
+      {
+        projectId,
+        name,
+        command,
+        expectedPort,
+        autoRestart,
+        envFile: envFile ?? null,
+        ports: ports ?? [],
+      },
       ScriptSchema,
     ),
   updateScript: (
@@ -80,10 +95,14 @@ export const api = {
       command?: string;
       expectedPort?: number | null;
       autoRestart?: boolean;
+      envFile?: string | null;
+      ports?: PortSpec[];
     },
   ) => call('update_script', { projectId, id, ...patch }, ScriptSchema),
   deleteScript: (projectId: string, id: string) =>
     call('delete_script', { projectId, id }, z.void()),
+  reorderScripts: (projectId: string, ids: string[]) =>
+    callRaw<null>('reorder_scripts', { projectId, ids }),
 
   // Scan
   scanDirectory: (path: string) =>
@@ -100,6 +119,8 @@ export const api = {
     call('list_processes', {}, z.array(ProcessSnapshotSchema)),
   logSnapshot: (scriptId: string) =>
     call('log_snapshot', { scriptId }, z.array(LogLineSchema)),
+  clearLog: (scriptId: string) => callRaw<null>('clear_log', { scriptId }),
+  forceQuit: () => callRaw<null>('force_quit', {}),
 
   // Groups
   listGroups: () => callRaw('list_groups', {}),
@@ -117,13 +138,49 @@ export const api = {
   killPort: (port: number) => callRaw<null>('kill_port', { port }),
   resolvePidToScript: (pid: number) =>
     call('resolve_pid_to_script', { pid }, z.string().nullable()),
+  listPortsForScriptPid: (rootPid: number) =>
+    call('list_ports_for_script_pid', { rootPid }, z.array(PortInfoSchema)),
+  // S1: declared-port APIs
+  portStatusForScript: (projectId: string, scriptId: string) =>
+    call(
+      'port_status_for_script',
+      { projectId, scriptId },
+      z.array(DeclaredPortStatusSchema),
+    ),
+  checkPortConflicts: (projectId: string, scriptId: string) =>
+    call(
+      'check_port_conflicts',
+      { projectId, scriptId },
+      z.array(PortConflictSchema),
+    ),
+  listPortsForScript: (projectId: string, scriptId: string) =>
+    call(
+      'list_ports_for_script',
+      { projectId, scriptId },
+      z.array(PortInfoSchema),
+    ),
+  listDescendantPids: (rootPids: number[]) =>
+    callRaw<number[]>('list_descendant_pids', { rootPids }),
+  getPortAliases: () =>
+    callRaw<Record<string, string>>('get_port_aliases', {}),
+  setPortAlias: (port: number, alias: string) =>
+    callRaw<null>('set_port_alias', { port, alias }),
 
-  // Tunnel (external access)
-  startTunnel: (port: number) =>
-    callRaw<{ running: boolean; url: string | null; pid: number | null }>('start_tunnel', { port }),
-  stopTunnel: () => callRaw<null>('stop_tunnel', {}),
+  // Tunnel (external access) — per-script
+  startTunnel: (port: number, scriptId: string) =>
+    callRaw<{
+      running: boolean;
+      url: string | null;
+      pid: number | null;
+      port: number | null;
+      script_id: string | null;
+    }>('start_tunnel', { port, scriptId }),
+  stopTunnel: (scriptId: string) => callRaw<null>('stop_tunnel', { scriptId }),
   tunnelStatus: () =>
-    callRaw<{ running: boolean; url: string | null; pid: number | null }>('tunnel_status', {}),
+    callRaw<Array<{ script_id: string; url: string; pid: number; port: number }>>(
+      'tunnel_status',
+      {},
+    ),
 
   // Remote server
   serverStatus: () =>
@@ -164,6 +221,9 @@ export const api = {
 export type {
   Project,
   Script,
+  PortSpec,
+  DeclaredPortStatus,
+  PortConflict,
   ProjectCandidate,
   LaunchConfigCandidate,
   NamedTunnel,

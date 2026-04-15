@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { api, type Script } from '@/api/tauri';
+import { api, type Script, type PortSpec } from '@/api/tauri';
 import { useConfirm } from '@/components/ConfirmDialog';
 
 interface Props {
@@ -64,7 +64,9 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [expectedPort, setExpectedPort] = useState('');
+  const [ports, setPorts] = useState<PortSpec[]>([]);
   const [autoRestart, setAutoRestart] = useState(false);
+  const [envFile, setEnvFile] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
@@ -74,15 +76,40 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setName(existing?.name ?? '');
       setCommand(existing?.command ?? '');
       setExpectedPort(existing?.expected_port?.toString() ?? '');
+      setPorts(existing?.ports ?? []);
       setAutoRestart(existing?.auto_restart ?? false);
+      setEnvFile(existing?.env_file ?? '');
       setErr(null);
     }
   }, [open, existing]);
 
+  function addPort() {
+    const nextNumber = ports.length === 0
+      ? parseInt(expectedPort, 10) || 3000
+      : (ports[ports.length - 1].number || 3000) + 1;
+    setPorts([
+      ...ports,
+      {
+        name: ports.length === 0 ? 'default' : `port${ports.length + 1}`,
+        number: nextNumber,
+        bind: '127.0.0.1',
+        proto: 'tcp',
+        optional: false,
+        note: null,
+      },
+    ]);
+  }
+  function updatePort(idx: number, patch: Partial<PortSpec>) {
+    setPorts(ports.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  }
+  function removePort(idx: number) {
+    setPorts(ports.filter((_, i) => i !== idx));
+  }
+
   async function applyTemplate(t: Template) {
     const hasContent = name.trim() || command.trim();
     if (hasContent) {
-      const ok = await confirm({ title: '템플릿 적용', description: '현재 편집 중인 내용이 템플릿으로 대체됩니다.', confirmLabel: '대체', destructive: false }); if (!ok) {
+      const ok = await confirm({ title: 'Apply template', description: 'Current content will be replaced with the template.', confirmLabel: 'Replace', destructive: false }); if (!ok) {
         return;
       }
     }
@@ -100,6 +127,20 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setBusy(false);
       return;
     }
+    // Validate declared ports
+    const trimmedPorts: PortSpec[] = [];
+    const seenNames = new Set<string>();
+    for (const [i, p] of ports.entries()) {
+      const nm = p.name.trim();
+      if (!nm) { setErr(`Port row ${i + 1}: name required`); setBusy(false); return; }
+      if (seenNames.has(nm)) { setErr(`Port name '${nm}' duplicated`); setBusy(false); return; }
+      seenNames.add(nm);
+      if (!Number.isInteger(p.number) || p.number < 1 || p.number > 65535) {
+        setErr(`Port row ${i + 1}: number must be 1–65535`); setBusy(false); return;
+      }
+      trimmedPorts.push({ ...p, name: nm });
+    }
+    const envVal = envFile.trim() || null;
     try {
       if (existing) {
         await api.updateScript(projectId, existing.id, {
@@ -107,9 +148,11 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           command,
           expectedPort: portNum,
           autoRestart,
+          envFile: envVal,
+          ports: trimmedPorts,
         });
       } else {
-        await api.createScript(projectId, name, command, portNum, autoRestart);
+        await api.createScript(projectId, name, command, portNum, autoRestart, envVal, trimmedPorts);
       }
       onSaved();
       onOpenChange(false);
@@ -126,7 +169,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
         {/* Template selector — only for new scripts */}
         {!existing && (
           <div className="mt-4 flex items-center gap-2 border-b border-border/60 pb-3">
-            <span className="shrink-0 text-[12px] font-medium text-muted-foreground">Template</span>
+            <span className="shrink-0 text-[13px] font-medium text-muted-foreground">Template</span>
             <select
               value=""
               onChange={(e) => {
@@ -135,7 +178,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
                   applyTemplate(TEMPLATES[idx]);
                 }
               }}
-              className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-[13px] text-foreground focus:border-primary/50 focus:outline-none"
+              className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-[14px] text-foreground focus:border-primary/50 focus:outline-none"
             >
               <option value="" disabled>Select a template...</option>
               {CATEGORIES.map((cat) => (
@@ -165,15 +208,15 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
             />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[12px] text-muted-foreground">:</span>
+            <span className="text-[13px] text-muted-foreground">:</span>
             <Input
               value={expectedPort}
               onChange={(e) => setExpectedPort(e.target.value)}
               placeholder="port"
               disabled={busy}
-              className="w-[70px] border-border/60 bg-muted/30 px-2 py-1 text-center font-mono text-[13px]"
+              className="w-[70px] border-border/60 bg-muted/30 px-2 py-1 text-center font-mono text-[14px]"
             />
-            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={autoRestart}
@@ -186,9 +229,98 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           </div>
         </div>
 
+        {/* S1: Declared ports (v2) */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium text-muted-foreground">
+              Declared ports
+              {ports.length > 0 && (
+                <span className="ml-1.5 text-muted-foreground/60">({ports.length})</span>
+              )}
+            </span>
+            <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[12px]" onClick={addPort} disabled={busy}>
+              + Add port
+            </Button>
+          </div>
+          {ports.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border/50 px-3 py-2 text-[12px] text-muted-foreground/70">
+              No declared ports. Falling back to the <code className="font-mono">expected_port</code> field above.
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {ports.map((p, i) => (
+                <li key={i} className="flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5">
+                  <Input
+                    value={p.name}
+                    onChange={(e) => updatePort(i, { name: e.target.value })}
+                    placeholder="name"
+                    disabled={busy}
+                    className="w-[110px] border-0 bg-transparent px-1 font-mono text-[13px]"
+                  />
+                  <Input
+                    value={p.number.toString()}
+                    onChange={(e) => updatePort(i, { number: parseInt(e.target.value, 10) || 0 })}
+                    placeholder="port"
+                    disabled={busy}
+                    className="w-[75px] border-0 bg-transparent px-1 text-center font-mono text-[13px]"
+                  />
+                  <select
+                    value={p.bind}
+                    onChange={(e) => updatePort(i, { bind: e.target.value })}
+                    disabled={busy}
+                    className="rounded border border-border/50 bg-background px-1.5 py-0.5 font-mono text-[12px]"
+                  >
+                    <option value="127.0.0.1">127.0.0.1</option>
+                    <option value="0.0.0.0">0.0.0.0</option>
+                    <option value="::1">::1</option>
+                  </select>
+                  <label className="flex items-center gap-1 text-[12px] text-muted-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={p.optional}
+                      onChange={(e) => updatePort(i, { optional: e.target.checked })}
+                      disabled={busy}
+                      className="accent-primary"
+                    />
+                    optional
+                  </label>
+                  <Input
+                    value={p.note ?? ''}
+                    onChange={(e) => updatePort(i, { note: e.target.value || null })}
+                    placeholder="note"
+                    disabled={busy}
+                    className="flex-1 border-0 bg-transparent px-1 text-[12px]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePort(i)}
+                    disabled={busy}
+                    className="shrink-0 rounded p-1 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                    aria-label="Remove port"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* M5: Env file path */}
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[13px] font-medium text-muted-foreground">.env file</span>
+          <Input
+            value={envFile}
+            onChange={(e) => setEnvFile(e.target.value)}
+            placeholder=".env or /absolute/path/.env.local"
+            disabled={busy}
+            className="flex-1 border-border/60 bg-muted/30 px-2 py-1 font-mono text-[13px]"
+          />
+        </div>
+
         {/* Command — large editor-like textarea */}
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+          <div className="mb-1.5 text-[13px] font-medium text-muted-foreground">
             Command
           </div>
           <textarea
@@ -197,12 +329,12 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
             placeholder="pnpm dev&#10;# or multi-line script..."
             disabled={busy}
             style={{ flex: 1, minHeight: 200 }}
-            className="w-full resize-none rounded-lg border border-border/60 bg-[#0a0a0a] p-4 font-mono text-[13px] leading-relaxed text-foreground placeholder:text-muted-foreground/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+            className="w-full resize-none rounded-lg border border-border/60 bg-log-bg p-4 font-mono text-[14px] leading-relaxed text-foreground placeholder:text-muted-foreground/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
             spellCheck={false}
           />
         </div>
 
-        {err && <p className="text-[12px] text-red-500">{err}</p>}
+        {err && <p className="text-[13px] text-red-500">{err}</p>}
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>

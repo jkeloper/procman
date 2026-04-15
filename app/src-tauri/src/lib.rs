@@ -96,6 +96,42 @@ pub fn run() {
             }
             log::info!("procman started, config at {:?}", config_path);
             watcher::spawn_config_watcher(app.handle().clone(), watch_state, watch_path);
+
+            // Orphan cleanup: if procman was force-killed last time,
+            // child processes may still hold ports. For each script
+            // that was running in the previous session, kill anything
+            // occupying its expected_port so the user can restart
+            // cleanly without manual port cleanup.
+            {
+                let rs = app.state::<Arc<RuntimeStore>>().inner().clone();
+                let cfg_state = app.state::<Arc<AppState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let snap = rs.snapshot().await;
+                    if snap.last_running.is_empty() {
+                        return;
+                    }
+                    let cfg = cfg_state.config.lock().await;
+                    let mut ports_to_clean: Vec<u16> = Vec::new();
+                    for project in &cfg.projects {
+                        for script in &project.scripts {
+                            if snap.last_running.contains(&script.id) {
+                                if let Some(port) = script.expected_port {
+                                    ports_to_clean.push(port as u16);
+                                }
+                            }
+                        }
+                    }
+                    drop(cfg);
+                    for port in ports_to_clean {
+                        match commands::port::kill_port(port).await {
+                            Ok(()) => log::info!("orphan cleanup: freed port {}", port),
+                            Err(_) => {} // port wasn't in use — fine
+                        }
+                    }
+                    let _ = rs.clear_last_running().await;
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -110,6 +146,7 @@ pub fn run() {
             commands::create_script,
             commands::update_script,
             commands::delete_script,
+            commands::reorder_scripts,
             // Scan
             commands::scan_directory,
             // Groups
@@ -128,10 +165,20 @@ pub fn run() {
             commands::restart_process,
             commands::list_processes,
             commands::log_snapshot,
+            commands::clear_log,
+            commands::force_quit,
             // Ports
             commands::list_ports,
             commands::kill_port,
             commands::resolve_pid_to_script,
+            commands::get_port_aliases,
+            commands::set_port_alias,
+            commands::list_ports_for_script_pid,
+            commands::list_descendant_pids,
+            // S1: declared-port APIs
+            commands::port_status_for_script,
+            commands::check_port_conflicts,
+            commands::list_ports_for_script,
             // VSCode scan
             vscode_scanner::scan_vscode_configs,
             // Cloudflared
@@ -164,6 +211,34 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Kill every managed process when procman itself is
+            // shutting down — whether via ⌘Q, Dock quit, OS logout,
+            // or Activity Monitor TERM. Without this children get
+            // reparented to launchd and keep holding their ports.
+            // We do this on Exit (fires after ExitRequested is
+            // approved) so the quit guard still has a chance to
+            // interrupt via prevent_exit.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(pm) = app_handle.try_state::<ProcessManager>() {
+                    let ids: Vec<String> = pm.list().into_iter().map(|s| s.id).collect();
+                    if !ids.is_empty() {
+                        log::info!("procman exiting — killing {} child process group(s)", ids.len());
+                        // Blocking SIGKILL of the whole process group
+                        // for each managed script. We use killpg + hard
+                        // SIGKILL because this is shutdown: no time to
+                        // wait for SIGTERM grace periods.
+                        for id in ids {
+                            if let Some(snap) = pm.list().into_iter().find(|s| s.id == id) {
+                                unsafe {
+                                    libc::killpg(snap.pid as i32, libc::SIGKILL);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
 }

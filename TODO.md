@@ -1,5 +1,22 @@
 # TODO
 
+## 🎯 Post-MVP Roadmap (S1~S5) — 2026-04-15 착수
+- [x] **S1** 포트 관리 v2 (선언 기반) — docs/07 기반, 3일. **2026-04-16 완료**
+      (PortSpec/migrate/3 commands/ScriptEditor/PortPicker/handleStart, 77 tests)
+      remainders: VSCode scanner `extract_ports_from_launch`, Dashboard script-grouped view
+- [ ] **S2** 포트 v3 소유권 + 헬스체크 — 5일
+- [ ] **S3** 관측성 (로그 검색/파일/메트릭) — 5일
+- [ ] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — 5일
+- [ ] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — 7일
+
+## 🔮 병렬 선택지 (Post-S5 재평가)
+- [ ] Docker Compose 네이티브 통합 (v0.2 원래 범위)
+- [ ] Multi-window / tear-off 로그 패널
+- [ ] Scheduled/cron 실행 (반복 작업)
+- [ ] 팀 공유 기능 (v1.0 원래 범위)
+- [ ] xterm.js 기반 PTY 인터랙션 터미널
+- [ ] 장기 로그 검색 (Elasticsearch 또는 sqlite FTS)
+
 ## ✅ Blocker 해소 (2026-04-05)
 - [x] **Q1**: Rust 숙련도 → **DEFERRED** (Week 0 S4로 실증 판정, Manager+Planner 협의 위임)
 - [x] **Q2**: 타임라인 → **A. 7주 안전** (스파이크 1주 + MVP 6주)

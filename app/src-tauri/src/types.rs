@@ -26,7 +26,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "1".to_string(),
+            version: "2".to_string(),
             projects: Vec::new(),
             groups: Vec::new(),
             settings: AppSettings::default(),
@@ -53,10 +53,63 @@ pub struct Script {
     pub name: String,
     /// Shell command string — wrapped with `zsh -l -c` at spawn time (T12).
     pub command: String,
+    /// DEPRECATED — S1 (port management v2): kept for v1 backward compatibility.
+    /// Migration populates `ports[0]` from this field; save-time hook syncs
+    /// `ports[0]` back into this field (double-write). Will be removed in v3.
     #[serde(default)]
     pub expected_port: Option<u16>,
+    /// S1: Declared TCP ports. May be empty. Treated as the authoritative
+    /// source for port conflict detection / tunnel target picking once any
+    /// entry is present.
+    #[serde(default)]
+    pub ports: Vec<PortSpec>,
     #[serde(default)]
     pub auto_restart: bool,
+    /// M5: Optional path to a .env file. Variables are exported before running.
+    #[serde(default)]
+    pub env_file: Option<String>,
+}
+
+/// S1: Per-script declared port. A PortSpec is purely a *declaration* — it
+/// records what the script is expected to bind. Runtime ownership and
+/// liveness are computed separately (see v3 for owner-proof + health probes).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortSpec {
+    /// Short logical name ("web", "debug", "metrics"). Used in UI labels
+    /// and as a lookup key for tunnel target selection. Must be unique
+    /// within a single Script (enforced at save time).
+    pub name: String,
+    /// TCP port number. 1..=65535. 0 is reserved for v3 "dynamic".
+    pub number: u16,
+    /// Bind address. Default "127.0.0.1". Displayed only — we never
+    /// actually bind. Used as a hint for conflict messaging.
+    #[serde(default = "default_bind")]
+    pub bind: String,
+    /// Protocol. v2 only accepts "tcp". Enum exists so YAML files don't
+    /// need rewriting when UDP support lands.
+    #[serde(default = "default_proto")]
+    pub proto: PortProto,
+    /// If true, start proceeds even if this port is in conflict (UI still
+    /// surfaces a warning and requires an explicit skip). Default false.
+    #[serde(default)]
+    pub optional: bool,
+    /// Free-form human note ("Vite HMR websocket", "JDWP debug").
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn default_bind() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_proto() -> PortProto {
+    PortProto::Tcp
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PortProto {
+    Tcp,
+    // Udp — v3
 }
 
 /// A named collection of scripts that can be launched together ("Morning Stack").
@@ -81,6 +134,9 @@ pub struct AppSettings {
     pub log_buffer_size: usize,
     pub port_poll_interval_ms: u64,
     pub theme: String,
+    /// User-defined aliases for ports (e.g. 3000 → "Frontend", 5432 → "Postgres").
+    #[serde(default)]
+    pub port_aliases: std::collections::HashMap<u16, String>,
 }
 
 impl Default for AppSettings {
@@ -89,6 +145,7 @@ impl Default for AppSettings {
             log_buffer_size: 5000,
             port_poll_interval_ms: 1000,
             theme: "system".to_string(),
+            port_aliases: std::collections::HashMap::new(),
         }
     }
 }
@@ -141,14 +198,18 @@ mod tests {
                         name: "dev".into(),
                         command: "pnpm dev".into(),
                         expected_port: Some(5173),
+                        ports: Vec::new(),
                         auto_restart: false,
+                        env_file: None,
                     },
                     Script {
                         id: "s2".into(),
                         name: "db".into(),
                         command: "docker compose up".into(),
                         expected_port: None,
+                        ports: Vec::new(),
                         auto_restart: true,
+                        env_file: None,
                     },
                 ],
             }],
@@ -164,6 +225,7 @@ mod tests {
                 log_buffer_size: 10000,
                 port_poll_interval_ms: 500,
                 theme: "dark".into(),
+                port_aliases: std::collections::HashMap::new(),
             },
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
@@ -173,10 +235,82 @@ mod tests {
 
     #[test]
     fn deserialize_minimal_yaml() {
-        let yaml = "version: '1'\n";
+        let yaml = "version: '2'\n";
         let cfg: AppConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(cfg.version, "1");
+        assert_eq!(cfg.version, "2");
         assert_eq!(cfg.projects.len(), 0);
         assert_eq!(cfg.settings.log_buffer_size, 5000); // default applied
+    }
+
+    #[test]
+    fn port_spec_roundtrip_with_defaults() {
+        // Minimal YAML should fill defaults: bind=127.0.0.1, proto=tcp, optional=false
+        let yaml = "name: http\nnumber: 8080\n";
+        let spec: PortSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.name, "http");
+        assert_eq!(spec.number, 8080);
+        assert_eq!(spec.bind, "127.0.0.1");
+        assert_eq!(spec.proto, PortProto::Tcp);
+        assert!(!spec.optional);
+        assert!(spec.note.is_none());
+    }
+
+    #[test]
+    fn script_roundtrip_with_multiple_ports() {
+        let s = Script {
+            id: "s".into(),
+            name: "api".into(),
+            command: "./gradlew bootRun".into(),
+            expected_port: Some(8080),
+            ports: vec![
+                PortSpec {
+                    name: "http".into(),
+                    number: 8080,
+                    bind: "0.0.0.0".into(),
+                    proto: PortProto::Tcp,
+                    optional: false,
+                    note: None,
+                },
+                PortSpec {
+                    name: "debug".into(),
+                    number: 5005,
+                    bind: "127.0.0.1".into(),
+                    proto: PortProto::Tcp,
+                    optional: false,
+                    note: Some("JDWP".into()),
+                },
+                PortSpec {
+                    name: "metrics".into(),
+                    number: 9010,
+                    bind: "127.0.0.1".into(),
+                    proto: PortProto::Tcp,
+                    optional: true,
+                    note: None,
+                },
+            ],
+            auto_restart: false,
+            env_file: None,
+        };
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        let back: Script = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(s, back);
+        assert_eq!(back.ports.len(), 3);
+    }
+
+    #[test]
+    fn roundtrip_script_with_quotes_and_parens() {
+        let script = Script {
+            id: "abc".into(),
+            name: "Backend (Spring Boot local)".into(),
+            command: "./gradlew bootRun --args='--spring.profiles.active=local'".into(),
+            expected_port: None,
+            ports: Vec::new(),
+            auto_restart: false,
+            env_file: None,
+        };
+        let yaml = serde_yaml::to_string(&script).unwrap();
+        eprintln!("serialized:\n{}", yaml);
+        let back: Script = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(script, back);
     }
 }

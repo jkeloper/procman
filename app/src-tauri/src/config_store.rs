@@ -10,7 +10,7 @@
 //   - `dirs::config_dir()` returns the platform config root
 //     (~/Library/Application Support on macOS, ~/.config on Linux, etc.).
 
-use crate::types::AppConfig;
+use crate::types::{AppConfig, PortProto, PortSpec};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -49,17 +49,49 @@ impl ConfigStore {
     }
 
     /// Apply schema migrations sequentially.
-    fn migrate(mut cfg: AppConfig) -> AppConfig {
-        // v1 → v2: (placeholder for future migrations)
-        // if cfg.version == "1" {
-        //     // ... migrate fields ...
-        //     cfg.version = "2".to_string();
-        // }
-        // Ensure version is set
+    pub(crate) fn migrate(mut cfg: AppConfig) -> AppConfig {
         if cfg.version.is_empty() {
             cfg.version = "1".to_string();
         }
+
+        // v1 → v2 (S1 port management v2): promote `expected_port` into
+        // `ports[0]` as a synthetic PortSpec named "default". If `ports`
+        // is already populated (user hand-edited a v1 file to look like
+        // v2), trust it and do nothing. Idempotent: re-running on a v2
+        // config is a no-op because ports is non-empty or expected_port
+        // is None.
+        if cfg.version == "1" {
+            for project in &mut cfg.projects {
+                for script in &mut project.scripts {
+                    if script.ports.is_empty() {
+                        if let Some(p) = script.expected_port {
+                            script.ports.push(PortSpec {
+                                name: "default".to_string(),
+                                number: p,
+                                bind: "127.0.0.1".to_string(),
+                                proto: PortProto::Tcp,
+                                optional: false,
+                                note: None,
+                            });
+                        }
+                    }
+                }
+            }
+            cfg.version = "2".to_string();
+        }
+
         cfg
+    }
+
+    /// S1: Sync `expected_port` with `ports[0]` on every save. This keeps
+    /// the legacy field meaningful for any v1-era tooling (including the
+    /// existing orphan cleanup loop in lib.rs) until v3 drops it.
+    pub(crate) fn sync_expected_port(cfg: &mut AppConfig) {
+        for project in &mut cfg.projects {
+            for script in &mut project.scripts {
+                script.expected_port = script.ports.first().map(|p| p.number);
+            }
+        }
     }
 
     /// Atomically write config to `path`. Creates parent directories if needed.
@@ -67,7 +99,10 @@ impl ConfigStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let yaml = serde_yaml::to_string(cfg)?;
+        // Double-write expected_port for v1 compatibility (see sync doc).
+        let mut out = cfg.clone();
+        Self::sync_expected_port(&mut out);
+        let yaml = serde_yaml::to_string(&out)?;
 
         // Temp file in the same directory → rename is atomic on same FS.
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -83,7 +118,19 @@ impl ConfigStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Project, Script};
+    use crate::types::{PortProto, PortSpec, Project, Script};
+
+    fn mk_script_v1(id: &str, port: Option<u16>) -> Script {
+        Script {
+            id: id.into(),
+            name: id.into(),
+            command: "pnpm dev".into(),
+            expected_port: port,
+            ports: Vec::new(),
+            auto_restart: false,
+            env_file: None,
+        }
+    }
 
     #[test]
     fn load_missing_returns_default() {
@@ -94,11 +141,11 @@ mod tests {
     }
 
     #[test]
-    fn save_then_load_roundtrip() {
+    fn save_then_load_roundtrip_v2() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.yaml");
         let cfg = AppConfig {
-            version: "1".into(),
+            version: "2".into(),
             projects: vec![Project {
                 id: "p1".into(),
                 name: "web".into(),
@@ -108,7 +155,16 @@ mod tests {
                     name: "dev".into(),
                     command: "pnpm dev".into(),
                     expected_port: Some(3000),
+                    ports: vec![PortSpec {
+                        name: "default".into(),
+                        number: 3000,
+                        bind: "127.0.0.1".into(),
+                        proto: PortProto::Tcp,
+                        optional: false,
+                        note: None,
+                    }],
                     auto_restart: false,
+                    env_file: None,
                 }],
             }],
             ..Default::default()
@@ -117,6 +173,137 @@ mod tests {
         assert!(path.exists());
         let back = ConfigStore::load(&path).unwrap();
         assert_eq!(cfg, back);
+    }
+
+    // --- S1 migration tests (4 cases) ---
+
+    #[test]
+    fn migrate_v1_with_expected_port_promotes_to_ports() {
+        let cfg = AppConfig {
+            version: "1".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![mk_script_v1("s", Some(3000))],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "2");
+        let s = &out.projects[0].scripts[0];
+        assert_eq!(s.ports.len(), 1);
+        assert_eq!(s.ports[0].name, "default");
+        assert_eq!(s.ports[0].number, 3000);
+        assert_eq!(s.ports[0].bind, "127.0.0.1");
+        assert_eq!(s.ports[0].proto, PortProto::Tcp);
+    }
+
+    #[test]
+    fn migrate_v1_without_expected_port_yields_empty_ports() {
+        let cfg = AppConfig {
+            version: "1".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![mk_script_v1("s", None)],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "2");
+        assert!(out.projects[0].scripts[0].ports.is_empty());
+    }
+
+    #[test]
+    fn migrate_v2_already_has_ports_is_noop() {
+        // User hand-edited: expected_port mismatches ports[0].number.
+        // migrate() must NOT rewrite ports.
+        let cfg = AppConfig {
+            version: "2".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![Script {
+                    id: "s".into(),
+                    name: "s".into(),
+                    command: "cmd".into(),
+                    expected_port: Some(9999), // stale
+                    ports: vec![PortSpec {
+                        name: "http".into(),
+                        number: 8080,
+                        bind: "0.0.0.0".into(),
+                        proto: PortProto::Tcp,
+                        optional: false,
+                        note: None,
+                    }],
+                    auto_restart: false,
+                    env_file: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg.clone());
+        assert_eq!(out, cfg);
+    }
+
+    #[test]
+    fn migrate_is_idempotent_on_v2() {
+        let cfg = AppConfig {
+            version: "2".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![mk_script_v1("s", Some(3000))],
+            }],
+            ..Default::default()
+        };
+        // v2 with expected_port=3000 and empty ports — migrate skipped
+        // (we only populate ports in the v1 branch).
+        let out = ConfigStore::migrate(cfg.clone());
+        assert_eq!(out.version, "2");
+        assert!(out.projects[0].scripts[0].ports.is_empty());
+        // Re-running is a no-op.
+        let out2 = ConfigStore::migrate(out);
+        assert_eq!(out2.version, "2");
+        assert!(out2.projects[0].scripts[0].ports.is_empty());
+    }
+
+    #[test]
+    fn save_hook_syncs_expected_port_from_first_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let cfg = AppConfig {
+            version: "2".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![Script {
+                    id: "s".into(),
+                    name: "s".into(),
+                    command: "cmd".into(),
+                    expected_port: None, // will be overwritten at save time
+                    ports: vec![PortSpec {
+                        name: "http".into(),
+                        number: 8080,
+                        bind: "0.0.0.0".into(),
+                        proto: PortProto::Tcp,
+                        optional: false,
+                        note: None,
+                    }],
+                    auto_restart: false,
+                    env_file: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        ConfigStore::save(&cfg, &path).unwrap();
+        let back = ConfigStore::load(&path).unwrap();
+        assert_eq!(back.projects[0].scripts[0].expected_port, Some(8080));
     }
 
     #[test]
