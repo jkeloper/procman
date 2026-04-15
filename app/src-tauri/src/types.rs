@@ -68,6 +68,11 @@ pub struct Script {
     /// M5: Optional path to a .env file. Variables are exported before running.
     #[serde(default)]
     pub env_file: Option<String>,
+    /// S4: IDs of other scripts (within the same config) that must be
+    /// running + reachable before this one spawns. Circular deps are
+    /// detected at spawn time and fail fast. Empty = no dependencies.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
 }
 
 /// S1: Per-script declared port. A PortSpec is purely a *declaration* — it
@@ -201,6 +206,7 @@ mod tests {
                         ports: Vec::new(),
                         auto_restart: false,
                         env_file: None,
+                        depends_on: Vec::new(),
                     },
                     Script {
                         id: "s2".into(),
@@ -210,6 +216,7 @@ mod tests {
                         ports: Vec::new(),
                         auto_restart: true,
                         env_file: None,
+                        depends_on: Vec::new(),
                     },
                 ],
             }],
@@ -290,6 +297,7 @@ mod tests {
             ],
             auto_restart: false,
             env_file: None,
+            depends_on: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&s).unwrap();
         let back: Script = serde_yaml::from_str(&yaml).unwrap();
@@ -307,6 +315,7 @@ mod tests {
             ports: Vec::new(),
             auto_restart: false,
             env_file: None,
+            depends_on: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&script).unwrap();
         eprintln!("serialized:\n{}", yaml);

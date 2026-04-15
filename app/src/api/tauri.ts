@@ -73,6 +73,7 @@ export const api = {
     autoRestart: boolean,
     envFile?: string | null,
     ports?: PortSpec[],
+    dependsOn?: string[],
   ) =>
     call(
       'create_script',
@@ -84,6 +85,7 @@ export const api = {
         autoRestart,
         envFile: envFile ?? null,
         ports: ports ?? [],
+        dependsOn: dependsOn ?? [],
       },
       ScriptSchema,
     ),
@@ -97,6 +99,7 @@ export const api = {
       autoRestart?: boolean;
       envFile?: string | null;
       ports?: PortSpec[];
+      dependsOn?: string[];
     },
   ) => call('update_script', { projectId, id, ...patch }, ScriptSchema),
   deleteScript: (projectId: string, id: string) =>

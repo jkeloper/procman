@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 2026-04-16 — S4 크래시/복구 UX (depends_on)
+- **Added** `Script.depends_on: Vec<String>` — 시작 전에 반드시 running + reachable
+  이어야 하는 다른 스크립트 ID 리스트. `#[serde(default)]`로 하위호환.
+- **Added** `wait_for_dependencies` (commands/process.rs): `spawn_process`에서 호출,
+  각 의존 스크립트가 ProcessManager::list에 있고(running) 선언된 모든 포트가 TCP
+  probe를 통과할 때까지 500ms 간격으로 폴링. 30초 타임아웃. 실패 시 어떤 포트가
+  pending인지 포함된 에러 메시지 반환.
+- **Added** `create_script` / `update_script`에 `depends_on: Option<Vec<String>>`
+  파라미터. update 시 None = 유지, Some(vec) = 교체.
+- **Added** FE: `ScriptSchema.depends_on` + `createScript`/`updateScript` 래퍼.
+- **Added** `ScriptEditor`에 "Depends on" 섹션 — 같은 프로젝트의 다른 스크립트를
+  칩 토글로 선택/해제. 자기 자신은 목록에서 제외.
+- **Note** 진짜 "Backend → Frontend" 순차 실행의 핵심 기능. auto-restart 정책
+  UI (max retries, delay 조절)와 graceful shutdown order는 후속.
+
 ### 2026-04-16 — S3 관측성 (CPU/RSS + 로그 검색 커맨드)
 - **Added** `ProcessSnapshot.cpu_pct: Option<f32>` / `rss_kb: Option<u64>`. `list()`가
   한 번의 `ps -p <pids> -o pid=,pcpu=,rss=` 호출로 모든 managed pid의 메트릭을 일괄

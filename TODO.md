@@ -8,7 +8,8 @@
       deferred: 진짜 ownership proof (wrapper_pid + bound_at_ms 기록)
 - [x] **S3** 관측성 (로그 검색/파일/메트릭) — **2026-04-16 완료** (CPU%/RSS 메트릭 + LogBuffer::search + search_log 커맨드 + 84 tests)
       deferred: 로그 파일 영속화, 로그 검색 UI backend 재배선
-- [ ] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — 5일
+- [x] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — **2026-04-16 완료** (depends_on + 30s TCP probe 대기 + ScriptEditor chip picker)
+      deferred: auto-restart 정책 UI (max retries / delay), graceful shutdown order
 - [ ] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — 7일
 
 ## 🔮 병렬 선택지 (Post-S5 재평가)

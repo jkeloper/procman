@@ -25,6 +25,8 @@ export const ScriptSchema = z.object({
   ports: z.array(PortSpecSchema).default([]),
   auto_restart: z.boolean().default(false),
   env_file: z.string().nullable().default(null),
+  // S4: IDs of other scripts that must be running + reachable first.
+  depends_on: z.array(z.string()).default([]),
 });
 export type Script = z.infer<typeof ScriptSchema>;
 

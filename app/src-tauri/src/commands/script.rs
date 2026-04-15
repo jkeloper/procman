@@ -86,6 +86,7 @@ pub async fn create_script(
     ports: Option<Vec<PortSpec>>,
     auto_restart: bool,
     env_file: Option<String>,
+    depends_on: Option<Vec<String>>,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Script, String> {
     if name.trim().is_empty() {
@@ -130,6 +131,7 @@ pub async fn create_script(
         ports: validated_ports,
         auto_restart,
         env_file: env_file.filter(|s| !s.trim().is_empty()),
+        depends_on: depends_on.unwrap_or_default(),
     };
     let to_return = script.clone();
     let found = state
@@ -159,6 +161,7 @@ pub async fn update_script(
     ports: Option<Vec<PortSpec>>,       // S1: None = don't change, Some(vec) = replace (empty clears)
     auto_restart: Option<bool>,
     env_file: Option<Option<String>>,   // Some(None) = clear, None = don't change
+    depends_on: Option<Vec<String>>,    // S4: None = don't change, Some(vec) = replace
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Script, String> {
     // Validate ports up front so we can bail without mutating state.
@@ -193,6 +196,9 @@ pub async fn update_script(
             }
             if let Some(ef) = env_file {
                 script.env_file = ef.filter(|s| !s.trim().is_empty());
+            }
+            if let Some(deps) = depends_on {
+                script.depends_on = deps;
             }
             Some(script.clone())
         })

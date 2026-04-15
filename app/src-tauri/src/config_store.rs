@@ -129,6 +129,7 @@ mod tests {
             ports: Vec::new(),
             auto_restart: false,
             env_file: None,
+            depends_on: Vec::new(),
         }
     }
 
@@ -165,6 +166,7 @@ mod tests {
                     }],
                     auto_restart: false,
                     env_file: None,
+                    depends_on: Vec::new(),
                 }],
             }],
             ..Default::default()
@@ -241,6 +243,7 @@ mod tests {
                     }],
                     auto_restart: false,
                     env_file: None,
+                    depends_on: Vec::new(),
                 }],
             }],
             ..Default::default()
@@ -297,6 +300,7 @@ mod tests {
                     }],
                     auto_restart: false,
                     env_file: None,
+                    depends_on: Vec::new(),
                 }],
             }],
             ..Default::default()

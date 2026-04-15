@@ -67,6 +67,8 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [ports, setPorts] = useState<PortSpec[]>([]);
   const [autoRestart, setAutoRestart] = useState(false);
   const [envFile, setEnvFile] = useState('');
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [siblings, setSiblings] = useState<Script[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
@@ -79,9 +81,15 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setPorts(existing?.ports ?? []);
       setAutoRestart(existing?.auto_restart ?? false);
       setEnvFile(existing?.env_file ?? '');
+      setDependsOn(existing?.depends_on ?? []);
       setErr(null);
+      // Load sibling scripts for depends_on picker.
+      api
+        .listScripts(projectId)
+        .then((list) => setSiblings(list.filter((s) => s.id !== existing?.id)))
+        .catch(() => setSiblings([]));
     }
-  }, [open, existing]);
+  }, [open, existing, projectId]);
 
   function addPort() {
     const nextNumber = ports.length === 0
@@ -150,9 +158,19 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           autoRestart,
           envFile: envVal,
           ports: trimmedPorts,
+          dependsOn,
         });
       } else {
-        await api.createScript(projectId, name, command, portNum, autoRestart, envVal, trimmedPorts);
+        await api.createScript(
+          projectId,
+          name,
+          command,
+          portNum,
+          autoRestart,
+          envVal,
+          trimmedPorts,
+          dependsOn,
+        );
       }
       onSaved();
       onOpenChange(false);
@@ -317,6 +335,49 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
             className="flex-1 border-border/60 bg-muted/30 px-2 py-1 font-mono text-[13px]"
           />
         </div>
+
+        {/* S4: Depends-on picker */}
+        {siblings.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[13px] font-medium text-muted-foreground">
+              Depends on
+              {dependsOn.length > 0 && (
+                <span className="ml-1.5 text-muted-foreground/60">({dependsOn.length})</span>
+              )}
+            </span>
+            <div className="flex flex-wrap gap-1.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5">
+              {siblings.map((sib) => {
+                const picked = dependsOn.includes(sib.id);
+                return (
+                  <button
+                    type="button"
+                    key={sib.id}
+                    disabled={busy}
+                    onClick={() =>
+                      setDependsOn(
+                        picked
+                          ? dependsOn.filter((id) => id !== sib.id)
+                          : [...dependsOn, sib.id],
+                      )
+                    }
+                    className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors ${
+                      picked
+                        ? 'border-primary bg-primary/15 text-primary'
+                        : 'border-border/50 text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                    }`}
+                    title={
+                      picked
+                        ? 'Click to remove dependency'
+                        : 'Click to require this script to be running first'
+                    }
+                  >
+                    {picked ? '✓ ' : ''}{sib.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Command — large editor-like textarea */}
         <div className="flex flex-1 flex-col min-h-0">
