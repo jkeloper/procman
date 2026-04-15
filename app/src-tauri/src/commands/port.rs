@@ -361,6 +361,35 @@ pub struct DeclaredPortStatus {
     pub holder_pid: Option<u32>,
     pub holder_command: Option<String>,
     pub owned_by_script: bool,
+    /// S2: TCP liveness probe result. `Some(true)` = connect succeeded,
+    /// `Some(false)` = connect refused/timeout, `None` = probe skipped.
+    /// Probe uses the spec's bind address (127.0.0.1 / 0.0.0.0 → 127.0.0.1 /
+    /// ::1) so the answer reflects what a local client would actually see.
+    pub reachable: Option<bool>,
+}
+
+/// S2: TCP probe — attempt a non-blocking connect to the declared port
+/// on its bind address with a short timeout. Returns true iff the TCP
+/// handshake completes. Anything else (refused, timeout, unreachable) is
+/// reported as false. This is cheap (~ms on localhost) and doesn't leak
+/// state: the socket is closed as soon as we know the answer.
+pub async fn tcp_probe(bind: &str, port: u16, timeout_ms: u64) -> bool {
+    // "0.0.0.0" listeners bind to every interface — probe loopback.
+    let host: &str = match bind {
+        "0.0.0.0" => "127.0.0.1",
+        "::" => "::1",
+        other => other,
+    };
+    let addr = if host.contains(':') && !host.starts_with('[') {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    };
+    let fut = tokio::net::TcpStream::connect(&addr);
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await {
+        Ok(Ok(_)) => true,
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -429,7 +458,21 @@ pub async fn port_status_for_script(
         None => std::collections::HashSet::new(),
     };
 
-    Ok(build_declared_status(&script.ports, &listening, &managed_pids))
+    let mut statuses = build_declared_status(&script.ports, &listening, &managed_pids);
+    // S2: probe each declared port in parallel. Keep timeout short (400ms)
+    // so a single hung port doesn't stall the whole response.
+    let probes: Vec<_> = statuses
+        .iter()
+        .map(|st| {
+            let bind = st.spec.bind.clone();
+            let port = st.spec.number;
+            tokio::spawn(async move { tcp_probe(&bind, port, 400).await })
+        })
+        .collect();
+    for (i, handle) in probes.into_iter().enumerate() {
+        statuses[i].reachable = handle.await.ok();
+    }
+    Ok(statuses)
 }
 
 /// Called by FE / start_process right before spawning. Returns a list of
@@ -564,6 +607,7 @@ pub(crate) fn build_declared_status(
                 holder_pid,
                 holder_command: holder_cmd,
                 owned_by_script: owned,
+                reachable: None,
             }
         })
         .collect()
@@ -671,5 +715,42 @@ mod tests {
         let sample = "p1234\ncnode\nn*:3000\nTST=LISTEN\nn[::]:3000\nTST=LISTEN\n";
         let parsed = parse_lsof(sample);
         assert_eq!(parsed.len(), 1);
+    }
+
+    // --- S2: TCP liveness probe ---
+
+    #[tokio::test]
+    async fn tcp_probe_refused_on_closed_port() {
+        // Port 1 is reserved and not listening on a dev mac. Probe
+        // should return false (connection refused / timeout).
+        let ok = tcp_probe("127.0.0.1", 1, 200).await;
+        assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn tcp_probe_succeeds_on_live_listener() {
+        // Bind an ephemeral listener and probe it.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let port = addr.port();
+        // Keep the listener alive by spawning an accept loop that
+        // ignores the incoming connection.
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let ok = tcp_probe("127.0.0.1", port, 500).await;
+        assert!(ok, "probe should succeed against a live listener on :{}", port);
+    }
+
+    #[tokio::test]
+    async fn tcp_probe_maps_zero_bind_to_loopback() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        // "0.0.0.0" must be rewritten to 127.0.0.1 before connect.
+        let ok = tcp_probe("0.0.0.0", port, 500).await;
+        assert!(ok);
     }
 }

@@ -156,6 +156,8 @@ export const DeclaredPortStatusSchema = z.object({
   holder_pid: z.number().int().nullable().default(null),
   holder_command: z.string().nullable().default(null),
   owned_by_script: z.boolean().default(false),
+  // S2: TCP liveness probe result. true/false/null (null = not probed).
+  reachable: z.boolean().nullable().default(null),
 });
 export type DeclaredPortStatus = z.infer<typeof DeclaredPortStatusSchema>;
 

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 2026-04-16 — S2 포트 v3 (TCP liveness probe)
+- **Added** `tcp_probe(bind, port, timeout_ms)` — tokio 기반 비동기 TCP connect
+  프로브. `0.0.0.0` → `127.0.0.1`, `::` → `::1` 리라이트. 400ms 타임아웃 기본.
+- **Added** `DeclaredPortStatus.reachable: Option<bool>` 필드. `port_status_for_script`가
+  선언된 각 포트를 병렬로 probe해서 채운다. 런타임에 "선언은 돼있는데 실제로 bind
+  되지 않은" 포트(예: 아직 부팅 중인 백엔드 · 크래시 후 좀비 선언)를 구분 가능.
+- **Added** `tcp_probe` 3건 유닛 테스트 (refused / live listener / 0.0.0.0 rewrite).
+  총 80 lib test 통과.
+- **Added** FE: `ProcessGrid`가 running + declared ports 있는 스크립트에 대해 3초마다
+  `portStatusForScript`를 폴링, scriptId → DeclaredPortStatus 맵을 관리.
+- **Added** 행 포트 배지에 liveness dot: 초록=reachable, 빨강=not reachable,
+  회색=probing/unknown. hover title에 상태 텍스트 포함.
+- **Note** 진짜 ownership proof (wrapper_pid + bound_at_ms 기록)는 후속 작업으로
+  이관. 현재는 TCP probe + 기존 pgid/cwd 휴리스틱 조합으로 충분한 신호 확보.
+
 ### 2026-04-16 — S1 포트 관리 v2 (선언 기반)
 - **Added** `types.rs`에 `PortSpec` / `PortProto::Tcp` 도입. `Script.ports: Vec<PortSpec>` 필드 추가.
   각 스펙은 `name`, `number`, `bind`, `proto`, `optional`, `note`를 가진다.

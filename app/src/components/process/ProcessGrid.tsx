@@ -11,7 +11,7 @@ import { UptimeLabel } from '@/hooks/useUptime';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { Cable, Equal } from 'lucide-react';
-import type { PortInfo } from '@/api/tauri';
+import type { PortInfo, DeclaredPortStatus } from '@/api/tauri';
 
 interface Props {
   projectId: string;
@@ -68,6 +68,9 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     fallback?: boolean;
     rootPid?: number;
   } | null>(null);
+  // S2: scriptId -> declared port statuses (includes TCP liveness probe).
+  // Polled every 3s for running scripts with declared ports.
+  const [portStatuses, setPortStatuses] = useState<Record<string, DeclaredPortStatus[]>>({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -85,6 +88,37 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // S2: Poll declared-port statuses (includes TCP liveness probe) for
+  // running scripts with declared ports. Every 3 seconds. Cleared when
+  // the set of running scripts changes or the component unmounts.
+  useEffect(() => {
+    const targets = scripts.filter(
+      (s) => statuses[s.id] === 'running' && s.ports && s.ports.length > 0,
+    );
+    if (targets.length === 0) {
+      setPortStatuses({});
+      return;
+    }
+    let cancelled = false;
+    async function tick() {
+      const next: Record<string, DeclaredPortStatus[]> = {};
+      await Promise.all(
+        targets.map(async (s) => {
+          try {
+            next[s.id] = await api.portStatusForScript(s.id);
+          } catch {}
+        }),
+      );
+      if (!cancelled) setPortStatuses(next);
+    }
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [scripts, statuses]);
 
   // Restore tunnel state from the backend on mount / project change.
   // Without this, the tunnel URL badge under each script disappears
@@ -312,7 +346,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     // which handles multi-port scripts and owned_by_script semantics.
     if (script.ports && script.ports.length > 0) {
       try {
-        const conflicts = await api.checkPortConflicts(projectId, script.id);
+        const conflicts = await api.checkPortConflicts(script.id);
         const blocking = conflicts.filter((c) => c.severity === 'blocking');
         if (blocking.length > 0) {
           // Reuse single-port dialog for the first blocking conflict.
@@ -502,15 +536,39 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         {s.name}
                       </span>
                       {s.ports && s.ports.length > 0 ? (
-                        s.ports.map((p) => (
-                          <span
-                            key={p.name}
-                            className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
-                            title={`${p.name}${p.note ? ` — ${p.note}` : ''}${p.optional ? ' (optional)' : ''}`}
-                          >
-                            {p.name}:{p.number}
-                          </span>
-                        ))
+                        s.ports.map((p) => {
+                          const st = portStatuses[s.id]?.find(
+                            (x) => x.spec.number === p.number,
+                          );
+                          // S2: liveness dot — green=reachable, red=declared but unreachable,
+                          // gray=unknown (not yet probed / script not running)
+                          const dotClass = !isRunning
+                            ? 'bg-muted-foreground/30'
+                            : st?.reachable === true
+                              ? 'bg-emerald-500'
+                              : st?.reachable === false
+                                ? 'bg-red-500/70'
+                                : 'bg-muted-foreground/30';
+                          const title =
+                            `${p.name}${p.note ? ` — ${p.note}` : ''}${p.optional ? ' (optional)' : ''}` +
+                            (isRunning
+                              ? st?.reachable === true
+                                ? ' · reachable'
+                                : st?.reachable === false
+                                  ? ' · not reachable'
+                                  : ' · probing…'
+                              : '');
+                          return (
+                            <span
+                              key={p.name}
+                              className="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
+                              title={title}
+                            >
+                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
+                              {p.name}:{p.number}
+                            </span>
+                          );
+                        })
                       ) : s.expected_port != null ? (
                         <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground">
                           :{s.expected_port}

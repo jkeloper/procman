@@ -4,7 +4,8 @@
 - [x] **S1** 포트 관리 v2 (선언 기반) — docs/07 기반, 3일. **2026-04-16 완료**
       (PortSpec/migrate/3 commands/ScriptEditor/PortPicker/handleStart, 77 tests)
       remainders: VSCode scanner `extract_ports_from_launch`, Dashboard script-grouped view
-- [ ] **S2** 포트 v3 소유권 + 헬스체크 — 5일
+- [x] **S2** 포트 v3 소유권 + 헬스체크 — **2026-04-16 완료** (TCP probe + reachable 필드 + 3s 폴링 + liveness dot. 80 tests)
+      deferred: 진짜 ownership proof (wrapper_pid + bound_at_ms 기록)
 - [ ] **S3** 관측성 (로그 검색/파일/메트릭) — 5일
 - [ ] **S4** 크래시/복구 UX (auto-restart 정책, depends_on) — 5일
 - [ ] **S5** 마감 (온보딩, Cmd+K 커버리지, 테스트, 문서) — 7일

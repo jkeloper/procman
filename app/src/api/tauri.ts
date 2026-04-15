@@ -140,25 +140,13 @@ export const api = {
     call('resolve_pid_to_script', { pid }, z.string().nullable()),
   listPortsForScriptPid: (rootPid: number) =>
     call('list_ports_for_script_pid', { rootPid }, z.array(PortInfoSchema)),
-  // S1: declared-port APIs
-  portStatusForScript: (projectId: string, scriptId: string) =>
-    call(
-      'port_status_for_script',
-      { projectId, scriptId },
-      z.array(DeclaredPortStatusSchema),
-    ),
-  checkPortConflicts: (projectId: string, scriptId: string) =>
-    call(
-      'check_port_conflicts',
-      { projectId, scriptId },
-      z.array(PortConflictSchema),
-    ),
-  listPortsForScript: (projectId: string, scriptId: string) =>
-    call(
-      'list_ports_for_script',
-      { projectId, scriptId },
-      z.array(PortInfoSchema),
-    ),
+  // S1: declared-port APIs (backend lookup_script scans all projects)
+  portStatusForScript: (scriptId: string) =>
+    call('port_status_for_script', { scriptId }, z.array(DeclaredPortStatusSchema)),
+  checkPortConflicts: (scriptId: string) =>
+    call('check_port_conflicts', { scriptId }, z.array(PortConflictSchema)),
+  listPortsForScript: (scriptId: string) =>
+    call('list_ports_for_script', { scriptId }, z.array(PortInfoSchema)),
   listDescendantPids: (rootPids: number[]) =>
     callRaw<number[]>('list_descendant_pids', { rootPids }),
   getPortAliases: () =>
