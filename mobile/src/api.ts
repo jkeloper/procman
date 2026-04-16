@@ -21,6 +21,33 @@ export interface ProcessSnapshot {
   status: 'running' | 'stopped' | 'crashed';
   started_at_ms: number;
   command: string;
+  cpu_pct: number | null;
+  rss_kb: number | null;
+}
+
+export interface PortSpec {
+  name: string;
+  number: number;
+  bind: string;
+  proto: 'tcp';
+  optional: boolean;
+  note: string | null;
+}
+
+export interface DeclaredPortStatus {
+  spec: PortSpec;
+  state: 'free' | 'listening_managed' | 'taken_by_other';
+  holder_pid: number | null;
+  holder_command: string | null;
+  owned_by_script: boolean;
+  reachable: boolean | null;
+}
+
+export interface PortConflict {
+  spec: PortSpec;
+  severity: 'blocking' | 'warning';
+  holder_pid: number;
+  holder_command: string;
 }
 
 export interface LogLine {
@@ -41,7 +68,9 @@ export interface ProjectsPayload {
       name: string;
       command: string;
       expected_port: number | null;
+      ports: PortSpec[];
       auto_restart: boolean;
+      depends_on: string[];
     }>;
   }>;
   groups: unknown[];
@@ -62,6 +91,22 @@ export const api = {
     req<{ pid: number }>(`/api/processes/${scriptId}/restart`, { method: 'POST' }),
   ports: () =>
     req<Array<{ port: number; pid: number; process_name: string }>>('/api/ports'),
+  portStatus: (scriptId: string) =>
+    req<DeclaredPortStatus[]>(`/api/ports/${scriptId}/status`),
+  portConflicts: (scriptId: string) =>
+    req<PortConflict[]>(`/api/ports/${scriptId}/conflicts`),
+  portsForScript: (scriptId: string) =>
+    req<Array<{ port: number; pid: number; process_name: string }>>(`/api/ports/${scriptId}/list`),
+  searchLog: (scriptId: string, query: string) =>
+    req<LogLine[]>(`/api/logs/${scriptId}/search?q=${encodeURIComponent(query)}`),
+  portAliases: () =>
+    req<Record<string, string>>('/api/port-aliases'),
+  setPortAlias: (port: number, alias: string) =>
+    req<void>('/api/port-aliases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port, alias }),
+    }),
 };
 
 // WebSocket stream for live updates.
