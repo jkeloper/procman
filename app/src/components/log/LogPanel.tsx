@@ -5,8 +5,8 @@ import { useLogStream } from '@/hooks/useLogStream';
 import type { LogLine } from '@/api/tauri';
 
 const ansi = new AnsiToHtml({
-  fg: '#d4d4d8',
-  bg: '#0a0a0a',
+  fg: '#c8ccc9',
+  bg: '#252b26',
   newline: false,
   escapeXML: true,
 });
@@ -20,10 +20,26 @@ const ROW_HEIGHT = 20;
 
 type RowProps = { lines: LogLine[]; query: string };
 
+// W1: Log-level keyword patterns and their highlight classes.
+const LOG_LEVEL_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(ERROR|FATAL|PANIC|EXCEPTION)\b/gi, 'text-red-400 font-semibold'],
+  [/\b(WARN(?:ING)?)\b/gi, 'text-amber-400'],
+  [/\b(INFO)\b/gi, 'text-sky-400'],
+  [/\b(DEBUG|TRACE)\b/gi, 'text-zinc-500'],
+];
+
+function applyLevelHighlight(html: string): string {
+  let result = html;
+  for (const [pattern, cls] of LOG_LEVEL_PATTERNS) {
+    result = result.replace(pattern, (m) => `<span class="${cls}">${m}</span>`);
+  }
+  return result;
+}
+
 function highlight(text: string, query: string): string {
   // Escape HTML-special chars in text first (ansi.toHtml already does that),
   // then wrap matches in <mark>. query is already lower-cased.
-  if (!query) return ansi.toHtml(text);
+  if (!query) return applyLevelHighlight(ansi.toHtml(text));
   // Case-insensitive plain-text search; wrap matches by indices to avoid
   // HTML injection via user text.
   const lowered = text.toLowerCase();
@@ -53,37 +69,55 @@ function highlight(text: string, query: string): string {
     if (ch === '>') inTag = false;
     i++;
   }
-  return out;
+  return applyLevelHighlight(out);
 }
 
-function Row({ index, style, lines, query }: RowComponentProps<RowProps>) {
+type RowPropsWithCache = RowProps & { cache: Map<number, string> };
+
+function Row({ index, style, lines, query, cache }: RowComponentProps<RowPropsWithCache>) {
   const line = lines[index];
   if (!line) return null;
   const isErr = line.stream === 'stderr';
-  const html = highlight(line.text, query);
+  let html = cache.get(line.seq);
+  if (html === undefined) {
+    html = highlight(line.text, query);
+    cache.set(line.seq, html);
+  }
   return (
     <div
       style={style}
-      className={`flex items-center gap-2 px-4 font-mono text-[11px] leading-[20px] whitespace-pre ${
-        isErr ? 'bg-red-500/5 text-red-400' : 'text-zinc-200'
-      } hover:bg-white/5`}
+      className={`flex items-center gap-2 px-4 font-mono text-[12px] leading-[20px] ${
+        isErr ? 'bg-red-500/5 text-red-400' : 'text-log-fg'
+      } hover:bg-foreground/5`}
     >
-      <span className="w-[52px] shrink-0 select-none text-right text-[9px] text-zinc-600 tabular-nums">
+      <span className="w-[52px] shrink-0 select-none text-right text-[11px] text-log-muted/60 tabular-nums">
         {line.seq}
       </span>
-      <span className="flex-1" dangerouslySetInnerHTML={{ __html: html }} />
+      <span
+        className="min-w-0 flex-1 truncate"
+        title={line.text}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </div>
   );
 }
 
 export function LogPanel({ scriptId, scriptName }: Props) {
-  const lines = useLogStream(scriptId);
+  const { lines, clear } = useLogStream(scriptId);
   const listRef = useRef<ListImperativeAPI>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [query, setQuery] = useState('');
   const [showStdout, setShowStdout] = useState(true);
   const [showStderr, setShowStderr] = useState(true);
+  // Per-instance HTML cache — scoped to this LogPanel so lines from
+  // different scripts never share cached HTML by seq collision.
+  // Cleared whenever the filter query changes (because highlight depends
+  // on query).
+  const htmlCacheRef = useRef<Map<number, string>>(new Map());
+  useEffect(() => {
+    htmlCacheRef.current.clear();
+  }, [query]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -104,6 +138,22 @@ export function LogPanel({ scriptId, scriptName }: Props) {
     }
   }, [filtered.length, effectiveAutoScroll]);
 
+  // Auto-detect when the user scrolls away from the bottom and
+  // disable auto-tail. Re-enable when they scroll back to the bottom.
+  // Without this, every new log line snaps the view to the bottom,
+  // making it impossible to read older output while the process runs.
+  useEffect(() => {
+    const el = listRef.current?.element;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < ROW_HEIGHT * 2;
+      setAutoScroll(atBottom);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [listRef.current?.element]);
+
   // Focus search on ⌘F when this panel is visible
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,41 +171,48 @@ export function LogPanel({ scriptId, scriptName }: Props) {
 
   if (!scriptId) {
     return (
-      <div className="flex h-full items-center justify-center text-[11px] text-zinc-500">
+      <div className="flex h-full items-center justify-center text-[12px] text-log-muted">
         Select a process to view its logs.
       </div>
     );
   }
 
+  const lowerQuery = useMemo(() => query.toLowerCase(), [query]);
+  const rowPropsMemo = useMemo(
+    () => ({ lines: filtered, query: lowerQuery, cache: htmlCacheRef.current }),
+    [filtered, lowerQuery],
+  );
   const hiddenCount = lines.length - filtered.length;
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0a0a]">
+    <div className="flex h-full flex-col bg-log-bg">
       {/* Toolbar */}
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-white/10 px-3 text-[10px]">
-        <span className="font-medium text-zinc-300">{scriptName ?? scriptId}</span>
-        <span className="font-mono text-zinc-500">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-log-border px-3 text-[11px]">
+        <span className="font-medium text-log-fg">{scriptName ?? scriptId}</span>
+        <span className="font-mono text-log-muted">
           {filtered.length}
-          {hiddenCount > 0 && <span className="text-zinc-600"> / {lines.length}</span>}
+          {hiddenCount > 0 && <span className="text-log-muted/60"> / {lines.length}</span>}
         </span>
         <div className="flex-1" />
 
         {/* Stream toggles */}
         <button
           onClick={() => setShowStdout(!showStdout)}
-          className={`rounded px-1.5 py-0.5 transition-colors ${
-            showStdout ? 'text-zinc-300' : 'text-zinc-600 line-through'
-          } hover:bg-white/5`}
+          className={`rounded px-2 py-1 text-[12px] transition-colors ${
+            showStdout ? 'text-log-fg' : 'text-log-muted/60 line-through'
+          } hover:bg-foreground/5`}
           title="Toggle stdout"
+          aria-pressed={showStdout}
         >
           stdout
         </button>
         <button
           onClick={() => setShowStderr(!showStderr)}
-          className={`rounded px-1.5 py-0.5 transition-colors ${
-            showStderr ? 'text-red-400' : 'text-zinc-600 line-through'
-          } hover:bg-white/5`}
+          className={`rounded px-2 py-1 text-[12px] transition-colors ${
+            showStderr ? 'text-red-400' : 'text-log-muted/60 line-through'
+          } hover:bg-foreground/5`}
           title="Toggle stderr"
+          aria-pressed={showStderr}
         >
           stderr
         </button>
@@ -168,20 +225,20 @@ export function LogPanel({ scriptId, scriptName }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="filter…  ⌘F"
-            className="h-5 w-40 rounded border border-white/10 bg-white/5 px-2 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:border-primary/50 focus:outline-none"
+            className="h-5 w-40 rounded border border-log-border bg-foreground/5 px-2 font-mono text-[11px] text-log-fg placeholder:text-log-muted/60 focus:border-primary/50 focus:outline-none"
           />
           {query && (
             <button
+              aria-label="Clear filter"
               onClick={() => setQuery('')}
-              className="close-circle absolute right-1 top-1/2 -translate-y-1/2" style={{width:16,height:16,fontSize:8}}
-            >
-              ✕
-            </button>
+              className="close-circle absolute right-1 top-1/2 -translate-y-1/2"
+              style={{ width: 16, height: 16 }}
+            />
           )}
         </div>
 
         {/* Auto-tail */}
-        <label className="flex cursor-pointer items-center gap-1 text-zinc-500 transition-colors hover:text-zinc-300">
+        <label className="flex cursor-pointer items-center gap-1 text-log-muted transition-colors hover:text-log-fg">
           <input
             type="checkbox"
             className="h-3 w-3 accent-primary"
@@ -191,6 +248,16 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           />
           auto-tail
         </label>
+        <button
+          onClick={clear}
+          className="rounded px-1.5 py-0.5 text-log-muted transition-colors hover:bg-foreground/10 hover:text-log-fg"
+          title="Clear log"
+          aria-label="Clear log"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h8M4 3V2h4v1M4.5 5v4M7.5 5v4M3 3v7a1 1 0 001 1h4a1 1 0 001-1V3" />
+          </svg>
+        </button>
         <button
           onClick={async () => {
             try {
@@ -203,8 +270,9 @@ export function LogPanel({ scriptId, scriptName }: Props) {
               }
             } catch {}
           }}
-          className="rounded px-1.5 py-0.5 text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200"
+          className="rounded px-1.5 py-0.5 text-log-muted transition-colors hover:bg-foreground/10 hover:text-log-fg"
           title="Export logs"
+          aria-label="Export logs"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2v6M3 5l3 3 3-3M2 10h8"/></svg>
         </button>
@@ -213,7 +281,7 @@ export function LogPanel({ scriptId, scriptName }: Props) {
       {/* Body */}
       <div className="flex-1 overflow-hidden">
         {filtered.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-[11px] text-zinc-600">
+          <div className="flex h-full items-center justify-center text-[12px] text-log-muted/60">
             {lines.length === 0
               ? 'waiting for output…'
               : query
@@ -227,7 +295,7 @@ export function LogPanel({ scriptId, scriptName }: Props) {
             rowCount={filtered.length}
             rowHeight={ROW_HEIGHT}
             rowComponent={Row}
-            rowProps={{ lines: filtered, query: query.toLowerCase() }}
+            rowProps={rowPropsMemo}
             overscanCount={30}
           />
         )}

@@ -115,7 +115,12 @@ pub fn run() {
                     for project in &cfg.projects {
                         for script in &project.scripts {
                             if snap.last_running.contains(&script.id) {
-                                if let Some(port) = script.expected_port {
+                                // S1: prefer declared ports list, fall back to legacy expected_port.
+                                if !script.ports.is_empty() {
+                                    for spec in &script.ports {
+                                        ports_to_clean.push(spec.number);
+                                    }
+                                } else if let Some(port) = script.expected_port {
                                     ports_to_clean.push(port as u16);
                                 }
                             }
