@@ -97,6 +97,37 @@ pub fn run() {
             log::info!("procman started, config at {:?}", config_path);
             watcher::spawn_config_watcher(app.handle().clone(), watch_state, watch_path);
 
+            // Tunnel recovery: re-map running cloudflared processes to
+            // scripts so the UI shows them without the user re-creating.
+            {
+                let tunnel_state = app.state::<Arc<commands::tunnel::TunnelState>>().inner().clone();
+                let cfg_state = app.state::<Arc<AppState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let running = match cloudflared::detect_running_cloudflared().await {
+                        Ok(r) => r,
+                        Err(_) => return,
+                    };
+                    if running.is_empty() { return; }
+                    let cfg = cfg_state.config.lock().await;
+                    let mut script_ports: Vec<(String, u16)> = Vec::new();
+                    for project in &cfg.projects {
+                        for script in &project.scripts {
+                            for spec in &script.ports {
+                                script_ports.push((script.id.clone(), spec.number));
+                            }
+                            if script.ports.is_empty() {
+                                if let Some(port) = script.expected_port {
+                                    script_ports.push((script.id.clone(), port));
+                                }
+                            }
+                        }
+                    }
+                    drop(cfg);
+                    tunnel_state.recover_from_running(&running, &script_ports).await;
+                    log::info!("tunnel recovery: scanned {} cloudflared processes", running.len());
+                });
+            }
+
             // Orphan cleanup: if procman was force-killed last time,
             // child processes may still hold ports. For each script
             // that was running in the previous session, kill anything
