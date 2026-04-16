@@ -43,7 +43,12 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/processes/:id/restart", post(restart_process))
         .route("/api/projects", get(list_projects))
         .route("/api/ports", get(list_ports))
+        .route("/api/port-aliases", get(get_port_aliases).post(set_port_alias))
         .route("/api/logs/:id", get(log_snapshot))
+        .route("/api/logs/:id/search", get(search_log))
+        .route("/api/ports/:script_id/status", get(port_status))
+        .route("/api/ports/:script_id/conflicts", get(port_conflicts))
+        .route("/api/ports/:script_id/list", get(ports_for_script))
         .route("/api/audit", get(audit_snapshot))
         .route("/api/stream", get(ws_handler))
         .route_layer(middleware::from_fn_with_state(
@@ -108,7 +113,9 @@ async fn list_projects(State(state): State<ServerState>) -> Json<serde_json::Val
                     "name": s.name,
                     "command": s.command,
                     "expected_port": s.expected_port,
+                    "ports": s.ports,
                     "auto_restart": s.auto_restart,
+                    "depends_on": s.depends_on,
                 })).collect::<Vec<_>>(),
             })
         })
@@ -129,6 +136,33 @@ async fn list_ports() -> Result<Json<Vec<PortInfo>>, StatusCode> {
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(Json(crate::commands::port::parse_lsof_for_api(&text)))
+}
+
+async fn get_port_aliases(
+    State(state): State<ServerState>,
+) -> Json<std::collections::HashMap<u16, String>> {
+    let guard = state.app_state.config.lock().await;
+    Json(guard.settings.port_aliases.clone())
+}
+
+async fn set_port_alias(
+    State(state): State<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<StatusCode, StatusCode> {
+    let port = body["port"].as_u64().ok_or(StatusCode::BAD_REQUEST)? as u16;
+    let alias = body["alias"].as_str().unwrap_or("").to_string();
+    state
+        .app_state
+        .mutate(|cfg| {
+            if alias.trim().is_empty() {
+                cfg.settings.port_aliases.remove(&port);
+            } else {
+                cfg.settings.port_aliases.insert(port, alias.trim().to_string());
+            }
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn log_snapshot(
@@ -211,6 +245,131 @@ async fn restart_process(
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+}
+
+// --- S1-S5: new API handlers for remote clients ---
+
+async fn search_log(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<Vec<crate::log_buffer::LogLine>> {
+    let query = params.get("q").cloned().unwrap_or_default();
+    let case_sensitive = params.get("cs").map(|v| v == "1").unwrap_or(false);
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(500usize);
+    Json(state.pm.log_search(&id, &query, case_sensitive, limit))
+}
+
+async fn port_status(
+    State(state): State<ServerState>,
+    Path(script_id): Path<String>,
+) -> Result<Json<Vec<crate::commands::port::DeclaredPortStatus>>, StatusCode> {
+    let script = lookup_script_from_state(&state, &script_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if script.ports.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let listening = crate::commands::port::list_ports()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let managed_pids: std::collections::HashSet<u32> = state
+        .pm
+        .list()
+        .into_iter()
+        .find(|s| s.id == script_id)
+        .map(|snap| {
+            crate::commands::port::list_ports_for_script_pid(snap.pid)
+        })
+        .map(|fut| tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut)))
+        .and_then(|r| r.ok())
+        .map(|v| v.into_iter().map(|p| p.pid).collect())
+        .unwrap_or_default();
+    let mut statuses =
+        crate::commands::port::build_declared_status(&script.ports, &listening, &managed_pids);
+    // TCP probe each port
+    let probes: Vec<_> = statuses
+        .iter()
+        .map(|st| {
+            let bind = st.spec.bind.clone();
+            let port = st.spec.number;
+            tokio::spawn(async move { crate::commands::port::tcp_probe(&bind, port, 400).await })
+        })
+        .collect();
+    for (i, handle) in probes.into_iter().enumerate() {
+        statuses[i].reachable = handle.await.ok();
+    }
+    Ok(Json(statuses))
+}
+
+async fn port_conflicts(
+    State(state): State<ServerState>,
+    Path(script_id): Path<String>,
+) -> Result<Json<Vec<crate::commands::port::PortConflict>>, StatusCode> {
+    let script = lookup_script_from_state(&state, &script_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if script.ports.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let listening = crate::commands::port::list_ports()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(crate::commands::port::build_conflicts(
+        &script.ports,
+        &listening,
+    )))
+}
+
+async fn ports_for_script(
+    State(state): State<ServerState>,
+    Path(script_id): Path<String>,
+) -> Result<Json<Vec<PortInfo>>, StatusCode> {
+    let script = lookup_script_from_state(&state, &script_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let all = crate::commands::port::list_ports()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let by_port: std::collections::HashMap<u16, PortInfo> =
+        all.iter().map(|p| (p.port, p.clone())).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<PortInfo> = Vec::new();
+    for spec in &script.ports {
+        if let Some(info) = by_port.get(&spec.number) {
+            if seen.insert(spec.number) {
+                out.push(info.clone());
+            }
+        }
+    }
+    if let Some(snap) = state.pm.list().into_iter().find(|s| s.id == script_id) {
+        if let Ok(v) = crate::commands::port::list_ports_for_script_pid(snap.pid).await {
+            for info in v {
+                if seen.insert(info.port) {
+                    out.push(info);
+                }
+            }
+        }
+    }
+    Ok(Json(out))
+}
+
+async fn lookup_script_from_state(
+    state: &ServerState,
+    script_id: &str,
+) -> Option<crate::types::Script> {
+    let guard = state.app_state.config.lock().await;
+    for proj in &guard.projects {
+        for s in &proj.scripts {
+            if s.id == script_id {
+                return Some(s.clone());
+            }
+        }
+    }
+    None
 }
 
 fn now_ms() -> i64 {
