@@ -229,17 +229,67 @@ pub fn run() {
             // interrupt via prevent_exit.
             if let tauri::RunEvent::Exit = event {
                 if let Some(pm) = app_handle.try_state::<ProcessManager>() {
-                    let ids: Vec<String> = pm.list().into_iter().map(|s| s.id).collect();
-                    if !ids.is_empty() {
-                        log::info!("procman exiting — killing {} child process group(s)", ids.len());
-                        // Blocking SIGKILL of the whole process group
-                        // for each managed script. We use killpg + hard
-                        // SIGKILL because this is shutdown: no time to
-                        // wait for SIGTERM grace periods.
-                        for id in ids {
-                            if let Some(snap) = pm.list().into_iter().find(|s| s.id == id) {
-                                unsafe {
-                                    libc::killpg(snap.pid as i32, libc::SIGKILL);
+                    let snaps = pm.list();
+                    if !snaps.is_empty() {
+                        log::info!("procman exiting — killing {} child process group(s)", snaps.len());
+
+                        // Collect all descendant PIDs holding ports before
+                        // killing groups. This catches detached processes
+                        // (Gradle daemon, etc.) that escape killpg.
+                        let all_pids: Vec<u32> = snaps.iter().map(|s| s.pid).collect();
+                        let mut extra_pids: Vec<u32> = Vec::new();
+                        // Sync lsof scan — acceptable at shutdown.
+                        let output = std::process::Command::new("lsof")
+                            .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcnT"])
+                            .output();
+                        if let Ok(out) = output {
+                            let text = String::from_utf8_lossy(&out.stdout);
+                            let ports = commands::port::parse_lsof_for_api(&text);
+                            // Collect descendant PIDs via ppid/pgid scan
+                            if let Ok(ps_out) = std::process::Command::new("ps")
+                                .args(["-ax", "-o", "pid=,ppid=,pgid="])
+                                .output()
+                            {
+                                let ps_text = String::from_utf8_lossy(&ps_out.stdout);
+                                let mut child_set: std::collections::HashSet<u32> = all_pids.iter().copied().collect();
+                                // BFS: find all descendants of managed PIDs
+                                let mut changed = true;
+                                while changed {
+                                    changed = false;
+                                    for line in ps_text.lines() {
+                                        let parts: Vec<&str> = line.split_whitespace().collect();
+                                        if parts.len() < 3 { continue; }
+                                        let pid: u32 = parts[0].parse().unwrap_or(0);
+                                        let ppid: u32 = parts[1].parse().unwrap_or(0);
+                                        let pgid: u32 = parts[2].parse().unwrap_or(0);
+                                        if pid == 0 { continue; }
+                                        if !child_set.contains(&pid) &&
+                                           (child_set.contains(&ppid) || child_set.contains(&pgid)) {
+                                            child_set.insert(pid);
+                                            changed = true;
+                                        }
+                                    }
+                                }
+                                for p in &ports {
+                                    if child_set.contains(&p.pid) && !all_pids.contains(&p.pid) {
+                                        extra_pids.push(p.pid);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Kill process groups
+                        for snap in &snaps {
+                            unsafe {
+                                libc::killpg(snap.pid as i32, libc::SIGKILL);
+                            }
+                        }
+                        // Kill orphan descendants that escaped the group
+                        for pid in &extra_pids {
+                            unsafe {
+                                if libc::kill(*pid as i32, 0) == 0 {
+                                    log::info!("exit: killing orphan descendant pid {}", pid);
+                                    libc::kill(*pid as i32, libc::SIGKILL);
                                 }
                             }
                         }

@@ -328,6 +328,11 @@ impl ProcessManager {
     /// Kill the process group and wait for the watcher to confirm exit.
     /// Uses try_wait-based observation (via exited flag) so we never
     /// SIGKILL a pid that's already been reaped by the OS (UNI-2).
+    ///
+    /// Enhanced: before killing the group, snapshot all descendant PIDs
+    /// holding ports (via lsof). After group kill, any survivors (detached
+    /// daemons like Gradle) are individually SIGKILL'd so they can't leak
+    /// zombie ports.
     pub async fn kill(&self, id: &str) -> Result<(), String> {
         let (pid, killed_flag, exited_flag, generation) = {
             let Some(m) = self.procs.get(id) else {
@@ -342,7 +347,17 @@ impl ProcessManager {
         };
         killed_flag.store(true, Ordering::SeqCst);
 
-        // SIGTERM
+        // Snapshot all descendant PIDs holding ports BEFORE kill.
+        // This catches detached processes (Gradle daemon, etc.) that
+        // setsid/setpgid away from our group.
+        let descendant_pids: Vec<u32> = crate::commands::port::list_ports_for_script_pid(pid)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.pid)
+            .collect();
+
+        // SIGTERM the process group
         if !exited_flag.load(Ordering::SeqCst) {
             unsafe {
                 libc::killpg(pid as i32, libc::SIGTERM);
@@ -368,6 +383,19 @@ impl ProcessManager {
             while waited < 500 && !exited_flag.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(25)).await;
                 waited += 25;
+            }
+        }
+
+        // Kill any descendant port holders that survived the group kill
+        // (detached daemons, setsid'd children, etc.).
+        for dpid in &descendant_pids {
+            if *dpid == pid { continue; }
+            unsafe {
+                // Check if still alive before killing
+                if libc::kill(*dpid as i32, 0) == 0 {
+                    log::info!("killing orphan descendant pid {} (survived group kill)", dpid);
+                    libc::kill(*dpid as i32, libc::SIGKILL);
+                }
             }
         }
 
