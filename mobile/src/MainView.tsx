@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, openStream, type ProcessSnapshot, type ProjectsPayload, type DeclaredPortStatus } from './api';
 import { clearPair, loadPair } from './pair';
 import { LogView } from './LogView';
@@ -28,15 +28,17 @@ export function MainView({ onUnpair }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [portStatuses, setPortStatuses] = useState<Record<string, DeclaredPortStatus[]>>({});
 
+  const initialLoadDone = useRef(false);
   const refresh = useCallback(async () => {
     try {
       const [cfg, procs] = await Promise.all([api.projects(), api.processes()]);
       setProjects(cfg.projects);
       setProcesses(procs);
       setLoadError(null);
-      // Always collapse all projects on (re)connect so the user sees the list,
-      // not a long stream of script rows.
-      setCollapsed(new Set(cfg.projects.map((p: any) => p.id)));
+      if (!initialLoadDone.current) {
+        initialLoadDone.current = true;
+        setCollapsed(new Set(cfg.projects.map((p: any) => p.id)));
+      }
     } catch (e: any) {
       setLoadError(e?.message ?? 'Connection failed');
     }
