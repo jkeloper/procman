@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { savePair } from './pair';
+import { QrScanner } from './QrScanner';
 import './mobile.css';
 
 interface Props {
@@ -20,12 +21,40 @@ export function PairView({ onPaired }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [abortCtrl, setAbortCtrl] = useState<AbortController | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   function cancel() {
     abortCtrl?.abort();
     setAbortCtrl(null);
     setBusy(false);
     setErr('Cancelled');
+  }
+
+  function handleQrScan(text: string) {
+    setScanning(false);
+    try {
+      // QR format: "http(s)://host:port#token=xxx"
+      const url = new URL(text);
+      const hashParams = new URLSearchParams(url.hash.slice(1));
+      const scannedToken = hashParams.get('token');
+      if (!scannedToken) {
+        setErr('QR code has no token. Generate a new QR from procman Remote Access.');
+        return;
+      }
+      const isTunnel = url.hostname.includes('trycloudflare.com');
+      if (isTunnel) {
+        setMode('tunnel');
+        setTunnelUrl(`${url.protocol}//${url.host}`);
+      } else {
+        setMode('lan');
+        setHost(url.hostname);
+        setPort(url.port || (url.protocol === 'https:' ? '443' : '80'));
+      }
+      setToken(scannedToken);
+      setErr(null);
+    } catch {
+      setErr('Invalid QR code. Expected a procman pairing URL.');
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -162,6 +191,39 @@ export function PairView({ onPaired }: Props) {
           </button>
         </div>
 
+        <button
+          type="button"
+          onClick={() => setScanning(true)}
+          style={{
+            width: '100%',
+            padding: '12px 0',
+            marginBottom: 12,
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.05)',
+            color: '#e4efe7',
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+            <rect x="7" y="7" width="10" height="10" rx="1"/>
+          </svg>
+          Scan QR Code
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, color: 'var(--fg3)', fontSize: 12 }}>
+          <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
+          or connect manually
+          <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
+        </div>
+
         <form onSubmit={submit} className="login-form">
           {mode === 'lan' ? (
             <div style={{ display: 'flex', gap: 8, width: '100%', boxSizing: 'border-box' }}>
@@ -229,6 +291,12 @@ export function PairView({ onPaired }: Props) {
           )}
         </form>
       </div>
+      {scanning && (
+        <QrScanner
+          onScan={handleQrScan}
+          onClose={() => setScanning(false)}
+        />
+      )}
     </div>
   );
 }
