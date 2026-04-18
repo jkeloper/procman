@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'dev.procman.remote',
+  appId: 'kr.procman.remote',
   appName: 'procman',
   webDir: 'dist',
   // Note: procman mobile ships iOS-only (per project charter). The
