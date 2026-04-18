@@ -117,7 +117,7 @@ else
   if [[ "$IDENTITY" != "-" ]]; then
     export APPLE_SIGNING_IDENTITY="$IDENTITY"
   fi
-  if ! pnpm tauri build --bundles dmg app; then
+  if ! pnpm tauri build --bundles dmg app updater; then
     err "Tauri build failed"; exit 2
   fi
 fi
