@@ -31,7 +31,7 @@
       "active": true,
       "dialog": false,
       "endpoints": [
-        "https://github.com/<owner>/procman/releases/latest/download/latest.json"
+        "https://github.com/jkeloper/procman/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJlcGxhY2UgYmVmb3JlIHJlbGVhc2UgLS0gcnVuIGBwbnBtIHRhdXJpIHNpZ25lciBnZW5lcmF0ZWAK"
     }
