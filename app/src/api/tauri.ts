@@ -295,9 +295,12 @@ export async function installUpdateAndRestart(
 ): Promise<boolean> {
   const update = await check();
   if (!update) return false;
+  let total: number | undefined;
   await update.downloadAndInstall((event) => {
-    if (event.event === 'Progress' && onProgress) {
-      onProgress(event.data.chunkLength, event.data.contentLength);
+    if (event.event === 'Started') {
+      total = event.data.contentLength;
+    } else if (event.event === 'Progress' && onProgress) {
+      onProgress(event.data.chunkLength, total);
     }
   });
   await relaunch();
