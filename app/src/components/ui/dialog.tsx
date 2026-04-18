@@ -47,31 +47,72 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  // Split children into header / footer / body by matching on
+  // React element data-slot. DialogHeader and DialogFooter keep their
+  // natural height (shrink-0). Everything else goes into a flex-1
+  // scroll region in the middle. This lets the dialog cap at viewport
+  // height while scrolling only the body, keeping title and action
+  // buttons always visible without the sticky-positioning glitches.
+  const childArray = React.Children.toArray(children);
+  const header: React.ReactNode[] = [];
+  const footer: React.ReactNode[] = [];
+  const body: React.ReactNode[] = [];
+  for (const child of childArray) {
+    if (React.isValidElement(child)) {
+      const slot = (child.props as { ["data-slot"]?: string })?.["data-slot"];
+      if (slot === "dialog-header") {
+        header.push(child);
+        continue;
+      }
+      if (slot === "dialog-footer") {
+        footer.push(child);
+        continue;
+      }
+    }
+    body.push(child);
+  }
+
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-hidden rounded-xl bg-popover p-6 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-2xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.85] data-open:duration-250 data-open:ease-out data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-closed:duration-150 data-closed:ease-in",
+          // Base geometry — fixed+centered, width capped to viewport
+          "fixed top-1/2 left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 sm:max-w-2xl",
+          // Height cap to viewport, flex column so the middle body
+          // region can scroll independently without moving header/footer.
+          "flex max-h-[calc(100vh-4rem)] flex-col overflow-hidden",
+          // Visual treatment
+          "rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none",
+          // Animations
+          "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.85] data-open:duration-250 data-open:ease-out data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-closed:duration-150 data-closed:ease-in",
           className
         )}
         {...props}
       >
-        {children}
+        {header}
+        {body.length > 0 && (
+          <div
+            data-slot="dialog-body"
+            className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-4"
+          >
+            {body}
+          </div>
+        )}
+        {footer}
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
             render={
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className="absolute top-2 right-2 z-20"
                 size="icon-sm"
               />
             }
           >
-            <XIcon
-            />
+            <XIcon />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
@@ -84,7 +125,12 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn(
+        // Pinned at the top of the dialog via flex-column ordering.
+        // DialogContent puts header first and it never shrinks.
+        "flex shrink-0 flex-col gap-2 border-b border-border/40 px-6 pt-6 pb-4",
+        className
+      )}
       {...props}
     />
   )
@@ -102,7 +148,9 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        // Pinned at the bottom of the dialog via flex-column ordering.
+        // DialogContent puts footer last and it never shrinks.
+        "flex shrink-0 flex-col-reverse gap-2 rounded-b-xl border-t border-border/40 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}

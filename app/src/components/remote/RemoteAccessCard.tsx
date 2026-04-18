@@ -1,14 +1,62 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { api } from '@/api/tauri';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/Toast';
+import { useSettings } from '@/hooks/useSettings';
+
+// QR code that encodes the procman pairing payload as a URL with the
+// token in the fragment (so it never gets logged or sent server-side).
+// Mobile picks the URL up, parses #token=, and auto-pairs.
+function PairingQR({ url, token }: { url: string; token: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const payload = `${url}#token=${encodeURIComponent(token)}`;
+    QRCode.toCanvas(canvasRef.current, payload, {
+      width: 180,
+      margin: 1,
+      color: {
+        dark: '#0f1c14',
+        light: '#ffffff',
+      },
+      errorCorrectionLevel: 'M',
+    }).catch(() => {});
+  }, [url, token]);
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <canvas
+        ref={canvasRef}
+        className="rounded-lg ring-1 ring-foreground/10"
+        style={{ width: 180, height: 180 }}
+      />
+      <p className="text-center text-[11px] text-muted-foreground">
+        Scan with your phone camera to pair instantly
+      </p>
+    </div>
+  );
+}
+
+// Special script_id used to key the tunnel that exposes procman's
+// own remote-control HTTP server (not a user script).
+const REMOTE_SERVER_TUNNEL_ID = '__procman_remote_server__';
 
 // ---- Tunnel sub-section ---- //
 function TunnelSection({ serverPort }: { serverPort: number | null }) {
-  const [tunnel, setTunnel] = useState<{ running: boolean; url: string | null; pid: number | null } | null>(null);
+  const [tunnel, setTunnel] = useState<
+    { running: boolean; url: string | null; pid: number | null } | null
+  >({ running: false, url: null, pid: null });
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      setTunnel(await api.tunnelStatus());
+      const all = await api.tunnelStatus();
+      const ours = all.find((t) => t.script_id === REMOTE_SERVER_TUNNEL_ID);
+      if (ours) {
+        setTunnel({ running: true, url: ours.url, pid: ours.pid });
+      } else {
+        setTunnel({ running: false, url: null, pid: null });
+      }
     } catch {}
   }, []);
 
@@ -21,8 +69,11 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
   async function start() {
     setBusy(true);
     try {
-      const result = await api.startTunnel(serverPort ?? 7777);
-      setTunnel(result);
+      const result = await api.startTunnel(
+        serverPort ?? 7777,
+        REMOTE_SERVER_TUNNEL_ID,
+      );
+      setTunnel({ running: true, url: result.url, pid: result.pid });
     } catch (e: any) {
       alert(`Tunnel failed: ${e?.message ?? e}`);
     } finally {
@@ -33,15 +84,16 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
   async function stop() {
     setBusy(true);
     try {
-      await api.stopTunnel();
+      await api.stopTunnel(REMOTE_SERVER_TUNNEL_ID);
       setTunnel({ running: false, url: null, pid: null });
     } finally {
       setBusy(false);
     }
   }
 
+  const toast = useToast();
   function copy(text: string) {
-    navigator.clipboard.writeText(text);
+    toast.copy(text, 'Tunnel URL copied');
   }
 
   if (!tunnel) return null;
@@ -56,33 +108,30 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
           </span>
         </div>
         {tunnel.running ? (
-          <button
-            className="rounded px-1.5 py-0.5 text-[10px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-destructive"
             onClick={stop}
             disabled={busy}
           >
-            stop
-          </button>
+            Stop
+          </Button>
         ) : (
-          <button
-            className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          <Button size="sm"
             onClick={start}
             disabled={busy || !serverPort}
           >
-            {busy ? 'connecting…' : 'expose via Cloudflare'}
-          </button>
+            {busy ? 'Connecting...' : 'Expose via Cloudflare'}
+          </Button>
         )}
       </div>
 
       {tunnel.running && tunnel.url && (
         <div className="flex items-center gap-2 text-[11px]">
           <span className="min-w-0 flex-1 truncate font-mono text-primary">{tunnel.url}</span>
-          <button
+          <Button variant="ghost" size="sm" className="h-6 px-2"
             onClick={() => copy(tunnel.url!)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            copy
-          </button>
+            Copy
+          </Button>
         </div>
       )}
 
@@ -115,6 +164,8 @@ export function RemoteAccessCard() {
   >([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const { settings } = useSettings();
+  const lanOptIn = settings?.lan_mode_opt_in ?? false;
 
   const reload = useCallback(async () => {
     try {
@@ -164,11 +215,11 @@ export function RemoteAccessCard() {
     }
   }
 
+  const toast2 = useToast();
   function copy(text: string, label: string) {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(label);
-      setTimeout(() => setCopied(null), 1500);
-    });
+    toast2.copy(text, `${label === 'url' ? 'URL' : 'Token'} copied`);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 1500);
   }
 
   const url = status?.running
@@ -185,34 +236,47 @@ export function RemoteAccessCard() {
           </span>
         </div>
         {status?.running ? (
-          <button
-            className="rounded px-1.5 py-0.5 text-[11px] text-red-500/80 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-destructive"
             onClick={() => toggle(false)}
             disabled={busy}
           >
-            stop
-          </button>
+            Stop
+          </Button>
         ) : (
           <div className="flex gap-1">
-            <button
-              className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            <Button variant="ghost" size="sm" className="h-6 px-2"
               onClick={() => toggle(true, 'loopback')}
               disabled={busy}
             >
-              local only
-            </button>
-            <button
-              className="rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              Local only
+            </Button>
+            <Button
+              size="sm"
               onClick={() => toggle(true, 'lan')}
-              disabled={busy}
+              disabled={busy || !lanOptIn}
+              title={!lanOptIn ? 'Enable LAN mode in Settings first' : undefined}
             >
-              start (LAN)
-            </button>
+              Start LAN
+            </Button>
           </div>
         )}
       </div>
 
       {err && <p className="mb-2 text-[11px] text-red-500">{err}</p>}
+
+      {!status?.running && !lanOptIn && (
+        <div className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+          <span className="font-semibold">LAN mode disabled.</span> Opt-in from Settings
+          to expose procman on your local network. Cloudflare Tunnel is recommended for
+          anything beyond a trusted Wi-Fi.
+        </div>
+      )}
+      {!status?.running && lanOptIn && (
+        <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+          Warning: certificate pinning is not yet implemented. Keep LAN sessions on
+          your own Wi-Fi only.
+        </div>
+      )}
 
       {!status?.running ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-3 text-[11px] text-muted-foreground">
@@ -229,12 +293,11 @@ export function RemoteAccessCard() {
             <div className="flex items-center gap-2">
               <span className="w-12 text-muted-foreground">URL</span>
               <span className="font-mono">{url}</span>
-              <button
+              <Button variant="ghost" size="sm" className="h-6 px-2"
                 onClick={() => copy(url!, 'url')}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                {copied === 'url' ? '✓' : 'copy'}
-              </button>
+                {copied === 'url' ? '✓' : 'Copy'}
+              </Button>
             </div>
             {/* Token */}
             <div className="flex items-center gap-2">
@@ -242,18 +305,16 @@ export function RemoteAccessCard() {
               <span className="min-w-0 flex-1 truncate font-mono">
                 {showToken ? status.token : '•'.repeat(20)}
               </span>
-              <button
+              <Button variant="ghost" size="sm" className="h-6 px-2"
                 onClick={() => setShowToken(!showToken)}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                {showToken ? 'hide' : 'show'}
-              </button>
-              <button
+                {showToken ? 'Hide' : 'Show'}
+              </Button>
+              <Button variant="ghost" size="sm" className="h-6 px-2"
                 onClick={() => copy(status.token, 'token')}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                {copied === 'token' ? '✓' : 'copy'}
-              </button>
+                {copied === 'token' ? '✓' : 'Copy'}
+              </Button>
             </div>
             {/* Mode */}
             <div className="flex items-center gap-2">
@@ -262,16 +323,21 @@ export function RemoteAccessCard() {
             </div>
           </div>
 
+          {url && status.token && (
+            <div className="border-t border-border/40 pt-3">
+              <PairingQR url={url} token={status.token} />
+            </div>
+          )}
+
           <div className="flex items-center gap-2 border-t border-border/40 pt-2">
-            <button
-              className="rounded border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            <Button variant="outline" size="sm" className="h-6 px-2"
               onClick={rotate}
               disabled={busy}
             >
-              rotate token
-            </button>
+              Rotate token
+            </Button>
             <span className="text-[10px] text-muted-foreground/50">
-              Phone: open {url} → paste token → connect
+              Or scan QR ↑ on your phone
             </span>
           </div>
 

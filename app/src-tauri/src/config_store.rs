@@ -10,11 +10,40 @@
 //   - `dirs::config_dir()` returns the platform config root
 //     (~/Library/Application Support on macOS, ~/.config on Linux, etc.).
 
-use crate::types::{AppConfig, PortProto, PortSpec};
+use crate::types::{AppConfig, AutoRestartPolicy, PortProto, PortSpec};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+/// H5: Guard against FS-watcher re-entry after our own atomic write.
+/// macOS FSEvents sometimes delivers multiple events (Create + Modify +
+/// Rename) for a single rename(), spread over >200ms. We set this to
+/// `now + SUPPRESS_MS` whenever `save()` lands, and the watcher thread
+/// skips reload while the guard hasn't expired. Stored as unix-millis
+/// so a plain AtomicU64 is sufficient — no Mutex contention.
+static SUPPRESS_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+const SUPPRESS_MS: u64 = 2_000;
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// True while the watcher should ignore FS events for our config file
+/// (we just wrote it). Called from the watcher thread.
+pub fn watcher_should_suppress() -> bool {
+    now_unix_ms() < SUPPRESS_UNTIL_MS.load(Ordering::Relaxed)
+}
+
+/// Arm the suppression window. Called from `ConfigStore::save()`.
+fn arm_watcher_suppress() {
+    SUPPRESS_UNTIL_MS.store(now_unix_ms() + SUPPRESS_MS, Ordering::Relaxed);
+}
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -45,6 +74,12 @@ impl ConfigStore {
         let mut cfg: AppConfig = serde_yaml::from_slice(&bytes)?;
         // E5: Schema migration — bump version + apply changes
         cfg = Self::migrate(cfg);
+        // H3: ensure the on-disk file is 0600 (one-shot chmod on load).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
         Ok(cfg)
     }
 
@@ -80,6 +115,27 @@ impl ConfigStore {
             cfg.version = "2".to_string();
         }
 
+        if cfg.version == "2" {
+            cfg = Self::migrate_v2_to_v3(cfg);
+        }
+
+        cfg
+    }
+
+    /// v2 → v3: synthesize `auto_restart_policy` from legacy `auto_restart`
+    /// bool. Idempotent: if a script already has a policy (v3-era), skip.
+    /// If a script has `auto_restart == false` and no policy, leave policy
+    /// as None (nothing to preserve). New AppSettings fields are serde-
+    /// defaulted by the load path — no touch needed here.
+    pub(crate) fn migrate_v2_to_v3(mut cfg: AppConfig) -> AppConfig {
+        for project in &mut cfg.projects {
+            for script in &mut project.scripts {
+                if script.auto_restart && script.auto_restart_policy.is_none() {
+                    script.auto_restart_policy = Some(AutoRestartPolicy::default());
+                }
+            }
+        }
+        cfg.version = "3".to_string();
         cfg
     }
 
@@ -96,6 +152,10 @@ impl ConfigStore {
 
     /// Atomically write config to `path`. Creates parent directories if needed.
     pub fn save(cfg: &AppConfig, path: &Path) -> Result<(), ConfigError> {
+        // H5: Arm the watcher-suppression guard BEFORE touching disk so
+        // the event callback can't race us. We re-arm again after persist
+        // (FSEvents may deliver the event up to ~1s after rename).
+        arm_watcher_suppress();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -111,6 +171,17 @@ impl ConfigStore {
         tmp.as_file().sync_all()?;
         tmp.persist(path)
             .map_err(|e| ConfigError::Io(e.error))?;
+        // H3: lock down to 0600 (user-only rw). config.yaml can contain
+        // env-file paths / local URLs — not secrets per se, but the
+        // runtime.json next door is already 0600 so align.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
+        // Re-arm: FSEvents can surface the rename event a second or two
+        // after persist() returns, so extend the window one more time.
+        arm_watcher_suppress();
         Ok(())
     }
 }
@@ -128,6 +199,7 @@ mod tests {
             expected_port: port,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         }
@@ -142,11 +214,11 @@ mod tests {
     }
 
     #[test]
-    fn save_then_load_roundtrip_v2() {
+    fn save_then_load_roundtrip_v3() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.yaml");
         let cfg = AppConfig {
-            version: "2".into(),
+            version: "3".into(),
             projects: vec![Project {
                 id: "p1".into(),
                 name: "web".into(),
@@ -165,6 +237,7 @@ mod tests {
                         note: None,
                     }],
                     auto_restart: false,
+                    auto_restart_policy: None,
                     env_file: None,
                     depends_on: Vec::new(),
                 }],
@@ -192,7 +265,8 @@ mod tests {
             ..Default::default()
         };
         let out = ConfigStore::migrate(cfg);
-        assert_eq!(out.version, "2");
+        // Chained v1 → v2 → v3 lands at "3".
+        assert_eq!(out.version, "3");
         let s = &out.projects[0].scripts[0];
         assert_eq!(s.ports.len(), 1);
         assert_eq!(s.ports[0].name, "default");
@@ -214,14 +288,16 @@ mod tests {
             ..Default::default()
         };
         let out = ConfigStore::migrate(cfg);
-        assert_eq!(out.version, "2");
+        // Chained migrations: v1 → v2 (no expected_port → no ports) → v3.
+        assert_eq!(out.version, "3");
         assert!(out.projects[0].scripts[0].ports.is_empty());
     }
 
     #[test]
-    fn migrate_v2_already_has_ports_is_noop() {
+    fn migrate_v2_already_has_ports_is_noop_on_ports() {
         // User hand-edited: expected_port mismatches ports[0].number.
-        // migrate() must NOT rewrite ports.
+        // migrate() must NOT rewrite ports. Version bumps v2 → v3 but
+        // everything port-related stays untouched.
         let cfg = AppConfig {
             version: "2".into(),
             projects: vec![Project {
@@ -242,6 +318,7 @@ mod tests {
                         note: None,
                     }],
                     auto_restart: false,
+                    auto_restart_policy: None,
                     env_file: None,
                     depends_on: Vec::new(),
                 }],
@@ -249,13 +326,16 @@ mod tests {
             ..Default::default()
         };
         let out = ConfigStore::migrate(cfg.clone());
-        assert_eq!(out, cfg);
+        assert_eq!(out.version, "3");
+        assert_eq!(out.projects[0].scripts[0].ports, cfg.projects[0].scripts[0].ports);
+        assert_eq!(out.projects[0].scripts[0].expected_port, Some(9999));
     }
 
     #[test]
     fn migrate_preserves_depends_on_when_already_v2() {
         // S4 invariant: v1→v2 migrate must not touch depends_on (it's
-        // a v2-era field and shouldn't get reset).
+        // a v2-era field and shouldn't get reset). After v3 lift, version
+        // should be "3".
         let cfg = AppConfig {
             version: "1".into(),
             projects: vec![Project {
@@ -269,6 +349,7 @@ mod tests {
                     expected_port: Some(3000),
                     ports: Vec::new(),
                     auto_restart: false,
+                    auto_restart_policy: None,
                     env_file: None,
                     depends_on: vec!["dep1".into(), "dep2".into()],
                 }],
@@ -276,7 +357,7 @@ mod tests {
             ..Default::default()
         };
         let out = ConfigStore::migrate(cfg);
-        assert_eq!(out.version, "2");
+        assert_eq!(out.version, "3");
         assert_eq!(
             out.projects[0].scripts[0].depends_on,
             vec!["dep1".to_string(), "dep2".to_string()]
@@ -286,7 +367,59 @@ mod tests {
     }
 
     #[test]
-    fn migrate_is_idempotent_on_v2() {
+    fn migrate_is_idempotent_on_v3() {
+        // After one full migrate (v1 → v2 → v3), a second pass is a no-op.
+        let cfg = AppConfig {
+            version: "1".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![mk_script_v1("s", Some(3000))],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "3");
+        let out2 = ConfigStore::migrate(out.clone());
+        assert_eq!(out2, out);
+    }
+
+    // --- v2 → v3 migration tests ---
+
+    #[test]
+    fn migrate_v2_to_v3_synthesizes_policy_from_auto_restart_true() {
+        let cfg = AppConfig {
+            version: "2".into(),
+            projects: vec![Project {
+                id: "p".into(),
+                name: "p".into(),
+                path: "/tmp".into(),
+                scripts: vec![Script {
+                    id: "s".into(),
+                    name: "s".into(),
+                    command: "cmd".into(),
+                    expected_port: None,
+                    ports: Vec::new(),
+                    auto_restart: true,
+                    auto_restart_policy: None,
+                    env_file: None,
+                    depends_on: Vec::new(),
+                }],
+            }],
+            ..Default::default()
+        };
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "3");
+        let pol = out.projects[0].scripts[0].auto_restart_policy.as_ref().unwrap();
+        assert!(pol.enabled);
+        assert_eq!(pol.max_retries, 5);
+        assert_eq!(pol.backoff_ms, 1000);
+        assert_eq!(pol.jitter_ms, 500);
+    }
+
+    #[test]
+    fn migrate_v2_to_v3_leaves_policy_none_when_auto_restart_false() {
         let cfg = AppConfig {
             version: "2".into(),
             projects: vec![Project {
@@ -297,15 +430,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        // v2 with expected_port=3000 and empty ports — migrate skipped
-        // (we only populate ports in the v1 branch).
-        let out = ConfigStore::migrate(cfg.clone());
-        assert_eq!(out.version, "2");
-        assert!(out.projects[0].scripts[0].ports.is_empty());
-        // Re-running is a no-op.
-        let out2 = ConfigStore::migrate(out);
-        assert_eq!(out2.version, "2");
-        assert!(out2.projects[0].scripts[0].ports.is_empty());
+        let out = ConfigStore::migrate(cfg);
+        assert_eq!(out.version, "3");
+        assert!(out.projects[0].scripts[0].auto_restart_policy.is_none());
     }
 
     #[test]
@@ -313,7 +440,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
         let cfg = AppConfig {
-            version: "2".into(),
+            version: "3".into(),
             projects: vec![Project {
                 id: "p".into(),
                 name: "p".into(),
@@ -332,6 +459,7 @@ mod tests {
                         note: None,
                     }],
                     auto_restart: false,
+                    auto_restart_policy: None,
                     env_file: None,
                     depends_on: Vec::new(),
                 }],
@@ -341,6 +469,52 @@ mod tests {
         ConfigStore::save(&cfg, &path).unwrap();
         let back = ConfigStore::load(&path).unwrap();
         assert_eq!(back.projects[0].scripts[0].expected_port, Some(8080));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_sets_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        ConfigStore::save(&AppConfig::default(), &path).unwrap();
+        let meta = fs::metadata(&path).unwrap();
+        // Compare only the permission bits (mask 0o777).
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_relocks_to_0600_when_file_was_644() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        ConfigStore::save(&AppConfig::default(), &path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let _ = ConfigStore::load(&path).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn save_arms_watcher_suppression_window() {
+        // H5: after save(), watcher_should_suppress() must be true for
+        // roughly SUPPRESS_MS. We don't assert the exact deadline to
+        // keep the test timing-robust, only that save flips it on and
+        // that no-save leaves it off.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        // Reset explicitly: previous tests may have armed the static.
+        SUPPRESS_UNTIL_MS.store(0, Ordering::Relaxed);
+        assert!(!watcher_should_suppress());
+        ConfigStore::save(&AppConfig::default(), &path).unwrap();
+        assert!(watcher_should_suppress());
     }
 
     #[test]

@@ -17,6 +17,16 @@ export const PortSpecSchema = z.object({
 });
 export type PortSpec = z.infer<typeof PortSpecSchema>;
 
+// v3: Structured auto-restart policy. Mirrors Rust `AutoRestartPolicy`.
+// When present and `enabled`, supersedes the legacy `auto_restart` bool.
+export const AutoRestartPolicySchema = z.object({
+  enabled: z.boolean(),
+  max_retries: z.number().int().nonnegative().default(5),
+  backoff_ms: z.number().int().nonnegative().default(1000),
+  jitter_ms: z.number().int().nonnegative().default(500),
+});
+export type AutoRestartPolicy = z.infer<typeof AutoRestartPolicySchema>;
+
 export const ScriptSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -24,6 +34,8 @@ export const ScriptSchema = z.object({
   expected_port: z.number().int().min(1).max(65535).nullable().default(null),
   ports: z.array(PortSpecSchema).default([]),
   auto_restart: z.boolean().default(false),
+  // v3: Optional structured policy. null = fall back to `auto_restart`.
+  auto_restart_policy: AutoRestartPolicySchema.nullable().default(null),
   env_file: z.string().nullable().default(null),
   // S4: IDs of other scripts that must be running + reachable first.
   depends_on: z.array(z.string()).default([]),
@@ -55,10 +67,22 @@ export const AppSettingsSchema = z.object({
   log_buffer_size: z.number().int().default(5000),
   port_poll_interval_ms: z.number().int().default(1000),
   theme: z.string().default('system'),
+  // Rust `HashMap<u16, String>` — JSON serializes keys as strings.
+  // Default empty; backend omits the field when absent from YAML.
+  port_aliases: z.record(z.string(), z.string()).default({}),
+  // v3: opt-in for LAN-mode remote server. Defaults false until the user
+  // explicitly enables it in Settings (self-signed TLS, no cert pin yet).
+  lan_mode_opt_in: z.boolean().default(false),
+  // v3: launch procman on login (wraps the `tauri-plugin-autostart` call).
+  start_at_login: z.boolean().default(false),
+  // v3: flipped to true after the 3-step onboarding completes.
+  onboarded: z.boolean().default(false),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
 export const AppConfigSchema = z.object({
+  // '2' is still accepted for backward reads — Worker E's migration
+  // rewrites to '3' on the next save.
   version: z.string(),
   projects: z.array(ProjectSchema).default([]),
   groups: z.array(GroupSchema).default([]),
@@ -66,6 +90,10 @@ export const AppConfigSchema = z.object({
     log_buffer_size: 5000,
     port_poll_interval_ms: 1000,
     theme: 'system',
+    port_aliases: {},
+    lan_mode_opt_in: false,
+    start_at_login: false,
+    onboarded: false,
   }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -108,6 +136,26 @@ export const LogLineSchema = z.object({
   text: z.string(),
 });
 export type LogLine = z.infer<typeof LogLineSchema>;
+
+// Worker K: rows returned from `search_log`. Mirrors Rust `LogLineRecord`.
+// `stream` is a plain string ("stdout"|"stderr") because the backend
+// serialises without the `LogStream` enum's rename_all wrapping.
+export const LogLineRecordSchema = z.object({
+  ts_ms: z.number().int(),
+  script_id: z.string(),
+  seq: z.number().int(),
+  stream: z.string(),
+  line: z.string(),
+});
+export type LogLineRecord = z.infer<typeof LogLineRecordSchema>;
+
+export const LogStorageStatsSchema = z.object({
+  total_rows: z.number().int(),
+  db_bytes: z.number().int(),
+  oldest_ts: z.number().int().nullable(),
+  newest_ts: z.number().int().nullable(),
+});
+export type LogStorageStats = z.infer<typeof LogStorageStatsSchema>;
 
 export const LaunchConfigCandidateSchema = z.object({
   name: z.string(),
@@ -176,6 +224,24 @@ export const PortConflictSchema = z.object({
   holder_command: z.string(),
 });
 export type PortConflict = z.infer<typeof PortConflictSchema>;
+
+// --- Docker Compose (Worker J) ---
+
+export const ComposeProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  compose_path: z.string(),
+  project_name: z.string().nullable().default(null),
+});
+export type ComposeProject = z.infer<typeof ComposeProjectSchema>;
+
+export const ComposeServiceSchema = z.object({
+  service: z.string(),
+  image: z.string().nullable().default(null),
+  state: z.string(),
+  ports: z.array(z.string()).default([]),
+});
+export type ComposeService = z.infer<typeof ComposeServiceSchema>;
 
 export const PortInfoSchema = z.object({
   port: z.number().int().min(1).max(65535),

@@ -74,11 +74,31 @@ pub fn spawn_config_watcher(
             }
             last_handled = Instant::now();
 
-            // Reload config + emit event
+            // H5: Skip events produced by our own atomic write. macOS
+            // FSEvents sometimes delivers a Create+Modify+Rename storm
+            // after persist(); the suppression window (2s) is generous
+            // enough to absorb that without swallowing user edits (an
+            // external editor save lands well after the window closes).
+            if crate::config_store::watcher_should_suppress() {
+                log::debug!("watcher: self-write suppressed");
+                continue;
+            }
+
+            // Acquire the lock FIRST, then load. If we read disk before
+            // locking, a concurrent createScript on the tokio side could
+            // write a newer version while we're sitting on a stale read,
+            // and then we'd overwrite the in-memory state with that stale
+            // copy, dropping freshly-added entries. Locking first means
+            // any in-flight writes complete (their save is atomic) before
+            // we read, and the read always reflects the current truth.
+            let mut guard = state.config.blocking_lock();
             match ConfigStore::load(&config_path) {
                 Ok(cfg) => {
-                    // Blocking lock on a tokio Mutex from a sync thread: use blocking_lock().
-                    let mut guard = state.config.blocking_lock();
+                    if *guard == cfg {
+                        // No actual change — skip the emit so we don't
+                        // bombard the UI with redundant reload events.
+                        continue;
+                    }
                     *guard = cfg;
                     drop(guard);
                     if let Err(e) = app.emit("config-changed", ()) {

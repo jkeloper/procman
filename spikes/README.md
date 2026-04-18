@@ -1,23 +1,23 @@
-# Week 0 Spikes
+# Week 0 Spikes (Archival)
 
-Manager 의사결정(2026-04-05) 에 따른 Tauri/Electron 판정용 스파이크 4건.
+> ⚠️ **이 디렉토리는 2026-04-05 Week 0 스파이크 과정의 역사 기록입니다.**
+> 현재 개발 상태는 [루트 README](../README.md)와 [TODO.md](../TODO.md) 참고.
+
+## 결과 요약
+Tauri v2 확정. 모든 게이트 통과 후 MVP → Post-MVP S1-S5 → 모바일까지 완료된 상태.
+
+최종 통합 판정서: [FINAL-VERDICT.md](FINAL-VERDICT.md)
 
 ## 스파이크 목록
-| # | 디렉토리 | 기간 | Go 기준 |
+| # | 디렉토리 | 결과 | 판정서 |
 |---|---------|------|---------|
-| S1 | [s1-stdout/](s1-stdout/) | 1.5일 | 10proc×10k line/s, 유실 0, RSS<150MB |
-| S2 | [s2-pty/](s2-pty/) | 1.0일 | docker/python/ssh 인터랙션 정상 |
-| S3 | [s3-xterm/](s3-xterm/) | 0.5일 | 10만 라인 평균 60fps |
-| S4 | [s4-rust/](s4-rust/) | 1.0일 | 사용자 Rust self-assessment |
-
-## 전환 트리거 (Plan B/Electron 전환 조건)
-1. S1 No-Go (유실 발생 or RSS ≥ 150MB)
-2. S4 No-Go (사용자 1일 내 완수 실패)
-3. 누적 스파이크 5일 초과
+| S1 | [s1-stdout/](s1-stdout/) | ✅ GO — 53k events/sec, zero drops | [REPORT.md](s1-stdout/REPORT.md) |
+| S2 | [s2-pty/](s2-pty/) | ✅ GO — docker/python/ANSI 정상 | [REPORT.md](s2-pty/REPORT.md) |
+| S3 | [s3-xterm/](s3-xterm/) | ✅ effectively GO — avg 59.9fps | [REPORT.md](s3-xterm/REPORT.md) |
+| S4 | (skipped) | 사용자 Option C — 리스크 감수 | — |
 
 ## 디렉토리 구조
-- `tauri-harness/` — Tauri v2 스파이크용 프로젝트
-- `plan-b-electron/` — Electron + node-pty Plan B 스켈레톤 (전환 대비)
-- `s1-stdout/`, `s2-pty/`, `s3-xterm/`, `s4-rust/` — 각 스파이크 측정/판정 산출물
+- `tauri-harness/` — Tauri v2 스파이크 원본 (이후 `app/`으로 승격됨, git mv로 history 보존)
+- `s1-stdout/`, `s2-pty/`, `s3-xterm/` — 각 스파이크 측정/판정 산출물
 
-최종 통합 판정서: `FINAL-VERDICT.md` (Day 5 EOD 작성 예정)
+Electron Plan B 스켈레톤은 확정 후 제거됨 (Tauri 확정으로 불필요).

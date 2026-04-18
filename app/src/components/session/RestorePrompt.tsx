@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Dialog,
@@ -23,9 +23,15 @@ export function RestorePrompt({ projects }: Props) {
   const [items, setItems] = useState<
     Array<{ projectId: string; scriptId: string; label: string }>
   >([]);
+  // Run the restore check ONCE per session, on the first projects load.
+  // Without this guard, every reorder / scan / config-changed reload
+  // re-triggers the prompt because the `projects` reference changes.
+  const checkedRef = useRef(false);
 
   useEffect(() => {
+    if (checkedRef.current) return;
     if (projects.length === 0) return;
+    checkedRef.current = true;
     (async () => {
       try {
         const ids = await invoke<string[]>('get_last_running');

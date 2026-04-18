@@ -124,21 +124,18 @@ pub async fn delete_project(
         let _ = pm.kill(&sid).await;
     }
 
-    let removed = state
+    // Idempotent delete: if the project is already gone (e.g. removed
+    // out-of-band by a config edit), we treat that as success. The
+    // end state is what the user wants.
+    state
         .mutate(|cfg| {
-            let before = cfg.projects.len();
             cfg.projects.retain(|p| p.id != id);
-            // Also remove from any groups.
             for group in cfg.groups.iter_mut() {
                 group.members.retain(|m| m.project_id != id);
             }
-            before != cfg.projects.len()
         })
         .await
         .map_err(|e| e.to_string())?;
-    if !removed {
-        return Err(format!("project not found: {}", id));
-    }
     Ok(())
 }
 

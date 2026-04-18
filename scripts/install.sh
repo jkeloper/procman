@@ -52,8 +52,18 @@ if [[ ! -d "$BUILT" ]]; then
 fi
 
 echo "▶ Installing to $INSTALLED_PATH..."
-# Kill running instance so we can replace the .app bundle.
-pkill -x procman 2>/dev/null || true
+# Gracefully quit procman so RunEvent::Exit kills all managed
+# process groups. osascript triggers the proper AppKit lifecycle;
+# pkill is a fallback if the app doesn't respond to AppleEvents.
+osascript -e 'quit app "procman"' 2>/dev/null || true
+# Wait up to 3 seconds for procman to exit and clean up children.
+for i in 1 2 3 4 5 6; do
+  pgrep -x procman >/dev/null 2>&1 || break
+  sleep 0.5
+done
+# Force-kill if it's still hanging.
+pkill -9 -x procman 2>/dev/null || true
+sleep 0.3
 
 rm -rf "$INSTALLED_PATH"
 cp -R "$BUILT" "$INSTALLED_PATH"

@@ -9,27 +9,24 @@ use axum::{
     Router,
 };
 use serde::Serialize;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
-use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 
 use super::{auth, ws::ws_handler, ServerState};
 use crate::types::PortInfo;
 
 pub fn build_router(state: ServerState) -> Router {
-    // SEC-08: CORS — allow known origins + any trycloudflare.com subdomain
-    // Native app uses capacitor:// scheme, tunnel uses https://*.trycloudflare.com
+    // SEC-08: CORS — allow known origins + any *.trycloudflare.com host.
+    // Native mobile uses capacitor:// scheme; tunnel uses https://*.trycloudflare.com;
+    // LAN dev uses http://<private-ip>:port. Substring matches are deliberately
+    // avoided here — "trycloudflare.com.evil.example" would have passed the
+    // previous implementation.
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::AllowOrigin::predicate(
             |origin: &HeaderValue, _req: &axum::http::request::Parts| {
                 let s = origin.to_str().unwrap_or("");
-                s.starts_with("http://localhost:")
-                    || s.starts_with("http://127.0.0.1:")
-                    || s.starts_with("capacitor://")
-                    || s.ends_with(".trycloudflare.com")
-                    || s.contains("trycloudflare.com")
-                    || s.starts_with("http://192.168.")
-                    || s.starts_with("http://10.")
+                origin_is_allowed(s)
             },
         ))
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
@@ -60,6 +57,10 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/health", get(health))
         .merge(protected)
         .fallback(super::spa::spa_fallback)
+        // Rate limit runs on EVERY request (including /api/health + SPA). Placed
+        // outermost (after `.layer()` stacking it's innermost-applied) so anonymous
+        // floods can't exhaust the auth middleware.
+        .layer(middleware::from_fn(auth::rate_limit))
         .layer(cors)
         // SEC-10: Security headers
         .layer(SetResponseHeaderLayer::overriding(
@@ -71,6 +72,97 @@ pub fn build_router(state: ServerState) -> Router {
             HeaderValue::from_static("nosniff"),
         ))
         .with_state(state)
+}
+
+/// Returns true if the given Origin header value is allowed by CORS policy.
+/// Exposed for unit testing.
+pub(crate) fn origin_is_allowed(origin: &str) -> bool {
+    if origin.is_empty() {
+        return false;
+    }
+    // Native app via Capacitor. Accept the whole capacitor:// scheme.
+    if let Some(rest) = origin.strip_prefix("capacitor://") {
+        return !rest.is_empty();
+    }
+    // Parse the rest as a URL-ish triple: scheme://host[:port]
+    let Some((scheme, host)) = parse_origin(origin) else {
+        return false;
+    };
+    match scheme {
+        "http" | "https" => {}
+        _ => return false,
+    }
+    // localhost / 127.0.0.1 on any port
+    if host == "localhost" || host == "127.0.0.1" || host == "[::1]" {
+        return true;
+    }
+    // *.trycloudflare.com (exact subdomain match, NOT substring)
+    if host == "trycloudflare.com" || host.ends_with(".trycloudflare.com") {
+        return true;
+    }
+    // RFC1918 / link-local IPs
+    if let Some(ip) = parse_host_ip(host) {
+        return is_private_ip(ip);
+    }
+    false
+}
+
+/// Parse "scheme://host[:port][/...]" into (scheme, host-without-port).
+/// Brackets around IPv6 hosts are preserved.
+fn parse_origin(s: &str) -> Option<(&str, &str)> {
+    let (scheme, rest) = s.split_once("://")?;
+    // host[:port]/path — we only want the authority
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    // strip port if present; be careful with IPv6 "[::1]:8080"
+    let host = if let Some(stripped) = authority.strip_prefix('[') {
+        // IPv6 literal
+        let end = stripped.find(']')?;
+        &authority[..end + 2] // include "[...]"
+    } else if let Some((h, _port)) = authority.rsplit_once(':') {
+        // plain host:port
+        h
+    } else {
+        authority
+    };
+    Some((scheme, host))
+}
+
+fn parse_host_ip(host: &str) -> Option<IpAddr> {
+    // Strip IPv6 brackets if present.
+    let h = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
+    h.parse::<IpAddr>().ok()
+}
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_private_v4(v4),
+        IpAddr::V6(v6) => is_private_v6(v6),
+    }
+}
+
+fn is_private_v4(ip: Ipv4Addr) -> bool {
+    ip.is_loopback()
+        || ip.is_private() // 10/8, 172.16/12, 192.168/16
+        || ip.is_link_local() // 169.254/16
+}
+
+fn is_private_v6(ip: Ipv6Addr) -> bool {
+    if ip.is_loopback() {
+        return true;
+    }
+    let segs = ip.segments();
+    // fc00::/7 unique-local
+    if (segs[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // fe80::/10 link-local
+    if (segs[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    false
 }
 
 #[derive(Serialize)]
@@ -276,18 +368,19 @@ async fn port_status(
     let listening = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let managed_pids: std::collections::HashSet<u32> = state
+    let managed_pids: std::collections::HashSet<u32> = if let Some(snap) = state
         .pm
         .list()
         .into_iter()
         .find(|s| s.id == script_id)
-        .map(|snap| {
-            crate::commands::port::list_ports_for_script_pid(snap.pid)
-        })
-        .map(|fut| tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut)))
-        .and_then(|r| r.ok())
-        .map(|v| v.into_iter().map(|p| p.pid).collect())
-        .unwrap_or_default();
+    {
+        crate::commands::port::list_ports_for_script_pid(snap.pid)
+            .await
+            .map(|v| v.into_iter().map(|p| p.pid).collect())
+            .unwrap_or_default()
+    } else {
+        std::collections::HashSet::new()
+    };
     let mut statuses =
         crate::commands::port::build_declared_status(&script.ports, &listening, &managed_pids);
     // TCP probe each port
@@ -377,4 +470,73 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cors_allows_known_origins() {
+        assert!(origin_is_allowed("http://localhost:5173"));
+        assert!(origin_is_allowed("http://127.0.0.1:1420"));
+        assert!(origin_is_allowed("capacitor://localhost"));
+        assert!(origin_is_allowed("https://alpha.trycloudflare.com"));
+        assert!(origin_is_allowed("https://trycloudflare.com"));
+        assert!(origin_is_allowed("http://192.168.1.5:8080"));
+        assert!(origin_is_allowed("http://10.0.0.2"));
+        assert!(origin_is_allowed("http://172.16.0.1"));
+    }
+
+    #[test]
+    fn cors_rejects_substring_spoof() {
+        // The old .contains("trycloudflare.com") implementation accepted these.
+        assert!(!origin_is_allowed("http://attacker-trycloudflare.com.evil.com"));
+        assert!(!origin_is_allowed("https://evil.com/trycloudflare.com"));
+        assert!(!origin_is_allowed("http://trycloudflare.com.evil.co"));
+    }
+
+    #[test]
+    fn cors_rejects_public_ips_and_random_hosts() {
+        assert!(!origin_is_allowed("http://8.8.8.8"));
+        assert!(!origin_is_allowed("https://example.com"));
+        assert!(!origin_is_allowed(""));
+        assert!(!origin_is_allowed("not-a-url"));
+        // Invalid schemes
+        assert!(!origin_is_allowed("ftp://localhost:21"));
+        assert!(!origin_is_allowed("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn cors_handles_ipv6() {
+        assert!(origin_is_allowed("http://[::1]:8080"));
+        assert!(!origin_is_allowed("http://[2001:db8::1]"));
+    }
+
+    #[test]
+    fn parse_origin_handles_ports_and_paths() {
+        assert_eq!(
+            parse_origin("http://localhost:3000"),
+            Some(("http", "localhost"))
+        );
+        assert_eq!(
+            parse_origin("https://foo.trycloudflare.com/path"),
+            Some(("https", "foo.trycloudflare.com"))
+        );
+        assert_eq!(
+            parse_origin("http://[::1]:8080/x"),
+            Some(("http", "[::1]"))
+        );
+    }
+
+    #[test]
+    fn private_ip_classifier() {
+        assert!(is_private_ip("127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("172.16.5.5".parse().unwrap()));
+        assert!(is_private_ip("192.168.1.1".parse().unwrap()));
+        assert!(is_private_ip("169.254.1.1".parse().unwrap()));
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("172.32.0.1".parse().unwrap())); // just outside 172.16/12
+    }
 }

@@ -79,11 +79,11 @@ export function MainLayout() {
   const runningCount = Object.values(statuses).filter((s) => s === 'running').length;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen w-screen flex-col overflow-hidden text-foreground">
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar */}
         <aside
-          className="flex shrink-0 flex-col border-r border-border/60 bg-sidebar"
+          className="glass-thick flex shrink-0 flex-col"
           style={{ width: sidebar.size }}
         >
           {/* macOS traffic light — inline with sidebar content */}
@@ -108,7 +108,7 @@ export function MainLayout() {
           {/* Top bar — draggable, only shows project name when inside a project */}
           {showingProject && (
             <div
-              className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 bg-card/50 px-3 text-[14px]"
+              className="glass-bar flex h-9 shrink-0 items-center gap-1 px-3 text-[14px]"
               style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
             >
               <div
@@ -129,7 +129,7 @@ export function MainLayout() {
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
                 {runningCount > 0 && (
-                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
                     {runningCount} running
                   </span>
                 )}
@@ -163,7 +163,7 @@ export function MainLayout() {
             className="shrink-0 overflow-hidden border-t border-border/60 transition-all duration-300 ease-in-out"
             style={{ height: logOpen ? logDrawer.size : 31 }}
           >
-            <LogViewer isExpanded={logOpen} />
+            <LogViewer isExpanded={logOpen} currentProjectId={selectedProjectId} />
           </section>
         </main>
       </div>

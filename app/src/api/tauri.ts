@@ -1,6 +1,8 @@
 // Typed Tauri invoke wrappers with runtime zod validation.
 
 import { invoke } from '@tauri-apps/api/core';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { z } from 'zod';
 import {
   ProjectSchema,
@@ -11,13 +13,20 @@ import {
   RunningCloudflaredSchema,
   CfInstalledSchema,
   LogLineSchema,
+  LogLineRecordSchema,
+  LogStorageStatsSchema,
   PortInfoSchema,
   ProcessSnapshotSchema,
   DeclaredPortStatusSchema,
   PortConflictSchema,
+  AppSettingsSchema,
+  ComposeProjectSchema,
+  ComposeServiceSchema,
   type Project,
   type Script,
   type PortSpec,
+  type AutoRestartPolicy,
+  type AppSettings,
   type DeclaredPortStatus,
   type PortConflict,
   type ProjectCandidate,
@@ -26,10 +35,14 @@ import {
   type RunningCloudflared,
   type CfInstalled,
   type LogLine,
+  type LogLineRecord,
+  type LogStorageStats,
   type PortInfo,
   type ProcessSnapshot,
   type StatusEvent,
   type RuntimeStatus,
+  type ComposeProject,
+  type ComposeService,
 } from './schemas';
 
 async function call<T>(
@@ -97,6 +110,7 @@ export const api = {
       command?: string;
       expectedPort?: number | null;
       autoRestart?: boolean;
+      autoRestartPolicy?: AutoRestartPolicy | null;
       envFile?: string | null;
       ports?: PortSpec[];
       dependsOn?: string[];
@@ -124,6 +138,27 @@ export const api = {
     call('log_snapshot', { scriptId }, z.array(LogLineSchema)),
   clearLog: (scriptId: string) => callRaw<null>('clear_log', { scriptId }),
   forceQuit: () => callRaw<null>('force_quit', {}),
+
+  // Persistent log search (Worker K). `query` is FTS5 MATCH syntax; empty
+  // string returns the most-recent N rows respecting the optional filters.
+  searchLog: (
+    query: string,
+    scriptId?: string | null,
+    sinceMs?: number | null,
+    limit?: number,
+  ) =>
+    call(
+      'search_log',
+      {
+        query,
+        scriptId: scriptId ?? null,
+        sinceMs: sinceMs ?? null,
+        limit: limit ?? null,
+      },
+      z.array(LogLineRecordSchema),
+    ),
+  getLogStorageStats: () =>
+    call('get_log_storage_stats', {}, LogStorageStatsSchema),
 
   // Groups
   listGroups: () => callRaw('list_groups', {}),
@@ -197,6 +232,16 @@ export const api = {
     >('get_audit_log', {}),
   localIp: () => callRaw<string>('local_ip', {}),
 
+  // Settings (v3)
+  getSettings: () => call('get_settings', {}, AppSettingsSchema),
+  updateSettings: (patch: Partial<AppSettings>) =>
+    call('update_settings', { patch }, AppSettingsSchema),
+
+  // Autostart (v3) — wraps tauri-plugin-autostart
+  getAutostartStatus: () => callRaw<boolean>('get_autostart_status', {}),
+  setAutostart: (enabled: boolean) =>
+    callRaw<null>('set_autostart', { enabled }),
+
   // VSCode
   scanVscodeConfigs: (projectPath: string) =>
     call('scan_vscode_configs', { projectPath }, z.array(LaunchConfigCandidateSchema)),
@@ -207,12 +252,64 @@ export const api = {
   detectRunningCloudflared: () =>
     call('detect_running_cloudflared', {}, z.array(RunningCloudflaredSchema)),
   killCloudflaredPid: (pid: number) => callRaw<null>('kill_cloudflared_pid', { pid }),
+
+  // Docker Compose (Worker J)
+  composeInstalled: () => callRaw<boolean>('compose_installed', {}),
+  composeProjectsList: () =>
+    call('compose_projects_list', {}, z.array(ComposeProjectSchema)),
+  composeAddProject: (name: string, composePath: string, projectName: string | null) =>
+    call(
+      'compose_add_project',
+      { name, composePath, projectName },
+      ComposeProjectSchema,
+    ),
+  composeRemoveProject: (id: string) =>
+    callRaw<null>('compose_remove_project', { id }),
+  composeUp: (id: string) => callRaw<null>('compose_up', { id }),
+  composeDown: (id: string) => callRaw<null>('compose_down', { id }),
+  composePs: (id: string) =>
+    call('compose_ps', { id }, z.array(ComposeServiceSchema)),
 };
+
+// Auto-update — GitHub Releases 기반. pubkey/endpoints 는 tauri.conf.json.
+export interface UpdateCheckResult {
+  available: boolean;
+  version?: string;
+  notes?: string;
+}
+
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  const update = await check();
+  if (update) {
+    return {
+      available: true,
+      version: update.version,
+      notes: update.body ?? undefined,
+    };
+  }
+  return { available: false };
+}
+
+export async function installUpdateAndRestart(
+  onProgress?: (chunk: number, total?: number) => void,
+): Promise<boolean> {
+  const update = await check();
+  if (!update) return false;
+  await update.downloadAndInstall((event) => {
+    if (event.event === 'Progress' && onProgress) {
+      onProgress(event.data.chunkLength, event.data.contentLength);
+    }
+  });
+  await relaunch();
+  return true;
+}
 
 export type {
   Project,
   Script,
   PortSpec,
+  AutoRestartPolicy,
+  AppSettings,
   DeclaredPortStatus,
   PortConflict,
   ProjectCandidate,
@@ -221,8 +318,12 @@ export type {
   RunningCloudflared,
   CfInstalled,
   LogLine,
+  LogLineRecord,
+  LogStorageStats,
   PortInfo,
   ProcessSnapshot,
   StatusEvent,
   RuntimeStatus,
+  ComposeProject,
+  ComposeService,
 };

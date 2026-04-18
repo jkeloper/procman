@@ -7,6 +7,7 @@ import {
   type Project,
 } from '@/api/tauri';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   projects: Project[];
@@ -150,13 +151,12 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
                       ? `quick: ${r.url}`
                       : r.command}
                   </span>
-                  <button
-                    className="rounded bg-red-800/80 px-3 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
+                  <Button variant="destructive" size="sm"
                     disabled={busy === `pid-${r.pid}`}
                     onClick={() => kill(r.pid)}
                   >
-                    {busy === `pid-${r.pid}` ? 'killing…' : 'Kill'}
-                  </button>
+                    {busy === `pid-${r.pid}` ? 'Killing...' : 'Kill'}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -184,8 +184,7 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
                     <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground">
                       {t.id.slice(0, 8)} · {t.connections} conn
                     </span>
-                    <button
-                      className="rounded border border-border/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                    <Button size="sm"
                       disabled={busy === t.id || isRunning || projects.length === 0}
                       onClick={() => registerAndRun(t)}
                       title={
@@ -196,8 +195,8 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
                           : `Register as script under "${projects[0]?.name}" and start`
                       }
                     >
-                      {busy === t.id ? '…' : isRunning ? 'running' : 'run'}
-                    </button>
+                      {busy === t.id ? '...' : isRunning ? 'Running' : 'Run'}
+                    </Button>
                   </li>
                 );
               })}

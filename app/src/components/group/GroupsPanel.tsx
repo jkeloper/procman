@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Project } from '@/api/tauri';
 import { NewGroupDialog } from './NewGroupDialog';
+import { Button } from '@/components/ui/button';
 
 interface Group {
   id: string;
@@ -63,13 +64,15 @@ export function GroupsPanel({ projects }: Props) {
           <h2 className="text-[13px] font-semibold">Groups</h2>
           <span className="font-mono text-[11px] text-muted-foreground">{groups.length}</span>
         </div>
-        <button
-          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-primary"
           onClick={() => setDialogOpen(true)}
           disabled={projects.length === 0}
         >
-          + new
-        </button>
+          + New
+        </Button>
       </div>
 
       {groups.length === 0 ? (
@@ -86,13 +89,13 @@ export function GroupsPanel({ projects }: Props) {
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="text-[13px] font-medium">{g.name}</span>
                 <div className="flex items-center gap-0.5">
-                  <button
-                    className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  <Button
+                    size="sm"
                     disabled={busy === g.id || g.members.length === 0}
                     onClick={() => handleRun(g.id)}
                   >
-                    {busy === g.id ? 'launching…' : 'Run'}
-                  </button>
+                    {busy === g.id ? 'Launching...' : 'Run'}
+                  </Button>
                   <button
                     className="close-circle opacity-0 group-hover:opacity-100"
                     onClick={() => handleDelete(g.id)}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { api } from '@/api/tauri';
 import {
   Dialog,
   DialogContent,
@@ -35,9 +35,8 @@ export function QuitGuard() {
 
   async function quit() {
     setOpen(false);
-    // Actually close the window (destroys the app + children)
-    const win = getCurrentWindow();
-    await win.destroy();
+    // E1: Kill all processes gracefully, then exit the app.
+    await api.forceQuit();
   }
 
   return (

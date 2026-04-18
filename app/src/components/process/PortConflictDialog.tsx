@@ -66,8 +66,12 @@ export function PortConflictDialog({
           <Button variant="outline" onClick={onStartAnyway}>
             Start anyway
           </Button>
-          <Button onClick={onKillAndStart} className="bg-primary hover:bg-primary/90">
-            Kill {conflict?.process_name ?? 'process'} & start
+          <Button
+            variant="destructive"
+            onClick={onKillAndStart}
+            title={`Kill ${conflict?.process_name ?? 'process'} (pid ${conflict?.pid ?? '?'}) and start`}
+          >
+            Yes, kill & start
           </Button>
         </DialogFooter>
       </DialogContent>

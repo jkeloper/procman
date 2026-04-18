@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
 import AnsiToHtml from 'ansi-to-html';
 import { useLogStream } from '@/hooks/useLogStream';
-import type { LogLine } from '@/api/tauri';
+import { api, type LogLine } from '@/api/tauri';
 
 const ansi = new AnsiToHtml({
   fg: '#c8ccc9',
@@ -110,6 +110,41 @@ export function LogPanel({ scriptId, scriptName }: Props) {
   const [query, setQuery] = useState('');
   const [showStdout, setShowStdout] = useState(true);
   const [showStderr, setShowStderr] = useState(true);
+  // Worker K (S3 deferred): persistent-history search mode. When ON, the
+  // panel renders sqlite FTS hits instead of the in-memory ring buffer,
+  // letting the user grep across days of logs (surviving restarts). Toggle
+  // via the magnifier button next to the filter input. Exiting the mode
+  // returns to the live tail.
+  const [historyMode, setHistoryMode] = useState(false);
+  const [historyHits, setHistoryHits] = useState<LogLine[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  async function runHistorySearch(q: string) {
+    if (!scriptId) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await api.searchLog(q, scriptId, null, 500);
+      // FTS returns most-recent first; reverse to chronological so the
+      // Row renderer's seq numbers climb downward like the live view.
+      const converted: LogLine[] = rows
+        .slice()
+        .reverse()
+        .map((r) => ({
+          seq: r.seq,
+          ts_ms: r.ts_ms,
+          stream: r.stream === 'stderr' ? 'stderr' : 'stdout',
+          text: r.line,
+        }));
+      setHistoryHits(converted);
+    } catch (e: unknown) {
+      setHistoryError(e instanceof Error ? e.message : String(e));
+      setHistoryHits([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
   // Per-instance HTML cache — scoped to this LogPanel so lines from
   // different scripts never share cached HTML by seq collision.
   // Cleared whenever the filter query changes (because highlight depends
@@ -120,6 +155,15 @@ export function LogPanel({ scriptId, scriptName }: Props) {
   }, [query]);
 
   const filtered = useMemo(() => {
+    // History-mode: show the sqlite FTS result set verbatim (stream
+    // toggles still apply so the user can hide stdout/stderr).
+    if (historyMode && historyHits) {
+      return historyHits.filter((l) => {
+        if (l.stream === 'stdout' && !showStdout) return false;
+        if (l.stream === 'stderr' && !showStderr) return false;
+        return true;
+      });
+    }
     const q = query.toLowerCase();
     return lines.filter((l) => {
       if (l.stream === 'stdout' && !showStdout) return false;
@@ -127,10 +171,11 @@ export function LogPanel({ scriptId, scriptName }: Props) {
       if (q && !l.text.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [lines, query, showStdout, showStderr]);
+  }, [lines, query, showStdout, showStderr, historyMode, historyHits]);
 
-  // Disable auto-scroll while filtering (user is reading).
-  const effectiveAutoScroll = autoScroll && !query;
+  // Disable auto-scroll while filtering OR in history mode (user is reading
+  // a static result set, not a live tail).
+  const effectiveAutoScroll = autoScroll && !query && !historyMode;
 
   useEffect(() => {
     if (effectiveAutoScroll && listRef.current && filtered.length > 0) {
@@ -217,25 +262,65 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           stderr
         </button>
 
-        {/* Search */}
+        {/* Search (live filter) + history FTS trigger */}
         <div className="relative">
           <input
             ref={searchRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="filter…  ⌘F"
-            className="h-5 w-40 rounded border border-log-border bg-foreground/5 px-2 font-mono text-[11px] text-log-fg placeholder:text-log-muted/60 focus:border-primary/50 focus:outline-none"
+            onKeyDown={(e) => {
+              // Enter in history mode re-runs the FTS query. Otherwise the
+              // in-memory filter updates on every keystroke (via setQuery).
+              if (e.key === 'Enter' && historyMode) {
+                e.preventDefault();
+                void runHistorySearch(query);
+              }
+            }}
+            placeholder={historyMode ? 'search history… ↵' : 'filter…  ⌘F'}
+            className="h-5 w-44 rounded border border-log-border bg-foreground/5 px-2 font-mono text-[11px] text-log-fg placeholder:text-log-muted/60 focus:border-primary/50 focus:outline-none"
           />
           {query && (
             <button
               aria-label="Clear filter"
-              onClick={() => setQuery('')}
+              onClick={() => {
+                setQuery('');
+                if (historyMode) {
+                  setHistoryHits(null);
+                }
+              }}
               className="close-circle absolute right-1 top-1/2 -translate-y-1/2"
               style={{ width: 16, height: 16 }}
             />
           )}
         </div>
+        {/* Magnifier — toggles FTS history search against the on-disk DB.
+            When active, hits from sqlite replace the ring buffer in the
+            viewport until the user clicks ✕ back to live tail. */}
+        <button
+          onClick={() => {
+            if (historyMode) {
+              // Exit history mode — restore live tail.
+              setHistoryMode(false);
+              setHistoryHits(null);
+              setHistoryError(null);
+            } else {
+              setHistoryMode(true);
+              // Auto-run with current query if any, else show most-recent N.
+              void runHistorySearch(query);
+            }
+          }}
+          className={`rounded px-1.5 py-0.5 transition-colors ${
+            historyMode
+              ? 'bg-primary/20 text-primary'
+              : 'text-log-muted hover:bg-foreground/10 hover:text-log-fg'
+          }`}
+          title={historyMode ? 'Exit history search (back to live tail)' : 'Search persistent log history (FTS5)'}
+          aria-label="Toggle history search"
+          aria-pressed={historyMode}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="5" cy="5" r="3"/><path d="M7.3 7.3 L10 10"/></svg>
+        </button>
 
         {/* Auto-tail */}
         <label className="flex cursor-pointer items-center gap-1 text-log-muted transition-colors hover:text-log-fg">
@@ -243,7 +328,7 @@ export function LogPanel({ scriptId, scriptName }: Props) {
             type="checkbox"
             className="h-3 w-3 accent-primary"
             checked={autoScroll}
-            disabled={!!query}
+            disabled={!!query || historyMode}
             onChange={(e) => setAutoScroll(e.target.checked)}
           />
           auto-tail
@@ -278,11 +363,44 @@ export function LogPanel({ scriptId, scriptName }: Props) {
         </button>
       </div>
 
+      {/* History-mode banner — makes it obvious the viewport is NOT the
+          live tail. Doubles as the "back to live" affordance. */}
+      {historyMode && (
+        <div className="flex h-6 shrink-0 items-center gap-2 border-b border-log-border bg-primary/10 px-3 text-[11px]">
+          <span className="font-medium text-primary">history</span>
+          <span className="text-log-muted">
+            {historyLoading
+              ? 'searching…'
+              : historyError
+              ? `error: ${historyError}`
+              : `${historyHits?.length ?? 0} match${
+                  (historyHits?.length ?? 0) === 1 ? '' : 'es'
+                } in sqlite`}
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={() => {
+              setHistoryMode(false);
+              setHistoryHits(null);
+              setHistoryError(null);
+            }}
+            className="rounded px-1.5 py-0.5 text-log-muted transition-colors hover:bg-foreground/10 hover:text-log-fg"
+            title="Back to live tail"
+          >
+            back to live tail
+          </button>
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex-1 overflow-hidden">
         {filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center text-[12px] text-log-muted/60">
-            {lines.length === 0
+            {historyMode
+              ? historyLoading
+                ? 'searching history…'
+                : `no history matches for "${query}"`
+              : lines.length === 0
               ? 'waiting for output…'
               : query
               ? `no matches for "${query}"`

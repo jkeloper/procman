@@ -17,8 +17,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// S1: Validate and canonicalize a list of PortSpecs.
+///
 /// - Rejects empty or overly long names, rejects duplicates within one script.
 /// - Rejects invalid characters. Defaults bind if empty.
+///
 /// Returns a normalized Vec (clone-with-defaults) or an error message.
 pub(crate) fn validate_ports(input: &[PortSpec]) -> Result<Vec<PortSpec>, String> {
     let mut seen_names: HashSet<String> = HashSet::new();
@@ -44,7 +46,7 @@ pub(crate) fn validate_ports(input: &[PortSpec]) -> Result<Vec<PortSpec>, String
             return Err(format!("duplicate port name '{}'", name));
         }
         if p.number == 0 {
-            return Err(format!("port number 0 is reserved"));
+            return Err("port number 0 is reserved".to_string());
         }
         let bind = if p.bind.trim().is_empty() {
             "127.0.0.1".to_string()
@@ -110,7 +112,7 @@ pub async fn create_script(
             return Err(format!("script with name '{}' already exists", trimmed_name));
         }
         if proj.scripts.iter().any(|s| s.command == trimmed_cmd) {
-            return Err(format!("script with identical command already exists"));
+            return Err("script with identical command already exists".to_string());
         }
     }
 
@@ -130,6 +132,7 @@ pub async fn create_script(
         expected_port: effective_expected,
         ports: validated_ports,
         auto_restart,
+        auto_restart_policy: None,
         env_file: env_file.filter(|s| !s.trim().is_empty()),
         depends_on: depends_on.unwrap_or_default(),
     };

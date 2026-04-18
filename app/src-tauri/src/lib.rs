@@ -8,10 +8,18 @@
 //     the frontend can call. Missing entries = "command not found" errors.
 //   - `.setup(|app| …)` runs once at startup for initialization.
 
+// Tauri commands take many optional fields (create_script/update_script have
+// 9-10 to match the JS-side patch shape). Refactoring to a struct per command
+// is a deliberate S6+ task; until then, allow the clippy warning crate-wide.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
+mod autostart;
 mod cloudflared;
 mod commands;
 mod config_store;
+mod crash_log;
 mod log_buffer;
+mod log_storage;
 mod process;
 mod runtime_state;
 mod server;
@@ -32,6 +40,17 @@ use tauri::Manager;
 pub fn run() {
     let config_path = config_store::default_config_path()
         .expect("could not determine config directory");
+
+    // Crash logger first so any panic during the rest of bootstrap
+    // still gets recorded. Place it next to config.yaml.
+    if let Some(config_dir) = config_path.parent() {
+        crash_log::init(config_dir.join("crash.log"));
+        crash_log::record(&format!(
+            "procman {} starting",
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+
     let app_state = Arc::new(
         AppState::new(config_path.clone())
             .expect("failed to load or initialize config"),
@@ -41,16 +60,14 @@ pub fn run() {
     let runtime_store = RuntimeStore::load(runtime_path)
         .expect("failed to load runtime state");
 
-    // Apply user settings to process manager log capacity.
-    let log_cap = {
-        let _ = config_path; // avoid unused-warn in debug build (used below)
-        // We'll read it synchronously here via try_lock since no contention at startup.
-        tokio::runtime::Handle::try_current()
-            .ok()
-            .and_then(|_| None::<usize>)
-            .unwrap_or(5000)
-    };
-    let _ = log_cap;
+    // Phase B Worker K: boot the persistent log-storage writer. Best-effort
+    // — if init fails (disk full, perms) the ring buffer keeps working and
+    // we just lose the history table for this session.
+    if let Some(log_db) = log_storage::default_db_path() {
+        if let Err(e) = log_storage::init(log_db) {
+            log::warn!("log_storage init failed: {}", e);
+        }
+    }
 
     let watch_state = Arc::clone(&app_state);
     let watch_path = config_path.clone();
@@ -58,6 +75,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_fs::init())
+        // GitHub Releases 기반 자동 업데이트. pubkey/endpoints는
+        // tauri.conf.json 의 plugins.updater 를 참조.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(app_state)
         .manage(runtime_store)
         .setup(move |app| {
@@ -68,6 +89,9 @@ pub fn run() {
                     pm.set_log_capacity(cfg.settings.log_buffer_size);
                 }
             }
+            // Phase B Worker L: emit `process://metrics` every 2s so the
+            // frontend can drop its per-hook listProcesses polling.
+            pm.clone().start_metrics_broadcaster();
             app.manage(pm);
 
             // Remote server state (bearer token loaded from runtime_state).
@@ -133,6 +157,14 @@ pub fn run() {
             // that was running in the previous session, kill anything
             // occupying its expected_port so the user can restart
             // cleanly without manual port cleanup.
+            //
+            // H6: verify the holder is plausibly ours before killing.
+            // Matching rule (union, any of):
+            //   (1) holder's cwd == project.path OR starts with project.path + "/"
+            //   (2) holder's command-line contains a meaningful substring of
+            //       script.command (first whitespace-delimited token ≥3 chars).
+            // If neither matches we log a warning and skip — better to leave
+            // a conflict that surfaces in the UI than nuke an unrelated daemon.
             {
                 let rs = app.state::<Arc<RuntimeStore>>().inner().clone();
                 let cfg_state = app.state::<Arc<AppState>>().inner().clone();
@@ -142,26 +174,53 @@ pub fn run() {
                         return;
                     }
                     let cfg = cfg_state.config.lock().await;
-                    let mut ports_to_clean: Vec<u16> = Vec::new();
+                    // (port, project_path, script_command)
+                    let mut ports_to_clean: Vec<(u16, String, String)> = Vec::new();
                     for project in &cfg.projects {
                         for script in &project.scripts {
                             if snap.last_running.contains(&script.id) {
                                 // S1: prefer declared ports list, fall back to legacy expected_port.
                                 if !script.ports.is_empty() {
                                     for spec in &script.ports {
-                                        ports_to_clean.push(spec.number);
+                                        ports_to_clean.push((
+                                            spec.number,
+                                            project.path.clone(),
+                                            script.command.clone(),
+                                        ));
                                     }
                                 } else if let Some(port) = script.expected_port {
-                                    ports_to_clean.push(port as u16);
+                                    ports_to_clean.push((
+                                        port,
+                                        project.path.clone(),
+                                        script.command.clone(),
+                                    ));
                                 }
                             }
                         }
                     }
                     drop(cfg);
-                    for port in ports_to_clean {
-                        match commands::port::kill_port(port).await {
-                            Ok(()) => log::info!("orphan cleanup: freed port {}", port),
-                            Err(_) => {} // port wasn't in use — fine
+                    for (port, project_path, script_command) in ports_to_clean {
+                        let holders: Vec<types::PortInfo> = match commands::port::list_ports().await {
+                            Ok(list) => list.into_iter().filter(|p| p.port == port).collect(),
+                            Err(_) => Vec::new(),
+                        };
+                        if holders.is_empty() {
+                            continue; // nothing to clean
+                        }
+                        let all_match = holders
+                            .iter()
+                            .all(|h| orphan_matches(h, &project_path, &script_command));
+                        if !all_match {
+                            for h in &holders {
+                                log::warn!(
+                                    "orphan cleanup: skipping :{} (pid {} cmd {:?}) — doesn't match project path {:?} or command {:?}",
+                                    port, h.pid, h.command, project_path, script_command
+                                );
+                            }
+                            continue;
+                        }
+                        if let Ok(()) = commands::port::kill_port(port).await {
+                            log::info!("orphan cleanup: freed port {}", port);
                         }
                     }
                     let _ = rs.clear_last_running().await;
@@ -198,10 +257,10 @@ pub fn run() {
             // Processes
             commands::spawn_process,
             commands::kill_process,
+            commands::stop_script_graceful,
             commands::restart_process,
             commands::list_processes,
             commands::log_snapshot,
-            commands::search_log,
             commands::clear_log,
             commands::force_quit,
             // Ports
@@ -234,6 +293,23 @@ pub fn run() {
             commands::rotate_token,
             commands::get_audit_log,
             commands::local_ip,
+            // Autostart (LaunchAgent)
+            commands::get_autostart_status,
+            commands::set_autostart,
+            // Settings
+            commands::get_settings,
+            commands::update_settings,
+            // Persistent log search (Worker K)
+            commands::search_log,
+            commands::get_log_storage_stats,
+            // Docker Compose (Worker J)
+            commands::compose_installed,
+            commands::compose_projects_list,
+            commands::compose_add_project,
+            commands::compose_remove_project,
+            commands::compose_up,
+            commands::compose_down,
+            commands::compose_ps,
         ])
         .on_window_event(|window, event| {
             use tauri::Emitter;
@@ -328,4 +404,125 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// H6: decide whether `holder` of a port is plausibly a leftover of our
+/// previous procman run.
+///
+/// Returns true iff ANY of the following hold:
+///   (1) holder's cwd equals `project_path`, or is a descendant path of it.
+///   (2) holder's command line contains the first meaningful (≥3 char)
+///       token of `script_command`.
+///
+/// False-positives here cost a user daemon; false-negatives leave a port
+/// conflict for the user to resolve manually. We bias strongly toward
+/// false-negatives — a skipped orphan surfaces as a visible conflict in
+/// the dashboard, which is a tolerable nudge compared to nuking someone's
+/// unrelated `redis-server` on :6379.
+fn orphan_matches(holder: &types::PortInfo, project_path: &str, script_command: &str) -> bool {
+    // (1) cwd match
+    if let Some(cwd) = commands::port::lsof_cwd(holder.pid) {
+        if path_matches_project(&cwd, project_path) {
+            return true;
+        }
+    }
+    // (2) command-token match
+    if let Some(token) = first_meaningful_token(script_command) {
+        if holder.command.contains(&token) {
+            return true;
+        }
+    }
+    false
+}
+
+fn path_matches_project(cwd: &str, project_path: &str) -> bool {
+    if project_path.is_empty() {
+        return false;
+    }
+    if cwd == project_path {
+        return true;
+    }
+    // treat as prefix iff followed by separator — avoid /tmp/foo matching /tmp/foobar.
+    let with_sep = if project_path.ends_with('/') {
+        project_path.to_string()
+    } else {
+        format!("{}/", project_path)
+    };
+    cwd.starts_with(&with_sep)
+}
+
+fn first_meaningful_token(cmd: &str) -> Option<String> {
+    cmd.split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-' && c != '/'))
+        .find(|t| t.len() >= 3)
+        .map(|t| t.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::PortInfo;
+
+    fn holder(pid: u32, cmd: &str) -> PortInfo {
+        PortInfo {
+            port: 3000,
+            pid,
+            process_name: "test".into(),
+            command: cmd.into(),
+        }
+    }
+
+    #[test]
+    fn first_meaningful_token_skips_short() {
+        // single-char / 2-char tokens are too promiscuous ("go", "ls").
+        assert_eq!(first_meaningful_token("ls"), None);
+        assert_eq!(first_meaningful_token("go run main.go"), Some("run".into()));
+    }
+
+    #[test]
+    fn first_meaningful_token_picks_first_word() {
+        assert_eq!(
+            first_meaningful_token("pnpm dev --host"),
+            Some("pnpm".into())
+        );
+        assert_eq!(
+            first_meaningful_token("python -m uvicorn app:main"),
+            Some("python".into())
+        );
+    }
+
+    #[test]
+    fn path_matches_exact_and_descendant() {
+        assert!(path_matches_project("/Users/x/proj", "/Users/x/proj"));
+        assert!(path_matches_project("/Users/x/proj/sub", "/Users/x/proj"));
+        // adjacent prefix must NOT match.
+        assert!(!path_matches_project("/Users/x/project2", "/Users/x/proj"));
+        // empty project path is a no-match.
+        assert!(!path_matches_project("/anywhere", ""));
+    }
+
+    #[test]
+    fn orphan_matches_by_command_token() {
+        let h = holder(1234, "pnpm dev --host 0.0.0.0");
+        // cwd lookup will fail for pid 1234 (not running) — so this is a
+        // pure command-token match test.
+        assert!(orphan_matches(&h, "/nowhere", "pnpm dev"));
+    }
+
+    #[test]
+    fn orphan_does_not_match_unrelated() {
+        let h = holder(1234, "redis-server *:6379");
+        assert!(!orphan_matches(&h, "/nowhere", "pnpm dev"));
+    }
+
+    #[test]
+    fn orphan_matches_is_permissive_on_shared_token() {
+        // If the first token is common (e.g. "node") it'll match lots of
+        // things. We accept that — user's other node daemons are rare
+        // compared to procman's own children, and the alternative (too
+        // strict) defeats the cleanup's purpose. This test documents the
+        // current bias.
+        let h = holder(1234, "node /other/app/server.js");
+        assert!(orphan_matches(&h, "/nowhere", "node server.js"));
+    }
 }

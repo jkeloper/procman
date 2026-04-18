@@ -135,6 +135,7 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
                 expected_port: None,
                 ports: Vec::new(),
                 auto_restart: false,
+                auto_restart_policy: None,
                 env_file: None,
                 depends_on: Vec::new(),
             };
@@ -227,7 +228,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.as_str().map(|s| substitute(s)))
+                .filter_map(|v| v.as_str().map(&substitute))
                 .collect()
         })
         .unwrap_or_default();
@@ -264,7 +265,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
     let runtime_exec = cfg
         .get("runtimeExecutable")
         .and_then(|v| v.as_str())
-        .map(|s| substitute(s));
+        .map(&substitute);
 
     let command = match base_kind.as_str() {
         "node-terminal" => {
@@ -275,7 +276,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let raw_cmd = cfg
                 .get("command")
                 .and_then(|v| v.as_str())
-                .map(|s| substitute(s))
+                .map(&substitute)
                 .unwrap_or_default();
             if raw_cmd.is_empty() {
                 return skip(name, kind, "node-terminal needs a `command` field", raw_json);
@@ -295,7 +296,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| substitute(s)))
+                        .filter_map(|v| v.as_str().map(&substitute))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -355,14 +356,14 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let python_path = cfg
                 .get("python")
                 .and_then(|v| v.as_str())
-                .map(|s| substitute(s));
+                .map(&substitute);
             let interp = runtime_exec
                 .or(python_path)
                 .unwrap_or_else(|| "python3".to_string());
             let module = cfg
                 .get("module")
                 .and_then(|v| v.as_str())
-                .map(|s| substitute(s));
+                .map(&substitute);
             let target = if let Some(m) = module {
                 format!("-m {}", shell_quote(&m))
             } else {
@@ -403,11 +404,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let main_class = cfg
                 .get("mainClass")
                 .and_then(|v| v.as_str())
-                .map(|s| substitute(s));
+                .map(&substitute);
             let vm_args = cfg
                 .get("vmArgs")
                 .and_then(|v| v.as_str())
-                .map(|s| substitute(s))
+                .map(substitute)
                 .unwrap_or_default();
 
             let has_mvnw = Path::new(workspace).join("mvnw").exists();
@@ -626,6 +627,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         expected_port: expected_from_ports,
         ports: extracted_ports,
         auto_restart: false,
+        auto_restart_policy: None,
         env_file: None,
         depends_on: Vec::new(),
     };
@@ -1114,7 +1116,7 @@ fn resolve_var(key: &str, workspace: &str, env_map: &HashMap<String, String>) ->
                 // empty string at scan time.
                 return format!("${}", rest);
             }
-            if let Some(rest) = key.strip_prefix("config:") {
+            if let Some(_rest) = key.strip_prefix("config:") {
                 // Unsupported
                 return format!("${{{}}}", key);
             }

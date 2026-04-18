@@ -72,7 +72,9 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
         const c = candidates[i];
         try {
           const project = await api.createProject(c.name, c.path);
-          // Also import the scripts (best-effort; dedup errors ignored).
+          // Import each script. Surface per-script errors so we can see
+          // why something was dropped (e.g. dedup, YAML write failure,
+          // validation, etc.).
           for (const s of c.scripts) {
             try {
               await api.createScript(
@@ -82,8 +84,13 @@ export function ScanDialog({ open: isOpen, onOpenChange, onImported }: Props) {
                 s.expected_port,
                 s.auto_restart,
               );
-            } catch {
-              // skip duplicate scripts silently
+            } catch (e: any) {
+              const msg = String(e?.message ?? e);
+              // Silently skip duplicate scripts (same name/command).
+              // Duplicates are expected when the project declares the
+              // same action in both package.json and launch.json.
+              if (msg.includes('already exists')) continue;
+              errors.push(`${c.name} › ${s.name}: ${msg}`);
             }
           }
         } catch (e: any) {

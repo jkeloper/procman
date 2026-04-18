@@ -146,6 +146,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         });
@@ -156,6 +157,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         });
@@ -170,6 +172,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         });
@@ -185,6 +188,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
                 expected_port: Some(8000),
                 ports: Vec::new(),
                 auto_restart: false,
+                auto_restart_policy: None,
                 env_file: None,
                 depends_on: Vec::new(),
             });
@@ -214,6 +218,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         });
@@ -224,6 +229,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         });
@@ -468,6 +474,7 @@ fn scripts_from_package_json(path: &Path) -> Vec<Script> {
                 expected_port: infer_port(cmd_str),
                 ports: Vec::new(),
                 auto_restart: false,
+                auto_restart_policy: None,
                 env_file: None,
                 depends_on: Vec::new(),
             })

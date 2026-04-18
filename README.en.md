@@ -1,4 +1,4 @@
-# 🐸 procman
+    # 🐸 procman
 
 **Local dev process manager with a GUI.** Manage all your dev servers, tunnels, and docker processes from one screen.
 

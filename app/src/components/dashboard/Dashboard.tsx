@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Button } from '@/components/ui/button';
 import { api, type PortInfo, type Project } from '@/api/tauri';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
 import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
+import { DockerComposeCard } from './DockerComposeCard';
 import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
 import { useConfirm } from '@/components/ConfirmDialog';
-import { IconOverview, IconPorts, IconGroups, IconNetwork } from '@/components/icons/TabIcons';
+import { LayoutDashboard, Network, Play, Globe } from 'lucide-react';
 
 interface Props {
   projects: Project[];
@@ -14,10 +16,10 @@ interface Props {
 type Tab = 'dashboard' | 'ports' | 'groups' | 'network';
 
 const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: <IconOverview /> },
-  { key: 'ports', label: 'Ports', icon: <IconPorts /> },
-  { key: 'groups', label: 'Groups', icon: <IconGroups /> },
-  { key: 'network', label: 'Network', icon: <IconNetwork /> },
+  { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+  { key: 'ports', label: 'Ports', icon: <Network size={16} /> },
+  { key: 'groups', label: 'Groups', icon: <Play size={16} /> },
+  { key: 'network', label: 'Network', icon: <Globe size={16} /> },
 ];
 
 export function Dashboard({ projects, onSelectProject }: Props) {
@@ -26,16 +28,31 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [killing, setKilling] = useState<number | null>(null);
+  const [aliases, setAliases] = useState<Record<string, string>>({});
   const confirm = useConfirm();
+
+  const [pidScriptMap, setPidScriptMap] = useState<Map<number, string>>(new Map());
 
   const reload = useCallback(async () => {
     try {
-      const [list, procs] = await Promise.all([
+      const [list, procs, als] = await Promise.all([
         api.listPorts(),
         api.listProcesses().catch(() => []),
+        api.getPortAliases().catch(() => ({})),
       ]);
       setPorts(list);
-      setManagedPids(new Set(procs.map((p) => p.pid)));
+      const rootPids = procs.map((p) => p.pid);
+      const descendants = rootPids.length > 0
+        ? await api.listDescendantPids(rootPids).catch(() => rootPids)
+        : [];
+      setManagedPids(new Set([...rootPids, ...descendants]));
+      // Build pid → scriptId map so port-to-project matching is exact.
+      const psMap = new Map<number, string>();
+      for (const p of procs) {
+        psMap.set(p.pid, p.id);
+      }
+      setPidScriptMap(psMap);
+      setAliases(als ?? {});
     } catch {
     } finally {
       setLoading(false);
@@ -89,19 +106,24 @@ export function Dashboard({ projects, onSelectProject }: Props) {
       }
     }
   }
-  // Also match by managed pid — if procman spawned a process and it opened a port
+  // Also match by managed pid — trace pid → wrapper → scriptId → project
   for (const port of ports) {
     if (!expectedPortMap.has(port.port) && managedPids.has(port.pid)) {
-      // Find which script owns this pid
-      for (const p of projects) {
-        if (true) {
-          // pid_index maps pid → script_id, but we don't have that here.
-          // Use managedPids as proof — if the pid is ours, show it as matched.
-          expectedPortMap.set(port.port, { project: p.name, script: '(auto-detected)' });
-          break;
+      // Walk from the port's pid back to a root wrapper pid that
+      // we track, then look up which script and project it belongs to.
+      const scriptId = pidScriptMap.get(port.pid);
+      if (scriptId) {
+        for (const p of projects) {
+          const sc = p.scripts.find((s) => s.id === scriptId);
+          if (sc) {
+            expectedPortMap.set(port.port, { project: p.name, script: sc.name });
+            break;
+          }
         }
-        if (expectedPortMap.has(port.port)) break;
       }
+      // If the pid isn't a root wrapper (it's a descendant), we can't
+      // precisely map it without a full pid→scriptId reverse index.
+      // Leave it as unmatched rather than wrongly assigning it.
     }
   }
 
@@ -113,7 +135,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     <div className="flex h-full flex-col">
       {/* Tab ribbon — also serves as macOS drag area for Dashboard view */}
       <div
-        className="flex shrink-0 items-center gap-0 border-b border-border/60 bg-card/30 pl-3"
+        className="glass-bar flex shrink-0 items-center gap-0 pl-3"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div
@@ -124,7 +146,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-[13px] font-medium transition-colors ${
+              className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-[14px] font-medium transition-colors ${
                 tab === t.key
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -133,7 +155,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
               <span className="flex items-center">{t.icon}</span>
               {t.label}
               {t.key === 'ports' && (
-                <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono">
+                <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[12px] font-mono">
                   {ports.length}
                 </span>
               )}
@@ -149,9 +171,9 @@ export function Dashboard({ projects, onSelectProject }: Props) {
           {tab === 'dashboard' && (
             <div className="space-y-5">
               <div>
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-[13px] text-muted-foreground">
                   {projects.length} projects · {totalScripts} scripts · {ports.length} listening ports
-                  {loading && ' · loading…'}
+                  {loading && ' · loading...'}
                 </p>
               </div>
 
@@ -173,6 +195,8 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="matched"
+                    aliases={aliases}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
                   />
                 </section>
               )}
@@ -181,7 +205,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
           {tab === 'ports' && (
             <div className="space-y-5">
-              
+
 
               <section>
                 <SectionHeader
@@ -200,6 +224,8 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="matched"
+                    aliases={aliases}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
                   />
                 )}
               </section>
@@ -217,6 +243,8 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="other"
+                    aliases={aliases}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
                   />
                 )}
               </section>
@@ -225,15 +253,16 @@ export function Dashboard({ projects, onSelectProject }: Props) {
 
           {tab === 'groups' && (
             <div className="space-y-5">
-              
+
               <GroupsPanel projects={projects} />
             </div>
           )}
 
           {tab === 'network' && (
             <div className="space-y-5">
-              
+
               <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
+              <DockerComposeCard />
               <RemoteAccessCard />
             </div>
           )}
@@ -256,19 +285,19 @@ function SectionHeader({
   return (
     <div className="mb-2 flex items-baseline justify-between">
       <div className="flex items-baseline gap-2">
-        <h2 className="text-[13px] font-semibold">{title}</h2>
+        <h2 className="text-[14px] font-semibold">{title}</h2>
         {count != null && (
-          <span className="font-mono text-[11px] text-muted-foreground">{count}</span>
+          <span className="font-mono text-[12px] text-muted-foreground">{count}</span>
         )}
       </div>
-      {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+      {sub && <p className="text-[12px] text-muted-foreground">{sub}</p>}
     </div>
   );
 }
 
 function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-4 text-center text-[12px] text-muted-foreground">
+    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-center text-[13px] text-muted-foreground backdrop-blur-md">
       {children}
     </div>
   );
@@ -284,8 +313,8 @@ function StatPill({
   accent: 'muted' | 'primary';
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-card p-3 transition-all hover:-translate-y-[1px] hover:shadow-md">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="glass-card rounded-2xl p-4">
+      <div className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <div
@@ -307,6 +336,8 @@ function PortTable({
   onKill,
   onClickRow,
   variant,
+  aliases,
+  onSetAlias,
 }: {
   rows: PortInfo[];
   expectedMap: Map<number, { project: string; script: string }>;
@@ -315,13 +346,18 @@ function PortTable({
   onKill: (port: number) => void;
   onClickRow: (p: PortInfo) => void;
   variant: 'matched' | 'other';
+  aliases: Record<string, string>;
+  onSetAlias: (port: number, alias: string) => void;
 }) {
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
   return (
-    <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
-      <table className="w-full text-[12px]">
-        <thead className="bg-muted/30">
-          <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="glass-card overflow-hidden rounded-2xl">
+      <table className="w-full text-[13px]">
+        <thead className="bg-white/5">
+          <tr className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-2 text-left">Port</th>
+            <th className="px-3 py-2 text-left">Alias</th>
             <th className="px-3 py-2 text-left">PID</th>
             <th className="px-3 py-2 text-left">Process</th>
             <th className="px-3 py-2 text-left">Matched</th>
@@ -332,6 +368,8 @@ function PortTable({
           {rows.map((p) => {
             const match = expectedMap.get(p.port);
             const managed = managedPids.has(p.pid);
+            const alias = aliases[String(p.port)] ?? '';
+            const isEditing = editing === p.port;
             return (
               <tr
                 key={`${p.pid}-${p.port}`}
@@ -345,7 +383,7 @@ function PortTable({
               >
                 <td className="px-3 py-2">
                   <span
-                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
+                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[12px] font-semibold ${
                       variant === 'matched'
                         ? 'bg-primary/15 text-primary'
                         : 'bg-muted/50 text-muted-foreground'
@@ -355,13 +393,36 @@ function PortTable({
                     :{p.port}
                   </span>
                 </td>
-                <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
+                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      className="h-6 w-28 rounded border border-border/60 bg-muted/30 px-1.5 text-[12px] focus:border-primary/50 focus:outline-none"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => { onSetAlias(p.port, draft); setEditing(null); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { onSetAlias(p.port, draft); setEditing(null); }
+                        if (e.key === 'Escape') setEditing(null);
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="cursor-text rounded px-1 py-0.5 text-[12px] text-foreground/80 hover:bg-muted/50"
+                      onClick={() => { setEditing(p.port); setDraft(alias); }}
+                      title="Click to set alias"
+                    >
+                      {alias || <span className="text-muted-foreground/40 italic">—</span>}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">
                   {p.pid}
                 </td>
                 <td className="px-3 py-2">
-                  <div className="text-[11px] font-medium">{p.process_name}</div>
+                  <div className="text-[12px] font-medium">{p.process_name}</div>
                   {p.command && p.command !== p.process_name && (
-                    <div className="mt-0.5 max-w-[400px] truncate font-mono text-[10px] text-muted-foreground/70" title={p.command}>
+                    <div className="mt-0.5 max-w-[400px] truncate font-mono text-[12px] text-muted-foreground/70" title={p.command}>
                       {p.command}
                     </div>
                   )}
@@ -380,13 +441,15 @@ function PortTable({
                   className="px-3 py-2 text-right"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    className="rounded bg-red-800/80 px-3 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-700 disabled:opacity-50"
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7"
                     disabled={killing === p.port}
                     onClick={() => onKill(p.port)}
                   >
-                    {killing === p.port ? 'killing…' : 'Kill'}
-                  </button>
+                    {killing === p.port ? 'Killing...' : 'Kill'}
+                  </Button>
                 </td>
               </tr>
             );

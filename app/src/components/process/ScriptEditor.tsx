@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { api, type Script, type PortSpec } from '@/api/tauri';
+import { api, type Script, type PortSpec, type AutoRestartPolicy } from '@/api/tauri';
 import { useConfirm } from '@/components/ConfirmDialog';
 
 interface Props {
@@ -66,6 +66,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [expectedPort, setExpectedPort] = useState('');
   const [ports, setPorts] = useState<PortSpec[]>([]);
   const [autoRestart, setAutoRestart] = useState(false);
+  const [autoRestartPolicy, setAutoRestartPolicy] = useState<AutoRestartPolicy | null>(null);
   const [envFile, setEnvFile] = useState('');
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [siblings, setSiblings] = useState<Script[]>([]);
@@ -80,6 +81,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setExpectedPort(existing?.expected_port?.toString() ?? '');
       setPorts(existing?.ports ?? []);
       setAutoRestart(existing?.auto_restart ?? false);
+      setAutoRestartPolicy(existing?.auto_restart_policy ?? null);
       setEnvFile(existing?.env_file ?? '');
       setDependsOn(existing?.depends_on ?? []);
       setErr(null);
@@ -156,12 +158,13 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           command,
           expectedPort: portNum,
           autoRestart,
+          autoRestartPolicy,
           envFile: envVal,
           ports: trimmedPorts,
           dependsOn,
         });
       } else {
-        await api.createScript(
+        const created = await api.createScript(
           projectId,
           name,
           command,
@@ -171,6 +174,14 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           trimmedPorts,
           dependsOn,
         );
+        // Backend create_script does not yet accept the structured
+        // policy — patch it in immediately so creation + advanced
+        // policy stay a single user action.
+        if (autoRestartPolicy) {
+          await api.updateScript(projectId, created.id, {
+            autoRestartPolicy,
+          });
+        }
       }
       onSaved();
       onOpenChange(false);
@@ -334,6 +345,96 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
             disabled={busy}
             className="flex-1 border-border/60 bg-muted/30 px-2 py-1 font-mono text-[13px]"
           />
+        </div>
+
+        {/* S6-05: Structured auto-restart policy */}
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoRestartPolicy != null}
+              onChange={(e) =>
+                setAutoRestartPolicy(
+                  e.target.checked
+                    ? { enabled: true, max_retries: 5, backoff_ms: 1000, jitter_ms: 500 }
+                    : null,
+                )
+              }
+              disabled={busy}
+              className="accent-primary"
+            />
+            Advanced auto-restart policy
+            <span className="text-[11px] text-muted-foreground/70">
+              (overrides the simple toggle)
+            </span>
+          </label>
+          {autoRestartPolicy && (
+            <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={autoRestartPolicy.enabled}
+                  onChange={(e) =>
+                    setAutoRestartPolicy({ ...autoRestartPolicy, enabled: e.target.checked })
+                  }
+                  disabled={busy}
+                  className="accent-primary"
+                />
+                Enabled
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">Max retries</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={autoRestartPolicy.max_retries}
+                    onChange={(e) =>
+                      setAutoRestartPolicy({
+                        ...autoRestartPolicy,
+                        max_retries: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                    disabled={busy}
+                    className="h-7 font-mono text-[12px]"
+                  />
+                  <span className="text-[10px] text-muted-foreground/70">0 = unlimited</span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">Backoff (ms)</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={autoRestartPolicy.backoff_ms}
+                    onChange={(e) =>
+                      setAutoRestartPolicy({
+                        ...autoRestartPolicy,
+                        backoff_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                    disabled={busy}
+                    className="h-7 font-mono text-[12px]"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">Jitter (ms)</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={autoRestartPolicy.jitter_ms}
+                    onChange={(e) =>
+                      setAutoRestartPolicy({
+                        ...autoRestartPolicy,
+                        jitter_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                    disabled={busy}
+                    className="h-7 font-mono text-[12px]"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* S4: Depends-on picker */}

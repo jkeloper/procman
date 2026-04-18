@@ -103,6 +103,56 @@ pub async fn kill_process(
     pm.kill(&script_id).await
 }
 
+/// v3 고도화 6: Graceful stop. Resolves all scripts that declare
+/// `script_id` as a dep (recursively), then stops the dependent chain
+/// front-to-back before stopping `script_id` itself. A `visited` set
+/// keeps the BFS terminating on circular declarations — the resulting
+/// kill order still makes forward progress because each `kill` is
+/// independently correct. Cycle *detection* (to reject saves) is a
+/// separate concern handled by a future config validator.
+#[tauri::command]
+pub async fn stop_script_graceful(
+    script_id: String,
+    state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<(), String> {
+    let dependents = resolve_dependents(&state, &script_id).await?;
+    pm.stop_script_graceful(&script_id, &dependents).await
+}
+
+/// Return every script id whose transitive `depends_on` graph contains
+/// `target_id`. Order is BFS — closer dependents first. Returns Err on
+/// a cycle reaching `target_id` (the caller can still force-kill).
+async fn resolve_dependents(
+    state: &AppState,
+    target_id: &str,
+) -> Result<Vec<String>, String> {
+    let guard = state.config.lock().await;
+    let mut all_scripts: Vec<(String, Vec<String>)> = Vec::new();
+    for project in &guard.projects {
+        for script in &project.scripts {
+            all_scripts.push((script.id.clone(), script.depends_on.clone()));
+        }
+    }
+    drop(guard);
+
+    let mut dependents: Vec<String> = Vec::new();
+    let mut visited = std::collections::HashSet::<String>::new();
+    let mut queue = std::collections::VecDeque::<String>::new();
+    queue.push_back(target_id.to_string());
+    visited.insert(target_id.to_string());
+
+    while let Some(cur) = queue.pop_front() {
+        for (sid, deps) in &all_scripts {
+            if deps.iter().any(|d| d == &cur) && visited.insert(sid.clone()) {
+                dependents.push(sid.clone());
+                queue.push_back(sid.clone());
+            }
+        }
+    }
+    Ok(dependents)
+}
+
 #[tauri::command]
 pub async fn restart_process(
     project_id: String,
@@ -129,24 +179,6 @@ pub async fn log_snapshot(
     pm: tauri::State<'_, ProcessManager>,
 ) -> Result<Vec<LogLine>, String> {
     Ok(pm.log_snapshot(&script_id))
-}
-
-/// S3: Substring search over the in-memory ring buffer. `limit` caps
-/// the number of hits returned. `case_sensitive` defaults to false.
-#[tauri::command]
-pub async fn search_log(
-    script_id: String,
-    query: String,
-    case_sensitive: Option<bool>,
-    limit: Option<usize>,
-    pm: tauri::State<'_, ProcessManager>,
-) -> Result<Vec<LogLine>, String> {
-    Ok(pm.log_search(
-        &script_id,
-        &query,
-        case_sensitive.unwrap_or(false),
-        limit.unwrap_or(500),
-    ))
 }
 
 #[tauri::command]

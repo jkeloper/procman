@@ -88,8 +88,57 @@ impl TunnelState {
 }
 
 fn parse_port_from_url(url: &str) -> Option<u16> {
-    // "http://localhost:3000" or "http://127.0.0.1:8080"
-    url.rsplit_once(':')?.1.parse().ok()
+    // Strip scheme ("http://...") if present.
+    let rest = url
+        .find("://")
+        .map(|i| &url[i + 3..])
+        .unwrap_or(url);
+    // Cut off path/query so "localhost:3000/foo" → "localhost:3000".
+    let host_port = rest.split(['/', '?', '#']).next()?;
+    // IPv6 literal: "[::1]:3000". Take everything after the closing bracket.
+    let after_bracket = if let Some(rb) = host_port.rfind(']') {
+        &host_port[rb + 1..]
+    } else {
+        host_port
+    };
+    // Now the tail is ":<port>" (IPv6 case) or "host:port" (v4/hostname) or
+    // "host" with no port at all.
+    let port_str = after_bracket.rsplit_once(':')?.1;
+    // Strip anything past the numeric run (defensive).
+    let digits: String = port_str.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::parse_port_from_url;
+
+    #[test]
+    fn v4_host() {
+        assert_eq!(parse_port_from_url("http://127.0.0.1:8080"), Some(8080));
+    }
+
+    #[test]
+    fn localhost() {
+        assert_eq!(parse_port_from_url("http://localhost:3000"), Some(3000));
+    }
+
+    #[test]
+    fn ipv6_literal() {
+        assert_eq!(parse_port_from_url("http://[::1]:3000"), Some(3000));
+        assert_eq!(parse_port_from_url("http://[fe80::1]:9000"), Some(9000));
+    }
+
+    #[test]
+    fn no_port_none() {
+        assert_eq!(parse_port_from_url("http://localhost"), None);
+        assert_eq!(parse_port_from_url("http://[::1]"), None);
+    }
+
+    #[test]
+    fn with_path() {
+        assert_eq!(parse_port_from_url("http://localhost:8000/ready"), Some(8000));
+    }
 }
 
 #[tauri::command]

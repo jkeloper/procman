@@ -4,6 +4,10 @@ const config: CapacitorConfig = {
   appId: 'dev.procman.remote',
   appName: 'procman',
   webDir: 'dist',
+  // Note: procman mobile ships iOS-only (per project charter). The
+  // `cleartext` / `androidScheme` fields below are Android-only and
+  // therefore unused at runtime — retained only so the config does
+  // not fail validation if someone inspects it with an Android toolchain.
   server: {
     cleartext: true,
     androidScheme: 'http',

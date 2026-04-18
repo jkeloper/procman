@@ -6,7 +6,7 @@ authors = ["procman"]
 license = "MIT"
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,6 +26,8 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 tokio = { version = "1", features = ["full"] }
 portable-pty = "0.8"
 serde_yaml = "0.9"
@@ -45,10 +47,13 @@ base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 tokio-stream = { version = "0.1", features = ["sync"] }
-tower_governor = "0.4"
 rcgen = "0.13"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 rustls = "0.23"
 rustls-pemfile = "2"
 rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
+# Worker K (S3 deferred): persistent log storage with FTS5 full-text search.
+# `bundled` ships a vendored sqlite3 so release builds don't depend on the
+# system libsqlite3 (macOS 14's version lacks FTS5 in some configurations).
+rusqlite = { version = "0.32", features = ["bundled"] }

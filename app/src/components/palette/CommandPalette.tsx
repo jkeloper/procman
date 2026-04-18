@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Project, type RuntimeStatus } from '@/api/tauri';
-import { IconOverview, IconGroups, IconFolder, IconPlay, IconStop, IconRestart } from '@/components/icons/TabIcons';
+import { LayoutDashboard, Play, Folder, Square, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
 
 interface Group {
   id: string;
@@ -175,6 +175,16 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
             }}
             visible={!q || 'dashboard'.includes(q)}
           />
+          <PaletteItem
+            icon="settings"
+            label="Settings"
+            sub="Preferences, autostart, LAN opt-in"
+            onClick={() => {
+              window.dispatchEvent(new Event('procman:open-settings'));
+              close();
+            }}
+            visible={!q || 'settings'.includes(q) || 'preferences'.includes(q)}
+          />
 
           {/* Groups */}
           {hasGroups && (
@@ -287,12 +297,13 @@ function PaletteItem({
       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/60 ${className}`}
     >
       <span className="flex w-5 shrink-0 items-center justify-center">
-        {icon === 'grid' ? <IconOverview /> :
-         icon === 'play-double' ? <IconGroups /> :
-         icon === 'folder' ? <IconFolder /> :
-         icon === 'play' ? <IconPlay /> :
-         icon === 'stop' ? <IconStop /> :
-         icon === 'restart' ? <IconRestart /> :
+        {icon === 'grid' ? <LayoutDashboard size={16} /> :
+         icon === 'play-double' ? <Play size={16} /> :
+         icon === 'folder' ? <Folder size={12} /> :
+         icon === 'play' ? <Play size={12} /> :
+         icon === 'stop' ? <Square size={12} /> :
+         icon === 'restart' ? <RotateCcw size={16} /> :
+         icon === 'settings' ? <SettingsIcon size={16} /> :
          <span className="text-[14px]">{icon}</span>}
       </span>
       <span className="min-w-0 flex-1">

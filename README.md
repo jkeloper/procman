@@ -5,10 +5,11 @@
 Mac용 프로세스 매니저 GUI. 로컬 개발환경의 여러 서버·tunnel·docker 프로세스를 한 화면에서 관리.
 
 ## 상태
-🟢 **Post-MVP S1~S4 완료** (2026-04-16)
+🟢 **Post-MVP S1~S5 완료** + **모바일/원격 통합 완료** (2026-04-17)
 
-Week 0 스파이크 + Sprint 1-3 단일 세션 완주 후, Post-MVP 로드맵 S1-S4까지 추가
-완료. S5(마감)은 테스트 하드닝/문서 위주로 진행 중. **Tauri v2** 기반.
+Week 0 스파이크 + Sprint 1-3(단일 세션) + v0.2 Feature Pack + Post-MVP S1-S5 완료.
+이후 모바일 PWA(S1-S5 동기화) + iOS Capacitor + Remote API(REST/WS) + cloudflared
+터널 자동 복구 + 모바일 QR 페어링까지 통합. **Tauri v2** + **Capacitor** 기반.
 
 ### Post-MVP 주요 추가
 - **S1 포트 관리 v2** — `Script.ports: Vec<PortSpec>`로 멀티 포트 선언. 이름/번호/
@@ -124,10 +125,28 @@ brew install fswatch   # 최초 1회
 개인용이면 서명 불필요. 다른 사람 배포 시 애플 개발자 계정($99/년) 필요.
 `scripts/install.sh`는 자동으로 `xattr -cr`로 quarantine 해제.
 
+### 릴리즈 (외부 배포)
+서명·notarize까지 한 방에 수행하는 `scripts/release.sh` 사용:
+```bash
+# 로컬 — 인증서 keychain 설치 + 환경변수 세팅 후
+export APPLE_ID="you@example.com"  # your Apple Developer account
+export APPLE_TEAM_ID="XXXXXXXXXX"
+export APPLE_NOTARIZE_PASSWORD="abcd-efgh-ijkl-mnop"  # app-specific password
+# DEVELOPER_ID_APPLICATION 은 보통 자동 감지 (security find-identity)
+./scripts/release.sh --version 0.2.0
+# → app/src-tauri/target/release/bundle/dmg/procman_0.2.0_aarch64.dmg
+```
+
+GitHub Actions 릴리즈(`git tag v0.2.0 && git push --tags`)는
+`.github/workflows/release.yml`이 macos-latest에서 같은 스크립트를 실행한다.
+필요한 repo secrets: `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_NOTARIZE_PASSWORD`,
+`TAURI_SIGNING_PRIVATE_KEY` (auto-updater용, Worker I에서 사용).
+
 ### 테스트
 ```bash
 cd app/src-tauri
-cargo test --lib    # 15 unit tests
+cargo test --lib    # 86 unit tests
 ```
 
 ## 디렉토리 구조
@@ -156,20 +175,21 @@ procman/
 │           ├── watcher.rs      # config.yaml FS watcher
 │           ├── state.rs        # AppState (Arc<Mutex<AppConfig>>)
 │           └── commands/       # IPC 명령 (project/script/process/port/scan/group/session)
-├── docs/                       # 기획 문서 (Charter/WBS/Decision)
-└── spikes/                     # Week 0 스파이크 산출물 (archival)
+├── mobile/                     # 모바일 PWA + iOS Capacitor 앱
+├── vscode-extension/           # VSCode 사이드바 확장
+├── scripts/                    # install.sh / watch-install.sh
+├── docs/
+│   ├── 07-port-management-v2.md  # 현행 포트 관리 설계
+│   └── archive/                  # Week 0 기획 히스토리 (참고용)
+└── spikes/                     # Week 0 스파이크 판정 (archival)
 ```
 
-## 테스트 완료 (15/15 Rust)
-- types round-trip (empty / full / minimal YAML)
-- ConfigStore (missing → default / atomic save+load / no temp leftover)
-- LogBuffer (monotonic seq / ring eviction / tail-N)
-- lsof parser (single/dup IPv4+IPv6)
-- scan (port inference / Rust detect / multi-stack / PM from lockfile)
-
-## 문서
+## 문서 맵
 - [CLAUDE.md](CLAUDE.md) — AI 작업용 프로젝트 컨텍스트
-- [TODO.md](TODO.md) — 작업 목록 (전부 완료)
+- [TODO.md](TODO.md) — 작업 목록 + Post-S5 선택지
 - [CHANGELOG.md](CHANGELOG.md) — 변경 이력
-- [docs/](docs/) — 기획 문서
-- [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 판정
+- [app/README.md](app/README.md) — 데스크톱 앱 개발 가이드
+- [mobile/README.md](mobile/README.md) — 모바일 PWA/iOS 가이드
+- [docs/07-port-management-v2.md](docs/07-port-management-v2.md) — 현행 포트 관리 설계
+- [docs/archive/](docs/archive/) — Week 0 기획 히스토리
+- [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 스파이크 최종 판정

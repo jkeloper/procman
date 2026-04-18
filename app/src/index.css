@@ -36,49 +36,62 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.975 0.005 140);
+  --sidebar-foreground: oklch(0.18 0.015 150);
+  --sidebar-primary: oklch(0.48 0.15 150);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.94 0.015 140);
+  --sidebar-accent-foreground: oklch(0.25 0.02 150);
+  --sidebar-border: oklch(0.91 0.01 140);
+  --sidebar-ring: oklch(0.65 0.16 148);
+  /* Log panel — slightly darker than background */
+  --log-bg: oklch(0.97 0.004 140);
+  --log-fg: oklch(0.18 0.02 150);
+  --log-muted: oklch(0.55 0.01 140);
+  --log-border: oklch(0.91 0.01 140);
 }
 
 .dark {
-  /* Deep forest green base */
-  --background: oklch(0.17 0.015 150);
+  /* Deep forest green base. Surfaces (card, popover, sidebar) use
+     semi-transparent fills so backdrop-filter blur can produce the
+     Apple liquid-glass look. Solid opaque background keeps the
+     root canvas stable. */
+  --background: oklch(0.18 0.018 150);
   --foreground: oklch(0.96 0.01 140);
-  --card: oklch(0.21 0.018 150);
+  --card: oklch(0.32 0.022 150 / 0.55);
   --card-foreground: oklch(0.96 0.01 140);
-  --popover: oklch(0.21 0.018 150);
+  --popover: oklch(0.30 0.022 150 / 0.75);
   --popover-foreground: oklch(0.96 0.01 140);
-  --primary: oklch(0.65 0.16 148);
+  --primary: oklch(0.68 0.16 148);
   --primary-foreground: oklch(0.13 0.02 150);
-  --secondary: oklch(0.26 0.02 150);
+  --secondary: oklch(0.31 0.02 150);
   --secondary-foreground: oklch(0.96 0.01 140);
-  --muted: oklch(0.24 0.015 150);
-  --muted-foreground: oklch(0.68 0.015 140);
-  --accent: oklch(0.29 0.025 150);
+  --muted: oklch(0.29 0.015 150);
+  --muted-foreground: oklch(0.72 0.015 140);
+  --accent: oklch(0.34 0.025 150);
   --accent-foreground: oklch(0.96 0.01 140);
   --destructive: oklch(0.70 0.20 25);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.65 0.16 148);
+  --ring: oklch(0.68 0.16 148);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.26 0.015 150 / 0.55);
+  --sidebar-foreground: oklch(0.92 0.01 140);
+  --sidebar-primary: oklch(0.68 0.16 148);
+  --sidebar-primary-foreground: oklch(0.13 0.02 150);
+  --sidebar-accent: oklch(0.36 0.025 150 / 0.65);
+  --sidebar-accent-foreground: oklch(0.96 0.01 140);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.68 0.16 148);
+  /* Log panel — slightly translucent so the green canvas peeks through */
+  --log-bg: oklch(0.14 0.012 150 / 0.88);
+  --log-fg: oklch(0.90 0.01 140);
+  --log-muted: oklch(0.50 0.01 140);
+  --log-border: oklch(1 0 0 / 8%);
 }
 
 @theme inline {
@@ -115,6 +128,10 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-log-bg: var(--log-bg);
+  --color-log-fg: var(--log-fg);
+  --color-log-muted: var(--log-muted);
+  --color-log-border: var(--log-border);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -128,6 +145,25 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  html, body {
+    overflow: hidden;
+  }
+  /* Ambient background: soft colored blobs for depth so glass surfaces
+     always have something interesting to blur. Anchored to the viewport
+     via fixed positioning. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 12% 18%, oklch(0.48 0.14 148 / 0.45), transparent 45%),
+      radial-gradient(circle at 85% 10%, oklch(0.55 0.12 200 / 0.28), transparent 50%),
+      radial-gradient(circle at 75% 85%, oklch(0.50 0.16 120 / 0.32), transparent 55%),
+      radial-gradient(circle at 20% 90%, oklch(0.45 0.14 170 / 0.35), transparent 55%);
+    filter: blur(60px) saturate(130%);
   }
   body {
     @apply bg-background text-foreground;
@@ -149,7 +185,7 @@
     font-feature-settings: 'calt', 'liga', 'ss01', 'ss02';
   }
   kbd {
-    @apply rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[13px] font-medium;
+    @apply rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[14px] font-medium;
   }
   /* Subtle scrollbars */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -167,12 +203,80 @@
   }
 }
 
-/* Glass effect utility for sidebar / header */
+/* ==========================================================
+   Glassmorphism utilities — Apple HIG / visionOS liquid glass
+   ========================================================== */
 @layer utilities {
+  /* Base glass: subtle, for panels that sit on the root canvas */
   .glass {
-    backdrop-filter: blur(12px) saturate(160%);
-    -webkit-backdrop-filter: blur(12px) saturate(160%);
-    background-color: color-mix(in oklch, var(--background) 75%, transparent);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    background-color: color-mix(in oklch, var(--background) 55%, transparent);
+    border: 1px solid color-mix(in oklch, white 12%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+      0 1px 2px rgba(0, 0, 0, 0.2),
+      0 8px 32px rgba(0, 0, 0, 0.25);
+  }
+  /* Strong glass: cards, popovers, dialogs */
+  .glass-card {
+    backdrop-filter: blur(32px) saturate(190%);
+    -webkit-backdrop-filter: blur(32px) saturate(190%);
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in oklch, white 10%, transparent) 0%,
+        color-mix(in oklch, white 3%, transparent) 50%,
+        color-mix(in oklch, white 8%, transparent) 100%
+      ),
+      color-mix(in oklch, var(--card) 80%, transparent);
+    border: 1px solid color-mix(in oklch, white 14%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+      inset 0 -1px 0 color-mix(in oklch, black 20%, transparent),
+      0 1px 2px rgba(0, 0, 0, 0.2),
+      0 12px 40px rgba(0, 0, 0, 0.30);
+  }
+  /* Thick toolbar / sidebar glass */
+  .glass-thick {
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in oklch, white 6%, transparent) 0%,
+        transparent 100%
+      ),
+      color-mix(in oklch, var(--background) 65%, transparent);
+    border-right: 1px solid color-mix(in oklch, white 10%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 14%, transparent);
+  }
+  /* Ribbon / header bar glass */
+  .glass-bar {
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    background: color-mix(in oklch, var(--background) 60%, transparent);
+    border-bottom: 1px solid color-mix(in oklch, white 8%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 14%, transparent);
+  }
+  /* Apply to shadcn dialog/popover automatically */
+  [data-slot="dialog-content"],
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="command-dialog"] {
+    backdrop-filter: blur(32px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in oklch, white 10%, transparent) 0%,
+        color-mix(in oklch, white 3%, transparent) 100%
+      ),
+      color-mix(in oklch, var(--popover) 75%, transparent) !important;
+    border: 1px solid color-mix(in oklch, white 14%, transparent) !important;
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+      0 20px 60px rgba(0, 0, 0, 0.5) !important;
   }
   .status-dot {
     display: inline-block;
@@ -206,14 +310,32 @@
     border-radius: 9999px;
     background: color-mix(in oklch, var(--primary) 25%, rgba(255,255,255,0.15));
     color: var(--muted-foreground);
-    font-size: 10px;
-    line-height: 1;
+    font-size: 0; /* hide any text child like "✕" — we draw via ::before */
+    line-height: 0;
     transition: all 0.15s;
     cursor: pointer;
     border: none;
     padding: 0;
     flex-shrink: 0;
+    position: relative;
   }
+  /* Perfectly-centered X built from two rotated rectangles. Scales
+     with the container so 16px and 20px (and anything else) stay
+     balanced. */
+  .close-circle::before,
+  .close-circle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 50%;
+    height: 1.5px;
+    background: currentColor;
+    border-radius: 1px;
+    transform-origin: center;
+  }
+  .close-circle::before { transform: translate(-50%, -50%) rotate(45deg); }
+  .close-circle::after  { transform: translate(-50%, -50%) rotate(-45deg); }
   .close-circle:hover {
     background: color-mix(in oklch, var(--primary) 40%, rgba(255,255,255,0.2));
     color: var(--foreground);

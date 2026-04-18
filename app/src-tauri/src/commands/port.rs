@@ -14,10 +14,42 @@ use crate::types::{PortInfo, PortSpec};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
+
+// M6: cache the listening-ports scan so bursts of `port_status_for_script`
+// calls (Dashboard polls every 3s × N scripts) don't each re-shell out to
+// lsof. 500ms is tight enough that a user-visible port change still lands
+// within one poll cycle, loose enough to collapse the N≥5 fan-out we saw
+// in health-check 08.
+const LISTENING_PORTS_TTL: Duration = Duration::from_millis(500);
+
+static LISTENING_PORTS_CACHE: std::sync::OnceLock<StdMutex<Option<(Instant, Vec<PortInfo>)>>> =
+    std::sync::OnceLock::new();
+
+fn cache_cell() -> &'static StdMutex<Option<(Instant, Vec<PortInfo>)>> {
+    LISTENING_PORTS_CACHE.get_or_init(|| StdMutex::new(None))
+}
+
+#[cfg(test)]
+fn clear_listening_ports_cache() {
+    if let Ok(mut g) = cache_cell().lock() {
+        *g = None;
+    }
+}
 
 #[tauri::command]
 pub async fn list_ports() -> Result<Vec<PortInfo>, String> {
+    // Fast path: fresh cache.
+    {
+        if let Ok(guard) = cache_cell().lock() {
+            if let Some((ts, ref data)) = *guard {
+                if ts.elapsed() < LISTENING_PORTS_TTL {
+                    return Ok(data.clone());
+                }
+            }
+        }
+    }
     // -F field output: p<pid>, c<command>, n<host:port>, T<state>
     let output = Command::new("lsof")
         .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcnT"])
@@ -27,11 +59,18 @@ pub async fn list_ports() -> Result<Vec<PortInfo>, String> {
     if !output.status.success() {
         // lsof returns 1 when no results — treat empty stdout as empty list
         if output.stdout.is_empty() {
+            if let Ok(mut g) = cache_cell().lock() {
+                *g = Some((Instant::now(), Vec::new()));
+            }
             return Ok(vec![]);
         }
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_lsof(&text))
+    let parsed = parse_lsof(&text);
+    if let Ok(mut g) = cache_cell().lock() {
+        *g = Some((Instant::now(), parsed.clone()));
+    }
+    Ok(parsed)
 }
 
 /// Dedupe: same (pid, port) pair can appear multiple times (IPv4 + IPv6).
@@ -114,7 +153,7 @@ pub async fn kill_port(port: u16) -> Result<(), String> {
     }
     for &pid in &targets {
         unsafe {
-            libc_kill(pid as i32, 15); // SIGTERM
+            libc::kill(pid as i32, libc::SIGTERM);
         }
     }
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -122,7 +161,7 @@ pub async fn kill_port(port: u16) -> Result<(), String> {
     // because a different process may have bound to it in the meantime.
     for &pid in &targets {
         unsafe {
-            libc_kill(pid as i32, 9); // SIGKILL (no-op if already exited)
+            libc::kill(pid as i32, libc::SIGKILL); // no-op if already exited
         }
     }
     Ok(())
@@ -253,7 +292,7 @@ pub async fn list_ports_for_script_pid(root_pid: u32) -> Result<Vec<PortInfo>, S
 }
 
 /// Return the current working directory of `pid`, or None if lsof fails.
-fn lsof_cwd(pid: u32) -> Option<String> {
+pub(crate) fn lsof_cwd(pid: u32) -> Option<String> {
     let out = Command::new("lsof")
         .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-F", "n"])
         .output()
@@ -332,11 +371,6 @@ pub async fn set_port_alias(
         .map_err(|e| e.to_string())
 }
 
-// Thin wrapper over libc::kill to avoid pulling nix for 2 signals.
-unsafe extern "C" {
-    #[link_name = "kill"]
-    fn libc_kill(pid: i32, sig: i32) -> i32;
-}
 
 // ----------------------------------------------------------------------
 // S1: Declared port status + conflict detection + tunnel-oriented lookup
@@ -386,10 +420,10 @@ pub async fn tcp_probe(bind: &str, port: u16, timeout_ms: u64) -> bool {
         format!("{}:{}", host, port)
     };
     let fut = tokio::net::TcpStream::connect(&addr);
-    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await {
-        Ok(Ok(_)) => true,
-        _ => false,
-    }
+    matches!(
+        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await,
+        Ok(Ok(_))
+    )
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -526,15 +560,12 @@ pub async fn list_ports_for_script(
 
     // Append descendants from the existing heuristic, if running.
     if let Some(snap) = pm.list().into_iter().find(|s| s.id == script_id) {
-        match list_ports_for_script_pid(snap.pid).await {
-            Ok(v) => {
-                for info in v {
-                    if seen.insert(info.port) {
-                        out.push(info);
-                    }
+        if let Ok(v) = list_ports_for_script_pid(snap.pid).await {
+            for info in v {
+                if seen.insert(info.port) {
+                    out.push(info);
                 }
             }
-            Err(_) => {}
         }
     }
 
@@ -752,6 +783,32 @@ mod tests {
         mp.insert(42);
         let out = build_declared_status(&specs, &listing, &mp);
         assert!(out[0].reachable.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_ports_uses_cache_within_ttl() {
+        // M6: two back-to-back calls within TTL share the same cache row
+        // — verifiable by observing the cache contents. We don't spy on
+        // lsof itself (it's a real system call), but we can assert that
+        // the cache slot is populated after the first call and still
+        // present on the second.
+        clear_listening_ports_cache();
+        let _ = list_ports().await.unwrap();
+        let cached_first = {
+            let g = cache_cell().lock().unwrap();
+            g.clone()
+        };
+        assert!(cached_first.is_some(), "cache should be populated after first call");
+        let (ts_first, _) = cached_first.unwrap();
+        // Second call immediately — cache must be reused, so the
+        // timestamp doesn't advance.
+        let _ = list_ports().await.unwrap();
+        let cached_second = {
+            let g = cache_cell().lock().unwrap();
+            g.clone()
+        };
+        let (ts_second, _) = cached_second.unwrap();
+        assert_eq!(ts_first, ts_second, "TTL-fresh call must not re-scan lsof");
     }
 
     #[tokio::test]

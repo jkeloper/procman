@@ -35,10 +35,50 @@ fn serve_file(path: &str, data: &[u8]) -> Response<Body> {
     let mime = mime_guess::from_path(path)
         .first_or_octet_stream()
         .to_string();
+    let cache_control = cache_control_for(path);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime)
-        .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .header(header::CACHE_CONTROL, cache_control)
         .body(Body::from(data.to_vec()))
         .unwrap()
+}
+
+/// Service worker and manifest must never be cached; if they are, mobile
+/// PWAs get stuck on stale builds after a server upgrade. Everything else
+/// (hashed assets, icons) is fine at the default 1h.
+fn cache_control_for(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower == "sw.js"
+        || lower.ends_with("/sw.js")
+        || lower == "manifest.webmanifest"
+        || lower.ends_with("/manifest.webmanifest")
+        || lower == "manifest.json"
+        || lower.ends_with("/manifest.json")
+        || lower == "index.html"
+        || lower.ends_with("/index.html")
+    {
+        "no-store"
+    } else {
+        "public, max-age=3600"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_control_no_store_for_sw_and_manifest() {
+        assert_eq!(cache_control_for("sw.js"), "no-store");
+        assert_eq!(cache_control_for("manifest.webmanifest"), "no-store");
+        assert_eq!(cache_control_for("manifest.json"), "no-store");
+        assert_eq!(cache_control_for("index.html"), "no-store");
+    }
+
+    #[test]
+    fn cache_control_cacheable_for_assets() {
+        assert_eq!(cache_control_for("assets/app-abcd1234.js"), "public, max-age=3600");
+        assert_eq!(cache_control_for("icons/icon-192.png"), "public, max-age=3600");
+    }
 }

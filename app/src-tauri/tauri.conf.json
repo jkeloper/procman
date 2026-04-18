@@ -26,15 +26,34 @@
       "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* https://*.trycloudflare.com wss://*.trycloudflare.com; img-src 'self' data:; font-src 'self' data:"
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://github.com/<owner>/procman/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJlcGxhY2UgYmVmb3JlIHJlbGVhc2UgLS0gcnVuIGBwbnBtIHRhdXJpIHNpZ25lciBnZW5lcmF0ZWAK"
+    }
+  },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["dmg", "app"],
+    "category": "DeveloperTool",
+    "shortDescription": "Mac process manager GUI",
+    "longDescription": "procman - Local Mission Control for developers. Manage VSCode, terminal, Docker and Cloudflare tunnels in one screen.",
+    "copyright": "Copyright (c) 2026 procman",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": null
+    }
   }
 }

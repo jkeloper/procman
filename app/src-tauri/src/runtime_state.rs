@@ -122,7 +122,7 @@ impl RuntimeStore {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(&snap)
-            .map_err(|e| ConfigError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| ConfigError::Io(std::io::Error::other(e)))?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         std::io::Write::write_all(&mut tmp, json.as_bytes())?;

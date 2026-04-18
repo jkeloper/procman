@@ -181,7 +181,7 @@ pub async fn kill_cloudflared_pid(pid: u32) -> Result<(), String> {
         .output()
         .map_err(|e| format!("ps: {}", e))?;
     let cmd = String::from_utf8_lossy(&check.stdout);
-    let first_token = cmd.trim().split_whitespace().next().unwrap_or("");
+    let first_token = cmd.split_whitespace().next().unwrap_or("");
     if first_token != "cloudflared" && !first_token.ends_with("/cloudflared") {
         return Err(format!("PID {} is not a cloudflared process ({})", pid, cmd.trim()));
     }

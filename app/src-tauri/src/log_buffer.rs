@@ -14,6 +14,13 @@ use crate::types::LogStream;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LogLine {
+    /// Monotonically increasing sequence number. Typed as `u64` on the
+    /// Rust side but received as JS `number` (safe integer range is
+    /// 2^53 − 1). At a sustained 100k lines/sec — far above anything a
+    /// human-run dev machine will hit — reaching 2^53 would take over
+    /// 2,800 years, so the mismatch is documented but not fixed. If we
+    /// ever need to worry about it, serialize via `#[serde(with)]` as a
+    /// string and upgrade the FE zod schema to `z.coerce.bigint()`.
     pub seq: u64,
     pub ts_ms: i64,
     pub stream: LogStream,
@@ -54,6 +61,7 @@ impl LogBuffer {
         self.buf.iter().cloned().collect()
     }
 
+    #[allow(dead_code)]
     pub fn tail(&self, n: usize) -> Vec<LogLine> {
         let take = n.min(self.buf.len());
         self.buf
@@ -63,6 +71,7 @@ impl LogBuffer {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.buf.len()
     }

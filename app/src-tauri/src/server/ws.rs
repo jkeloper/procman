@@ -5,6 +5,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::HeaderMap,
     response::IntoResponse,
 };
 use serde::Serialize;
@@ -14,9 +15,32 @@ use super::ServerState;
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    // If the client negotiated our token-bearing subprotocol, echo it back
+    // on the response so the browser accepts the connection. (The
+    // require_token middleware already validated the token.)
+    let selected = headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            s.split(',')
+                .map(str::trim)
+                .find(|p| p.starts_with("procman-token."))
+                .map(str::to_string)
+        });
+
+    let upgrade = ws.on_upgrade(move |socket| handle_socket(socket, state));
+    if let Some(proto) = selected {
+        let mut resp = upgrade.into_response();
+        if let Ok(val) = axum::http::HeaderValue::from_str(&proto) {
+            resp.headers_mut().insert("sec-websocket-protocol", val);
+        }
+        resp
+    } else {
+        upgrade.into_response()
+    }
 }
 
 #[derive(Serialize)]
@@ -59,8 +83,11 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
         }
     });
 
-    // Subscribe to all log://* by tracking running processes.
-    // Simpler approach: poll process list every 1s and subscribe per-script.
+    // Cancel channel lets us *gracefully* unwind the log_task so it can
+    // unlisten its own per-script subscriptions. Previously we used abort(),
+    // which leaked every log listener on disconnect — one per running process
+    // every reconnect.
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
     let tx_log = tx.clone();
     let app_for_log = app.clone();
     let pm = state.pm.clone();
@@ -107,7 +134,15 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
                     app_for_log.unlisten(h);
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(1000)) => {}
+                _ = &mut cancel_rx => break,
+            }
+        }
+        // Graceful teardown: release every per-script listener we still hold.
+        for (_, h) in active.drain() {
+            app_for_log.unlisten(h);
         }
     });
 
@@ -129,5 +164,7 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
     }
 
     app.unlisten(status_handle);
-    log_task.abort();
+    // Signal graceful shutdown so log_task can unlisten before exiting.
+    let _ = cancel_tx.send(());
+    let _ = log_task.await;
 }

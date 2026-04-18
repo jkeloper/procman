@@ -62,7 +62,10 @@ export interface ProjectsPayload {
   projects: Array<{
     id: string;
     name: string;
-    path: string;
+    // SEC-14: server omits `path` from the remote payload to avoid
+    // leaking local filesystem layout. Typed as optional so clients
+    // don't rely on it.
+    path?: string;
     scripts: Array<{
       id: string;
       name: string;
@@ -127,9 +130,13 @@ export function openStream(
   const connect = () => {
     const pair = loadPair();
     if (!pair) return;
-    const url = `${baseUrl().replace(/^http/, 'ws')}/api/stream?token=${encodeURIComponent(pair.token)}`;
+    // Token delivered via WebSocket subprotocol (RFC 6455 Sec-WebSocket-Protocol)
+    // rather than `?token=` query string. Query strings land in HTTP access
+    // logs and proxies, whereas subprotocols do not. The server accepts both
+    // transitionally (Worker A).
+    const url = `${baseUrl().replace(/^http/, 'ws')}/api/stream`;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url, [`procman-token.${pair.token}`]);
     } catch {
       scheduleReconnect();
       return;

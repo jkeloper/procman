@@ -228,7 +228,7 @@ export function VSCodeImportDialog({
                                 }`}
                                 onClick={() => toggleExpand(i, 'raw')}
                               >
-                                원문 보기
+                                View raw
                               </button>
                             </div>
                             {exp === 'parsed' ? (
@@ -253,7 +253,7 @@ export function VSCodeImportDialog({
                                 )}
                               </div>
                             ) : (
-                              <pre className="overflow-x-auto rounded border border-border/60 bg-[#0a0a0a] p-2 font-mono text-[10px] leading-snug text-zinc-200">
+                              <pre className="overflow-x-auto rounded border border-border/60 bg-log-bg p-2 font-mono text-[11px] leading-snug text-log-fg">
                                 {c.raw_json}
                               </pre>
                             )}

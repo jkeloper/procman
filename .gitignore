@@ -35,6 +35,35 @@ spikes/**/*.csv
 .env
 .env.local
 .env.*.local
+scripts/release.env
 
 # procman runtime
 ~/.procman/
+
+# AI agent artifacts — NEVER commit
+.claude/
+memory/
+MEMORY.md
+CLAUDE.local.md
+*.private.md
+
+# Internal-only docs (full CHANGELOG/TODO + security audit history)
+docs/private/
+
+# Local secrets / certificates
+*.p12
+*.mobileprovision
+*.pem
+*.key
+
+# Local runtime data (contain user paths/commands)
+config.yaml
+runtime.json
+logs.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+crash.log
+audit.log*
+server.crt
+server.key

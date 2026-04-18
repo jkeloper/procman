@@ -21,15 +21,20 @@ pub struct AppConfig {
     pub groups: Vec<Group>,
     #[serde(default)]
     pub settings: AppSettings,
+    /// Worker J: docker compose stacks registered by absolute path. Optional;
+    /// pre-existing config.yaml files without this key remain valid.
+    #[serde(default)]
+    pub compose_projects: Vec<ComposeProject>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "2".to_string(),
+            version: "3".to_string(),
             projects: Vec::new(),
             groups: Vec::new(),
             settings: AppSettings::default(),
+            compose_projects: Vec::new(),
         }
     }
 }
@@ -65,6 +70,11 @@ pub struct Script {
     pub ports: Vec<PortSpec>,
     #[serde(default)]
     pub auto_restart: bool,
+    /// v3: Structured auto-restart policy (max_retries / backoff_ms / jitter_ms).
+    /// When present AND `enabled`, supersedes the legacy `auto_restart` bool.
+    /// When `None`, falls back to `auto_restart` (exponential backoff).
+    #[serde(default)]
+    pub auto_restart_policy: Option<AutoRestartPolicy>,
     /// M5: Optional path to a .env file. Variables are exported before running.
     #[serde(default)]
     pub env_file: Option<String>,
@@ -110,6 +120,42 @@ fn default_proto() -> PortProto {
     PortProto::Tcp
 }
 
+/// v3: Auto-restart policy. When `enabled`, the watcher restarts a crashed
+/// script after `backoff_ms + rand(0..jitter_ms)` up to `max_retries` times.
+/// `max_retries = 0` means unlimited (matches the legacy `auto_restart: true`
+/// behaviour with no ceiling).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoRestartPolicy {
+    pub enabled: bool,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    #[serde(default = "default_backoff_ms")]
+    pub backoff_ms: u32,
+    #[serde(default = "default_jitter_ms")]
+    pub jitter_ms: u32,
+}
+
+fn default_max_retries() -> u32 {
+    5
+}
+fn default_backoff_ms() -> u32 {
+    1000
+}
+fn default_jitter_ms() -> u32 {
+    500
+}
+
+impl Default for AutoRestartPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_retries: default_max_retries(),
+            backoff_ms: default_backoff_ms(),
+            jitter_ms: default_jitter_ms(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PortProto {
@@ -142,6 +188,19 @@ pub struct AppSettings {
     /// User-defined aliases for ports (e.g. 3000 → "Frontend", 5432 → "Postgres").
     #[serde(default)]
     pub port_aliases: std::collections::HashMap<u16, String>,
+    /// v3: User has explicitly opted into the LAN remote server mode.
+    /// Server routes use this as a gate so that discovery on a coffee-shop
+    /// Wi-Fi can never surface procman without the user's intent.
+    #[serde(default)]
+    pub lan_mode_opt_in: bool,
+    /// v3: Launch procman at login via a LaunchAgent plist.
+    /// Actual plist management is handled by `autostart.rs`; this field
+    /// is the user-visible source of truth that the FE toggles.
+    #[serde(default)]
+    pub start_at_login: bool,
+    /// v3: First-run onboarding has been completed. Hides welcome / tips.
+    #[serde(default)]
+    pub onboarded: bool,
 }
 
 impl Default for AppSettings {
@@ -151,6 +210,9 @@ impl Default for AppSettings {
             port_poll_interval_ms: 1000,
             theme: "system".to_string(),
             port_aliases: std::collections::HashMap::new(),
+            lan_mode_opt_in: false,
+            start_at_login: false,
+            onboarded: false,
         }
     }
 }
@@ -165,6 +227,32 @@ impl Default for AppSettings {
 pub enum LogStream {
     Stdout,
     Stderr,
+}
+
+/// Worker J: a registered `docker-compose.yml` stack. Persisted in config.yaml.
+/// Execution is always "path-by-reference" — procman never copies the file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ComposeProject {
+    pub id: String,
+    pub name: String,
+    /// Absolute path to a docker-compose.yml / compose.yaml.
+    pub compose_path: String,
+    /// Optional `-p` project-name override. When None, docker derives it
+    /// from the file's parent directory.
+    #[serde(default)]
+    pub project_name: Option<String>,
+}
+
+/// Worker J: runtime-only shape returned by `docker compose ps --format json`.
+/// Not persisted.
+#[derive(Debug, Clone, Serialize)]
+pub struct ComposeService {
+    pub service: String,
+    pub image: Option<String>,
+    /// running / exited / paused / ... (raw string from docker)
+    pub state: String,
+    /// Raw port strings e.g. "0.0.0.0:5432->5432/tcp". Displayed as-is.
+    pub ports: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +293,7 @@ mod tests {
                         expected_port: Some(5173),
                         ports: Vec::new(),
                         auto_restart: false,
+                        auto_restart_policy: None,
                         env_file: None,
                         depends_on: Vec::new(),
                     },
@@ -215,6 +304,7 @@ mod tests {
                         expected_port: None,
                         ports: Vec::new(),
                         auto_restart: true,
+                        auto_restart_policy: None,
                         env_file: None,
                         depends_on: Vec::new(),
                     },
@@ -233,11 +323,36 @@ mod tests {
                 port_poll_interval_ms: 500,
                 theme: "dark".into(),
                 port_aliases: std::collections::HashMap::new(),
+                lan_mode_opt_in: false,
+                start_at_login: false,
+                onboarded: false,
             },
+            compose_projects: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         let back: AppConfig = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn app_config_accepts_missing_compose_projects() {
+        // Legacy config.yaml without the new key deserializes cleanly.
+        let yaml = "version: '3'\nprojects: []\ngroups: []\n";
+        let cfg: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.compose_projects.is_empty());
+    }
+
+    #[test]
+    fn compose_project_roundtrip() {
+        let cp = ComposeProject {
+            id: "u1".into(),
+            name: "stack".into(),
+            compose_path: "/tmp/docker-compose.yml".into(),
+            project_name: Some("mystack".into()),
+        };
+        let yaml = serde_yaml::to_string(&cp).unwrap();
+        let back: ComposeProject = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(cp, back);
     }
 
     #[test]
@@ -296,6 +411,7 @@ mod tests {
                 },
             ],
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         };
@@ -303,6 +419,31 @@ mod tests {
         let back: Script = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(s, back);
         assert_eq!(back.ports.len(), 3);
+    }
+
+    #[test]
+    fn auto_restart_policy_default_values() {
+        let p = AutoRestartPolicy::default();
+        assert!(p.enabled);
+        assert_eq!(p.max_retries, 5);
+        assert_eq!(p.backoff_ms, 1000);
+        assert_eq!(p.jitter_ms, 500);
+    }
+
+    #[test]
+    fn auto_restart_policy_yaml_partial_fills_defaults() {
+        // Only `enabled` specified; serde defaults fill the rest.
+        let yaml = "enabled: true\n";
+        let p: AutoRestartPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p, AutoRestartPolicy::default());
+    }
+
+    #[test]
+    fn app_settings_defaults_v3_fields() {
+        let s = AppSettings::default();
+        assert!(!s.lan_mode_opt_in);
+        assert!(!s.start_at_login);
+        assert!(!s.onboarded);
     }
 
     #[test]
@@ -314,6 +455,7 @@ mod tests {
             expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
+            auto_restart_policy: None,
             env_file: None,
             depends_on: Vec::new(),
         };

@@ -1,73 +1,78 @@
-# React + TypeScript + Vite
+# procman — Mobile Companion
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+데스크톱 procman을 외출·침대·다른 방에서 조작하기 위한 모바일 동반 앱.
+- **PWA** (React/TS + Capacitor) — 브라우저에서 직접 설치 가능
+- **iOS 네이티브 셸** (Capacitor) — App Store 우회 설치 시 사용
 
-Currently, two official plugins are available:
+전체 개요는 [루트 README](../README.md) 참고. 데스크톱 앱은 [app/](../app/).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## 아키텍처
+```
+[Desktop procman] --REST/WS--> [Cloudflare Tunnel] --HTTPS--> [Mobile PWA/iOS]
+         ↑
+   remote.rs  (REST + WebSocket, CORS: trycloudflare.com + LAN IPs)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+데스크톱 `src-tauri/src/remote.rs`가 REST + WebSocket 서버를 띄우고, `cloudflared` 터널로 외부 노출. 모바일은 QR 코드 1회 스캔으로 페어링.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Prerequisites
+- Node 20+
+- pnpm 10
+- (iOS 빌드 시) Xcode 15+ + Apple Developer 계정
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## 개발 모드
+```bash
+cd mobile
+pnpm install
+pnpm dev                              # Vite PWA (port 5174)
 ```
+
+## PWA 빌드 & 배포
+```bash
+pnpm build                            # dist/
+# dist/를 정적 호스팅(GitHub Pages, Vercel 등)에 배포
+# PWA manifest가 포함되어 있어 홈 화면 추가 시 풀스크린으로 실행
+```
+
+## iOS 빌드
+```bash
+pnpm build
+npx cap sync ios
+npx cap open ios                      # Xcode로 열고 서명 + 빌드
+```
+
+iOS 프로젝트는 [ios/App/](ios/App/)에 커밋되어 있음. Capacitor가 자동 생성한 부분(`ios/App/CapApp-SPM/`)은 건드리지 말 것.
+
+## 페어링 플로우
+1. 데스크톱 procman → Remote Access 카드에서 "터널 시작"
+2. 화면에 QR 코드 + pairing token 표시
+3. 모바일에서 PWA 열고 QR 스캔 → 자동으로 endpoint + token 저장
+4. 이후 연결 시 저장된 token 재사용
+
+## 기능 (S1-S5 전부 미러링)
+- 프로젝트 리스트 (펼쳐진 상태 유지 — start/stop 후에도)
+- 스크립트 start/stop/restart + 실시간 상태
+- 로그 뷰어 (substring 검색 포함)
+- 포트 dashboard + liveness dot
+- CPU/RSS 메트릭 표시
+- Cloudflare tunnel run/kill
+- 그룹 실행
+- ⌘K 커맨드 팔레트 (모바일에서는 검색 버튼)
+
+## 디렉토리 구조
+```
+mobile/
+├── src/                              # React PWA 소스 (app/src와 공유 컴포넌트 일부 재사용)
+│   ├── api/                          # REST + WebSocket 클라이언트
+│   ├── components/                   # 데스크톱 UI의 모바일 포팅
+│   └── pairing/                      # QR 스캐너 + token 저장소
+├── public/                           # PWA manifest + 아이콘
+├── ios/App/                          # Capacitor iOS 프로젝트 (Xcode workspace)
+└── capacitor.config.ts
+```
+
+## 보안 경계
+- 터널 endpoint는 pairing token 없이는 의미있는 작업 불가
+- CORS는 `trycloudflare.com` + LAN IPs로 제한 (`remote.rs`)
+- Governor rate limiting은 Tauri 컨텍스트에서 실패하므로 사용하지 않음 (참고: [SECURITY.md](../SECURITY.md))
+- 신뢰 경계: 터널 endpoint를 타인에게 공유하지 말 것

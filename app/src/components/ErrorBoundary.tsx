@@ -30,10 +30,10 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="max-w-md space-y-4 text-center">
             <div className="text-[48px]">⚠️</div>
             <h1 className="text-[20px] font-bold text-foreground">Something went wrong</h1>
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-[14px] text-muted-foreground">
               {this.state.error?.message ?? 'An unexpected error occurred.'}
             </p>
-            <pre className="max-h-40 overflow-auto rounded-lg bg-muted/30 p-3 text-left font-mono text-[11px] text-muted-foreground">
+            <pre className="max-h-40 overflow-auto rounded-lg bg-muted/30 p-3 text-left font-mono text-[12px] text-muted-foreground">
               {this.state.error?.stack?.slice(0, 500)}
             </pre>
             <button
