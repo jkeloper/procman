@@ -1,0 +1,25 @@
+---
+import { site } from '~/config/site';
+---
+
+<footer class="border-t border-[var(--border)] mt-12">
+  <div class="container-x py-10 flex flex-col sm:flex-row gap-6 sm:items-center justify-between text-sm text-[var(--muted)]">
+    <div class="flex items-center gap-2">
+      <img src="/icon.png" alt="" width="20" height="20" class="rounded" />
+      <span class="text-[var(--fg)] font-medium">{site.name}</span>
+      <span>&middot;</span>
+      <a href={`https://${site.domain}`} class="hover:text-[var(--fg)]">{site.domain}</a>
+      <span>&middot;</span>
+      <span>{site.license} License</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href={site.githubUrl} class="hover:text-[var(--fg)]" target="_blank" rel="noreferrer">GitHub</a>
+      <a href={site.latestReleaseUrl} class="hover:text-[var(--fg)]" target="_blank" rel="noreferrer">Releases</a>
+      <span>
+        Built by
+        <a href={site.author.url} class="hover:text-[var(--fg)]" target="_blank" rel="noreferrer">@{site.author.name}</a>
+      </span>
+      <span>&copy; {site.year}</span>
+    </div>
+  </div>
+</footer>

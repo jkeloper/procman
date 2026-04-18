@@ -1,0 +1,59 @@
+---
+const features = [
+  {
+    title: 'Scripts',
+    desc: 'Start, stop, and restart your dev servers in one click. Login-shell wrapped for nvm / pyenv parity.',
+    icon: '\u2699\uFE0F',
+  },
+  {
+    title: 'Logs',
+    desc: '5,000-line ring buffer with full-text search across history, powered by SQLite FTS.',
+    icon: '\u{1F4C4}',
+  },
+  {
+    title: 'Ports',
+    desc: 'Live TCP liveness probe, multi-port PortSpec, and one-click conflict resolution.',
+    icon: '\u{1F50C}',
+  },
+  {
+    title: 'Groups',
+    desc: '"Morning Stack" launches everything you need at once, with dependency-aware ordering.',
+    icon: '\u{1F525}',
+  },
+  {
+    title: 'Mobile',
+    desc: 'iOS and PWA companion apps. QR-pair from your desk for instant remote control.',
+    icon: '\u{1F4F1}',
+  },
+  {
+    title: 'Auto-restart',
+    desc: 'Policy-driven recovery with exponential backoff and jitter when your scripts crash.',
+    icon: '\u{1F504}',
+  },
+];
+---
+
+<section id="features" class="container-x py-16 sm:py-24">
+  <div class="text-center mb-12 fade-in">
+    <span class="badge mb-4">Features</span>
+    <h2 class="text-3xl sm:text-4xl font-semibold tracking-tight">
+      Everything you open 40 times a day, unified.
+    </h2>
+    <p class="mt-3 text-[var(--muted)] max-w-xl mx-auto">
+      Built for solo founders juggling 10 VS Code windows, Docker, a tunnel, and a half-forgotten migration script.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    {features.map((f) => (
+      <div class="card fade-in">
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-4"
+             style="background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent);">
+          <span>{f.icon}</span>
+        </div>
+        <h3 class="font-semibold text-lg mb-2">{f.title}</h3>
+        <p class="text-sm text-[var(--muted)] leading-relaxed">{f.desc}</p>
+      </div>
+    ))}
+  </div>
+</section>

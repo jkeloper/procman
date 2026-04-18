@@ -1,0 +1,26 @@
+---
+const shots = [
+  { src: '/screenshots/dashboard.svg', caption: 'Dashboard — every process at a glance' },
+  { src: '/screenshots/logs.svg', caption: 'Log viewer — 5K ring buffer + FTS search' },
+  { src: '/screenshots/ports.svg', caption: 'Port manager — liveness + one-click kill' },
+  { src: '/screenshots/mobile.svg', caption: 'Mobile companion — control from anywhere' },
+];
+---
+
+<section class="container-x py-12 sm:py-16">
+  <div class="text-center mb-10 fade-in">
+    <span class="badge mb-4">Screenshots</span>
+    <h2 class="text-3xl sm:text-4xl font-semibold tracking-tight">See it in action</h2>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    {shots.map((s) => (
+      <figure class="card overflow-hidden p-0 fade-in">
+        <img src={s.src} alt={s.caption} loading="lazy" class="w-full h-auto block" />
+        <figcaption class="px-4 py-3 text-sm text-[var(--muted)] border-t border-[var(--border)]">
+          {s.caption}
+        </figcaption>
+      </figure>
+    ))}
+  </div>
+</section>

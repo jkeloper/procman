@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <rect width="1600" height="1000" fill="#07110a"/>
+  <rect x="60" y="60" width="1480" height="80" rx="14" fill="#0f2418" stroke="#1b3a28"/>
+  <rect x="60" y="170" width="1480" height="770" rx="14" fill="#050c07" stroke="#1b3a28"/>
+  <g font-family="JetBrains Mono,Menlo,monospace" font-size="18">
+    <text x="90" y="220" fill="#4ade80">[12:04:01] <tspan fill="#8aa396">server listening on :3000</tspan></text>
+    <text x="90" y="250" fill="#22d3ee">[12:04:02] <tspan fill="#e7f1ea">GET /api/users 200 12ms</tspan></text>
+    <text x="90" y="280" fill="#facc15">[12:04:02] <tspan fill="#e7f1ea">GET /api/orders 200 31ms</tspan></text>
+    <text x="90" y="310" fill="#f87171">[12:04:03] <tspan fill="#fca5a5">ERR  redis: connection refused</tspan></text>
+    <text x="90" y="340" fill="#4ade80">[12:04:04] <tspan fill="#e7f1ea">retrying... backoff=1.2s</tspan></text>
+  </g>
+  <text x="800" y="680" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="48" fill="#4ade80" text-anchor="middle" font-weight="600">Logs placeholder</text>
+  <text x="800" y="730" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="20" fill="#8aa396" text-anchor="middle">Replace web/public/screenshots/logs.svg</text>
+</svg>

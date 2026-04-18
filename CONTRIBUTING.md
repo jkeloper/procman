@@ -12,7 +12,7 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ### Getting Started
 ```bash
-git clone https://github.com/YOUR_USERNAME/procman.git
+git clone https://github.com/jkeloper/procman.git
 cd procman/app
 pnpm install
 source "$HOME/.cargo/env"

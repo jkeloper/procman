@@ -1,10 +1,91 @@
 # procman — Mobile Companion
 
+A mobile companion for controlling desktop procman from outside, in bed, or across the house.
+- **PWA** (React/TS + Capacitor) — installable straight from the browser
+- **iOS native shell** (Capacitor) — for sideloading outside the App Store
+
+For the overall project overview see the [root README](../README.md). The desktop app lives in [app/](../app/).
+
+## Architecture
+```
+[Desktop procman] --REST/WS--> [Cloudflare Tunnel] --HTTPS--> [Mobile PWA/iOS]
+         ↑
+   remote.rs  (REST + WebSocket, CORS: trycloudflare.com + LAN IPs)
+```
+
+The desktop `src-tauri/src/remote.rs` hosts a REST + WebSocket server and exposes it through a `cloudflared` tunnel. The mobile client pairs in one QR-code scan.
+
+## Prerequisites
+- Node 20+
+- pnpm 10
+- (iOS builds only) Xcode 15+ and an Apple Developer account
+
+## Dev mode
+```bash
+cd mobile
+pnpm install
+pnpm dev                              # Vite PWA (port 5174)
+```
+
+## PWA build & deploy
+```bash
+pnpm build                            # → dist/
+# Deploy dist/ to any static host (GitHub Pages, Vercel, etc.).
+# The PWA manifest is bundled, so "Add to Home Screen" gives a fullscreen install.
+```
+
+## iOS build
+```bash
+pnpm build
+npx cap sync ios
+npx cap open ios                      # open in Xcode, sign, build
+```
+
+The iOS project is committed under [ios/App/](ios/App/). Leave the Capacitor-generated parts (`ios/App/CapApp-SPM/`) untouched.
+
+## Pairing flow
+1. Desktop procman → Remote Access card → "Start Tunnel"
+2. The desktop shows a QR code + pairing token
+3. Open the PWA on mobile, scan the QR → endpoint + token saved automatically
+4. Subsequent connections reuse the stored token
+
+## Features (full S1–S5 mirror)
+- Project list (stays expanded across start/stop)
+- Script start/stop/restart with live status
+- Log viewer (with substring search)
+- Port dashboard + liveness dot
+- CPU/RSS metric display
+- Cloudflare tunnel run/kill
+- Group execution
+- ⌘K command palette (surfaced as a search button on mobile)
+
+## Directory layout
+```
+mobile/
+├── src/                              # React PWA source (shares some components with app/src)
+│   ├── api/                          # REST + WebSocket client
+│   ├── components/                   # mobile-ported desktop UI
+│   └── pairing/                      # QR scanner + token store
+├── public/                           # PWA manifest + icons
+├── ios/App/                          # Capacitor iOS project (Xcode workspace)
+└── capacitor.config.ts
+```
+
+## Security boundary
+- The tunnel endpoint is useless without the pairing token
+- CORS is restricted to `trycloudflare.com` + LAN IPs (`remote.rs`)
+- Governor rate limiting doesn't work under the Tauri context and is intentionally not used (see [SECURITY.md](../SECURITY.md))
+- Trust boundary: do not share the tunnel endpoint with anyone you don't trust
+
+---
+
+# procman — 모바일 동반 앱 (한국어)
+
 데스크톱 procman을 외출·침대·다른 방에서 조작하기 위한 모바일 동반 앱.
 - **PWA** (React/TS + Capacitor) — 브라우저에서 직접 설치 가능
 - **iOS 네이티브 셸** (Capacitor) — App Store 우회 설치 시 사용
 
-전체 개요는 [루트 README](../README.md) 참고. 데스크톱 앱은 [app/](../app/).
+전체 프로젝트 개요는 [루트 README](../README.md) 참고. 데스크톱 앱은 [app/](../app/).
 
 ## 아키텍처
 ```

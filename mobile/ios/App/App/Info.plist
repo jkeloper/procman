@@ -32,6 +32,8 @@
 	<array>
 		<string>armv7</string>
 	</array>
+	<key>UIRequiresFullScreen</key>
+	<false/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -48,7 +50,11 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>QR 코드를 스캔하여 Mac의 procman과 연결하기 위해 카메라 접근이 필요합니다.</string>
+	<string>procman uses the camera to scan QR codes shown by the procman desktop app for instant pairing.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>procman connects to your Mac on the local network to control running processes.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

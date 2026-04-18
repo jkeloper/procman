@@ -5,6 +5,7 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 ## [Unreleased]
 
 ### Added
+- **iOS App Store prep** — `PrivacyInfo.xcprivacy` privacy manifest, `NSLocalNetworkUsageDescription` + `ITSAppUsesNonExemptEncryption=false` + `UIRequiresFullScreen=false` in Info.plist, "How it works" explainer card on the pair screen so reviewers understand the companion-app model. Submission checklist and review notes in `docs/private/` (gitignored).
 - **Auto-updater** — Tauri updater plugin wired to GitHub Releases. Check & install from Settings.
 - **Release automation** — `scripts/release.sh` and `.github/workflows/release.yml` build, codesign (Developer ID), and notarize DMGs. Tag push (`v*.*.*`) triggers a draft Release.
 - **Docker Compose integration** — register `docker-compose.yml` stacks, one-click up/down/ps from the dashboard.

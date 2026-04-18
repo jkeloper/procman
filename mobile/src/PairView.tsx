@@ -22,6 +22,7 @@ export function PairView({ onPaired }: Props) {
   const [busy, setBusy] = useState(false);
   const [abortCtrl, setAbortCtrl] = useState<AbortController | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   function cancel() {
     abortCtrl?.abort();
@@ -141,11 +142,54 @@ export function PairView({ onPaired }: Props) {
   }
 
   return (
-    <div className="page center-page">
+    <div className="page center-page" style={{ overflow: 'auto' }}>
       <div className="login-card">
         <div className="login-logo"><img src="/icon-192.png" alt="procman" style={{width:72,height:72,borderRadius:16}} /></div>
         <h1 className="login-title">procman</h1>
-        <p className="login-sub">Connect to your Mac</p>
+        <p className="login-sub">Companion app for procman on macOS</p>
+
+        {/* What this app is — visible before pairing, for App Store reviewers and new users.
+            TODO(post-launch): optional "demo mode" with stub data for zero-setup exploration. */}
+        <div style={{
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 12,
+          padding: 14,
+          marginBottom: 16,
+          fontSize: 13,
+          lineHeight: 1.5,
+          color: 'var(--fg2)',
+          textAlign: 'left',
+        }}>
+          <div style={{ color: 'var(--fg)', fontWeight: 600, marginBottom: 6 }}>
+            How it works
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 18 }}>
+            <li>Install procman on your Mac (<a href="https://procman.kr" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>procman.kr</a>)</li>
+            <li>Open Dashboard &rarr; Remote Access &rarr; Start</li>
+            <li>Scan the QR code or paste the token below</li>
+          </ol>
+          <button
+            type="button"
+            onClick={() => setShowHelp((v) => !v)}
+            style={{
+              marginTop: 8,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--primary)',
+              padding: 0,
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            {showHelp ? 'Hide details' : 'What does this app do?'}
+          </button>
+          {showHelp && (
+            <div style={{ marginTop: 8, color: 'var(--fg3)', fontSize: 12 }}>
+              procman mobile is a remote control for the procman desktop app on macOS. It lets you start, stop, and watch logs of your dev processes (servers, Docker, tunnels) from your phone. The app cannot function without a paired Mac running procman.
+            </div>
+          )}
+        </div>
 
         {/* Mode toggle */}
         <div style={{

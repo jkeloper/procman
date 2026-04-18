@@ -5,7 +5,7 @@
 If you discover a security vulnerability in procman, please report it responsibly:
 
 1. **Do NOT open a public GitHub issue**
-2. Email: [create a GitHub security advisory](https://github.com/YOUR_USERNAME/procman/security/advisories/new)
+2. Email: [create a GitHub security advisory](https://github.com/jkeloper/procman/security/advisories/new)
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce

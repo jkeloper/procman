@@ -1,5 +1,31 @@
 # Week 0 Spikes (Archival)
 
+> ⚠️ **This directory is a historical record of the 2026-04-05 Week 0 spike process.**
+> For current development status, see the [root README](../README.md) and [TODO.md](../TODO.md).
+
+## Outcome summary
+Tauri v2 locked in. Every gate passed, MVP → Post-MVP S1–S5 → mobile all shipped afterwards.
+
+Consolidated final verdict: [FINAL-VERDICT.md](FINAL-VERDICT.md)
+
+## Spike list
+| # | Directory | Result | Verdict |
+|---|---------|------|---------|
+| S1 | [s1-stdout/](s1-stdout/) | ✅ GO — 53k events/sec, zero drops | [REPORT.md](s1-stdout/REPORT.md) |
+| S2 | [s2-pty/](s2-pty/) | ✅ GO — docker/python/ANSI all clean | [REPORT.md](s2-pty/REPORT.md) |
+| S3 | [s3-xterm/](s3-xterm/) | ✅ effectively GO — avg 59.9fps | [REPORT.md](s3-xterm/REPORT.md) |
+| S4 | (skipped) | User chose Option C — risk accepted | — |
+
+## Directory layout
+- `tauri-harness/` — original Tauri v2 spike harness (later promoted to `app/` via `git mv` to preserve history)
+- `s1-stdout/`, `s2-pty/`, `s3-xterm/` — measurement/verdict artifacts per spike
+
+The Electron Plan B skeleton was removed once Tauri was confirmed (no longer needed).
+
+---
+
+# Week 0 스파이크 (Archival, 한국어)
+
 > ⚠️ **이 디렉토리는 2026-04-05 Week 0 스파이크 과정의 역사 기록입니다.**
 > 현재 개발 상태는 [루트 README](../README.md)와 [TODO.md](../TODO.md) 참고.
 

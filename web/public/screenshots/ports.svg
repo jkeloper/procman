@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <rect width="1600" height="1000" fill="#07110a"/>
+  <g transform="translate(80,80)">
+    <rect width="1440" height="120" rx="16" fill="#0f2418" stroke="#1b3a28"/>
+    <text x="30" y="72" fill="#e7f1ea" font-family="system-ui,sans-serif" font-size="28" font-weight="600">Port Manager</text>
+  </g>
+  <g transform="translate(80,230)" font-family="JetBrains Mono,Menlo,monospace" font-size="20" fill="#e7f1ea">
+    <rect width="1440" height="80" rx="12" fill="#0f2418" stroke="#1b3a28"/>
+    <circle cx="40" cy="40" r="10" fill="#22c55e"/>
+    <text x="70" y="48">:3000</text>
+    <text x="180" y="48" fill="#8aa396">next dev</text>
+    <text x="400" y="48" fill="#8aa396">reachable 6ms</text>
+  </g>
+  <g transform="translate(80,330)" font-family="JetBrains Mono,Menlo,monospace" font-size="20" fill="#e7f1ea">
+    <rect width="1440" height="80" rx="12" fill="#0f2418" stroke="#1b3a28"/>
+    <circle cx="40" cy="40" r="10" fill="#22c55e"/>
+    <text x="70" y="48">:5432</text>
+    <text x="180" y="48" fill="#8aa396">postgres</text>
+  </g>
+  <g transform="translate(80,430)" font-family="JetBrains Mono,Menlo,monospace" font-size="20" fill="#e7f1ea">
+    <rect width="1440" height="80" rx="12" fill="#1a0d0d" stroke="#3a1b1b"/>
+    <circle cx="40" cy="40" r="10" fill="#f87171"/>
+    <text x="70" y="48">:6379</text>
+    <text x="180" y="48" fill="#fca5a5">redis (conflict — PID 23451)</text>
+    <rect x="1280" y="20" width="140" height="40" rx="10" fill="#22c55e"/>
+    <text x="1350" y="48" text-anchor="middle" fill="#04160a" font-weight="600">Kill</text>
+  </g>
+  <text x="800" y="760" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="44" fill="#4ade80" text-anchor="middle" font-weight="600">Ports placeholder</text>
+  <text x="800" y="810" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="20" fill="#8aa396" text-anchor="middle">Replace web/public/screenshots/ports.svg</text>
+</svg>
