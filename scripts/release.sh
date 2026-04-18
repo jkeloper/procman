@@ -111,6 +111,12 @@ else
   log "Building Tauri release (pnpm tauri build)"
   cd "$APP_DIR"
   pnpm install --frozen-lockfile
+  # Let Tauri sign all nested binaries inside-out. `--deep` post-sign is
+  # deprecated by Apple and misses entitlements on nested Mach-Os, which
+  # surfaces as notarytool status:Invalid.
+  if [[ "$IDENTITY" != "-" ]]; then
+    export APPLE_SIGNING_IDENTITY="$IDENTITY"
+  fi
   if ! pnpm tauri build --bundles dmg app; then
     err "Tauri build failed"; exit 2
   fi
@@ -124,23 +130,28 @@ if [[ -z "$DMG_PATH" || -z "$APP_PATH" ]]; then
   exit 2
 fi
 
-# ───────── 5. Codesign ─────────
-log "Signing .app with identity: $IDENTITY"
-if ! codesign --force --deep --options runtime \
-     --entitlements "$TAURI_DIR/Entitlements.plist" \
-     --sign "$IDENTITY" "$APP_PATH"; then
-  err "codesign failed"; exit 3
+# ───────── 5. Codesign verification ─────────
+# Signing happens inside `tauri build` via APPLE_SIGNING_IDENTITY env.
+# Here we only verify + optionally re-sign the DMG container.
+log "Verifying .app signature"
+if ! codesign -dv --verbose=2 "$APP_PATH" 2>&1 | tee /tmp/codesign-verify.log | head -10; then
+  warn "codesign verify returned non-zero"
+fi
+if ! grep -q 'Developer ID Application' /tmp/codesign-verify.log; then
+  if [[ "$IDENTITY" == "-" ]]; then
+    warn "App is ad-hoc signed (expected in local dev)"
+  else
+    err "App was not signed with Developer ID (got: $(grep -i 'Authority=' /tmp/codesign-verify.log | head -1))"
+    exit 3
+  fi
 fi
 
-# Tauri builds sign internally, but re-sign ensures our entitlements + runtime hardening.
-# Re-sign the DMG as well so notarytool accepts it.
-if [[ "$IDENTITY" != "-" ]]; then
-  log "Signing DMG container"
+# DMG container itself needs a thin signature for notarytool (Tauri
+# does this when APPLE_SIGNING_IDENTITY is set, but double-check).
+if [[ "$IDENTITY" != "-" ]] && ! codesign -dv "$DMG_PATH" 2>/dev/null; then
+  log "Signing DMG container (tauri did not)"
   codesign --force --sign "$IDENTITY" "$DMG_PATH" || warn "DMG codesign returned non-zero"
 fi
-
-log "Verifying signature"
-codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -10 || true
 
 # ───────── 6. Notarize ─────────
 notarize() {
@@ -165,8 +176,21 @@ notarize() {
   fi
 
   log "Submitting DMG to Apple notary service (this takes 1-10 minutes)"
-  if ! xcrun notarytool submit "$dmg" "${args[@]}" --wait --timeout 20m; then
-    err "notarytool submit failed"; return 4
+  local submit_log
+  submit_log="$(xcrun notarytool submit "$dmg" "${args[@]}" --wait --timeout 20m 2>&1)"
+  local submit_exit=$?
+  echo "$submit_log"
+  local sub_id
+  sub_id="$(printf '%s\n' "$submit_log" | awk '/^  id: / { print $2; exit }')"
+  if (( submit_exit != 0 )) || printf '%s\n' "$submit_log" | grep -q 'status: Invalid'; then
+    err "Notarization was rejected (status: Invalid)."
+    if [[ -n "$sub_id" ]]; then
+      err "Fetching Apple notarization log for submission $sub_id:"
+      xcrun notarytool log "$sub_id" "${args[@]}" || warn "notarytool log fetch failed"
+    else
+      warn "No submission id captured — cannot fetch detailed Apple log"
+    fi
+    return 4
   fi
 
   log "Stapling notarization ticket (Apple CloudKit may lag; will retry)"
