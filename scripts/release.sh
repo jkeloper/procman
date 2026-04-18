@@ -169,10 +169,20 @@ notarize() {
     err "notarytool submit failed"; return 4
   fi
 
-  log "Stapling notarization ticket"
-  if ! xcrun stapler staple "$dmg"; then
-    err "stapler failed"; return 4
-  fi
+  log "Stapling notarization ticket (Apple CloudKit may lag; will retry)"
+  local attempt=1
+  local max_attempts=6
+  while (( attempt <= max_attempts )); do
+    if xcrun stapler staple "$dmg"; then
+      break
+    fi
+    if (( attempt == max_attempts )); then
+      err "stapler failed after $max_attempts attempts"; return 4
+    fi
+    warn "stapler attempt $attempt/$max_attempts failed, retrying in 30s (ticket may not have propagated yet)"
+    sleep 30
+    (( attempt++ ))
+  done
 
   log "Staple validation"
   xcrun stapler validate "$dmg" || warn "staple validate non-zero"
