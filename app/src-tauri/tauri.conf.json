@@ -38,7 +38,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app", "updater"],
+    "targets": ["dmg", "app"],
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "shortDescription": "Mac process manager GUI",
     "longDescription": "procman - Local Mission Control for developers. Manage VSCode, terminal, Docker and Cloudflare tunnels in one screen.",
