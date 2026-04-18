@@ -33,7 +33,7 @@
       "endpoints": [
         "https://github.com/jkeloper/procman/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJlcGxhY2UgYmVmb3JlIHJlbGVhc2UgLS0gcnVuIGBwbnBtIHRhdXJpIHNpZ25lciBnZW5lcmF0ZWAK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1QkMyNjE4QzM1RUE5NTIKUldSU3FWN0RHQ2E4VlpXeE12S3QzM05BNHRHWWpNRHhueVpab1BrRnlML2xZZTVEYnA5cm51VUMK"
     }
   },
   "bundle": {
