@@ -47,8 +47,9 @@ MEMORY.md
 CLAUDE.local.md
 *.private.md
 
-# Internal-only docs (full CHANGELOG/TODO + security audit history)
-docs/private/
+# Internal-only: entire docs/ directory (planning notes, audit records,
+# charter, UX personas, submission guides). Kept local, never pushed.
+docs/
 
 # Local secrets / certificates
 *.p12

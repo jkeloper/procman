@@ -31,7 +31,6 @@ cargo test --lib
 - `vscode-extension/` — VSCode sidebar extension
 - `scripts/` — build/install automation
 - `spikes/` — archived Week 0 spike results
-- `docs/` — project planning documents
 
 ## Pull Requests
 1. Fork the repo

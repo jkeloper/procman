@@ -54,7 +54,7 @@
 ## Next Steps — Sprint 1 Kickoff
 
 ### Immediate (today)
-- [ ] Manager: update [docs/06-decision.md](../docs/06-decision.md) with final confirmation
+- [ ] Manager: record final confirmation in planning notes
 - [ ] Planner: validate Sprint 1 WBS T01-T10 against current scaffold
 - [ ] Worker: clean up spike-only code in tauri-harness, rename to `procman/`
 

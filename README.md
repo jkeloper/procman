@@ -93,7 +93,7 @@ procman/
 ├── mobile/               # PWA + Capacitor iOS shell
 ├── vscode-extension/     # Sidebar extension (process control)
 ├── scripts/              # install.sh, watch-install.sh, release.sh
-├── docs/                 # Design specs + archived Week 0 planning
+├── web/                  # Landing site (procman.kr)
 └── spikes/               # Week 0 spike verdicts (archival)
 ```
 
@@ -118,8 +118,6 @@ Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is en
 - [CHANGELOG.md](CHANGELOG.md) — release history
 - [app/README.md](app/README.md) — desktop app dev guide
 - [mobile/README.md](mobile/README.md) — mobile PWA / iOS guide
-- [docs/07-port-management-v2.md](docs/07-port-management-v2.md) — current port-management design
-- [docs/archive/](docs/archive/) — Week 0 planning history
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 spike verdict
 
 ## Contributing
@@ -230,7 +228,7 @@ procman/
 ├── mobile/               # PWA + Capacitor iOS 셸
 ├── vscode-extension/     # 사이드바 확장 (프로세스 제어)
 ├── scripts/              # install.sh, watch-install.sh, release.sh
-├── docs/                 # 설계 스펙 + Week 0 기획 아카이브
+├── web/                  # 랜딩 사이트 (procman.kr)
 └── spikes/               # Week 0 스파이크 판정 (archival)
 ```
 
@@ -255,8 +253,6 @@ procman/
 - [CHANGELOG.md](CHANGELOG.md) — 릴리즈 히스토리
 - [app/README.md](app/README.md) — 데스크톱 앱 개발 가이드
 - [mobile/README.md](mobile/README.md) — 모바일 PWA/iOS 가이드
-- [docs/07-port-management-v2.md](docs/07-port-management-v2.md) — 현행 포트 관리 설계
-- [docs/archive/](docs/archive/) — Week 0 기획 히스토리
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 스파이크 최종 판정
 
 ## 기여
