@@ -15,8 +15,26 @@ const MAX_LINES = 5000;
  * duplicates before merging. Within the merged set, we sort by seq so
  * out-of-order arrivals still render correctly.
  */
-function mergeLines(prev: LogLine[], incoming: LogLine[]): LogLine[] {
+export function mergeLines(prev: LogLine[], incoming: LogLine[]): LogLine[] {
   if (incoming.length === 0) return prev;
+  // Restart detection. A fresh Rust LogBuffer starts seq at 0, so when
+  // incoming brings a seq lower than anything we've already seen, the
+  // backend rebuilt the buffer — typically because the script stopped/
+  // crashed and was (re)started. Drop stale prev in that case so the
+  // viewport reflects the new process only. This guards against
+  // status-event races where `process://status=running` arrives after
+  // the first log lines. We compare against prev's *minimum* (prev[0],
+  // since prev is always sorted ascending) rather than the max so that
+  // normal snapshot/live overlap on mount does not trigger a reset.
+  if (prev.length > 0) {
+    let minIncoming = incoming[0].seq;
+    for (const l of incoming) {
+      if (l.seq < minIncoming) minIncoming = l.seq;
+    }
+    if (minIncoming < prev[0].seq) {
+      prev = [];
+    }
+  }
   if (prev.length === 0) {
     // Still possible to have dupes inside `incoming` itself
     const seen = new Set<number>();
