@@ -313,15 +313,27 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             use tauri::Emitter;
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if let Some(pm) = window.try_state::<ProcessManager>() {
-                    let running = pm.list();
-                    if !running.is_empty() {
-                        api.prevent_close();
-                        let count = running.len();
-                        let _ = window.emit("procman://confirm-quit", count);
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if let Some(pm) = window.try_state::<ProcessManager>() {
+                        let running = pm.list();
+                        if !running.is_empty() {
+                            api.prevent_close();
+                            let count = running.len();
+                            let _ = window.emit("procman://confirm-quit", count);
+                        }
                     }
                 }
+                tauri::WindowEvent::Focused(focused) => {
+                    use std::sync::atomic::Ordering;
+                    if *focused {
+                        process::METRICS_PAUSED.store(false, Ordering::Relaxed);
+                        process::METRICS_WAKE.notify_one();
+                    } else {
+                        process::METRICS_PAUSED.store(true, Ordering::Relaxed);
+                    }
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

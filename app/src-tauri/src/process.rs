@@ -27,13 +27,21 @@ const KILL_GRACE_MS: u64 = 1500;
 const KILL_POLL_INTERVAL_MS: u64 = 50;
 const AUTO_RESTART_BASE_MS: u64 = 1000;
 const AUTO_RESTART_MAX_MS: u64 = 30_000;
-const METRICS_BROADCAST_INTERVAL_MS: u64 = 2000;
+const METRICS_BROADCAST_INTERVAL_MS: u64 = 5000;
 
 /// Phase B Worker L: ensure we spawn exactly one metrics broadcaster
 /// per app run. Multiple windows or repeated `setup()` entry (unlikely
 /// but defensive) would otherwise duplicate the `process://metrics`
 /// stream and double the `ps` load.
 static METRICS_BROADCASTER_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// B2: when the main window is hidden / unfocused we park the
+/// broadcaster instead of churning ps every interval. Resumed by
+/// the window-event hook in lib.rs which also kicks `METRICS_WAKE`
+/// to force an immediate sample on focus return.
+pub static METRICS_PAUSED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+pub static METRICS_WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -625,10 +633,23 @@ impl ProcessManager {
             // startup work; first emit happens after 2s.
             tick.tick().await;
             loop {
+                if METRICS_PAUSED.load(Ordering::Relaxed) {
+                    METRICS_WAKE.notified().await;
+                    // Reset interval phase — first emit after resume should be immediate.
+                    tick = tokio::time::interval(Duration::from_millis(
+                        METRICS_BROADCAST_INTERVAL_MS,
+                    ));
+                    tick.tick().await;
+                    let snapshots = self.list();
+                    if !snapshots.is_empty() {
+                        if let Err(e) = self.app.emit("process://metrics", &snapshots) {
+                            log::warn!("process://metrics emit failed: {}", e);
+                        }
+                    }
+                    continue;
+                }
                 tick.tick().await;
                 let snapshots = self.list();
-                // Skip the emit when nothing is running — saves a
-                // round-trip to every window and keeps devtools clean.
                 if snapshots.is_empty() {
                     continue;
                 }

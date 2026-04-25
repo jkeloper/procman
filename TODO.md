@@ -24,6 +24,7 @@ Public roadmap. Internal planning, decision logs, and completed-issue detail are
 - Start-at-login (LaunchAgent)
 
 ## Planned (next)
+- **Frontend visibility-aware hook polling** — `document.visibilitychange`로 port/process hook polling freeze (backend metrics pause는 B2에서 완료, frontend hook은 여전히 tick 중)
 - **Multi-window / tear-off log panel** — pop individual process log streams into their own windows.
 - **Scheduled / cron execution** — repeat a script on a cron expression.
 - **xterm.js PTY shell** — interactive terminal tab for processes that need stdin (REPL, `docker exec`).

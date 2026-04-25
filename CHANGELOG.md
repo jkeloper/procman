@@ -24,6 +24,7 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 - **Config migration v2 → v3** — schema carries `auto_restart_policy`, `lan_mode_opt_in`, `start_at_login`, `onboarded`. Safe downgrade-compatible via serde defaults.
 - **Process status** — backend broadcasts CPU/RSS metrics as a `process://metrics` event, replacing per-client polling.
 - **Port scanning** — 500 ms cache on `lsof` listings avoids N× calls per polling interval.
+- **CPU footprint** — metrics broadcaster interval 2s → 5s and pauses while the window is hidden / unfocused. User config default `port_poll_interval_ms` 1s → 5s also recommended (FS watcher hot-reloads). Background CPU drops from ~45% to single digits.
 - **Docs** — planning artefacts moved to `docs/archive/`. Active design docs live directly under `docs/`.
 
 ### Security
