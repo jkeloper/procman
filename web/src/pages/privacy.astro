@@ -1,0 +1,108 @@
+---
+import Layout from '~/layouts/Layout.astro';
+const updated = '2026-04-25';
+---
+
+<Layout title="Privacy Policy — procman">
+  <main class="mx-auto max-w-3xl px-6 py-16">
+    <a href="/" class="text-sm text-zinc-500 hover:text-zinc-300">← back</a>
+    <h1 class="mt-6 text-3xl font-semibold tracking-tight">Privacy Policy</h1>
+    <p class="mt-2 text-sm text-zinc-500">Last updated: {updated}</p>
+
+    <section class="prose prose-invert mt-10 space-y-6 text-zinc-300">
+      <p>
+        procman is a local-first developer tool. It is designed so that
+        the data you create stays on your machine. This page describes
+        what little does leave your machine and under what conditions.
+      </p>
+
+      <h2 class="text-xl font-semibold text-white">Data the desktop app collects</h2>
+      <ul class="list-disc space-y-2 pl-5">
+        <li><b>None by default.</b> No analytics, no telemetry, no remote logging.</li>
+        <li>
+          Project paths, script commands, port aliases, and group
+          definitions you create are stored only on disk at
+          <code>~/Library/Application&nbsp;Support/procman/</code>.
+        </li>
+        <li>
+          Process logs (stdout/stderr) are kept in a 5,000-line memory
+          ring buffer plus an optional sqlite database in the same
+          local directory. Logs never leave your machine.
+        </li>
+        <li>
+          Crash reports are written to a local file (<code>crash.log</code>) and
+          are not transmitted anywhere.
+        </li>
+      </ul>
+
+      <h2 class="text-xl font-semibold text-white">Auto-update</h2>
+      <p>
+        When the auto-updater is enabled it queries
+        <code>github.com/jkeloper/procman/releases/latest/download/latest.json</code>.
+        That request hits GitHub's servers; please consult
+        <a class="underline" href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+          >GitHub's privacy statement</a> for what they log on their side.
+        procman itself does not record or share update checks.
+      </p>
+
+      <h2 class="text-xl font-semibold text-white">Mobile companion app</h2>
+      <p>
+        The mobile companion is an iOS / PWA client whose only purpose
+        is to control a desktop procman instance you own. It connects
+        directly to that desktop via either a LAN address or a
+        Cloudflare Tunnel URL that you choose to expose.
+      </p>
+      <ul class="list-disc space-y-2 pl-5">
+        <li>
+          Data the app handles is limited to what the desktop returns:
+          your own project / script names, port states, and live
+          stdout/stderr lines.
+        </li>
+        <li>
+          Authentication uses a 256-bit pairing token. The token and
+          the endpoint URL are stored in the device's local storage
+          and never sent to any third party.
+        </li>
+        <li>
+          The app does not collect device identifiers, advertising IDs,
+          contacts, photos, or location.
+        </li>
+        <li>
+          When traffic flows through a Cloudflare Tunnel, Cloudflare
+          terminates TLS on its edge. Refer to
+          <a class="underline" href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>
+          for what they log there. procman does not store anything on
+          Cloudflare's side beyond the tunnel itself.
+        </li>
+      </ul>
+
+      <h2 class="text-xl font-semibold text-white">Third-party services</h2>
+      <p>
+        We integrate with two services only when you explicitly use a
+        related feature:
+      </p>
+      <ul class="list-disc space-y-2 pl-5">
+        <li><b>GitHub Releases</b> — auto-update fetch (see above).</li>
+        <li><b>Cloudflare Tunnel</b> — only when you click "Expose via Cloudflare" in Remote Access.</li>
+      </ul>
+
+      <h2 class="text-xl font-semibold text-white">Children's privacy</h2>
+      <p>
+        procman is a developer tool not directed at children under 13.
+        We do not knowingly collect data from children.
+      </p>
+
+      <h2 class="text-xl font-semibold text-white">Changes to this policy</h2>
+      <p>
+        Material changes will be announced in the project changelog and
+        the "Last updated" date above will move forward.
+      </p>
+
+      <h2 class="text-xl font-semibold text-white">Contact</h2>
+      <p>
+        Questions or concerns? Open an issue at
+        <a class="underline" href="https://github.com/jkeloper/procman/issues">github.com/jkeloper/procman/issues</a>.
+      </p>
+    </section>
+  </main>
+</Layout>
