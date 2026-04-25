@@ -613,7 +613,11 @@ impl ProcessManager {
             log::debug!("metrics broadcaster already running — skipping duplicate");
             return;
         }
-        tokio::spawn(async move {
+        // tauri::async_runtime wraps a long-lived tokio runtime that is
+        // guaranteed to be entered from setup hooks. Using `tokio::spawn`
+        // here panics on macOS 26 because the AppDelegate callback runs
+        // outside any entered runtime context.
+        tauri::async_runtime::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(
                 METRICS_BROADCAST_INTERVAL_MS,
             ));
