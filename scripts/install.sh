@@ -38,6 +38,16 @@ fi
 
 echo "▶ Building procman ($MODE)..."
 cd "$APP_DIR"
+
+# Tauri 2 with createUpdaterArtifacts=true needs TAURI_SIGNING_PRIVATE_KEY
+# to produce the .app.tar.gz.sig sidecar. CI injects it from secrets;
+# locally we read the key file the developer generated once via
+# `pnpm tauri signer generate -w ~/.tauri/procman.key`.
+if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -f "$HOME/.tauri/procman.key" ]]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/procman.key")"
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+fi
+
 if [[ "$MODE" == "debug" ]]; then
   pnpm tauri build --debug --bundles app
   BUILT="$APP_DIR/src-tauri/target/debug/bundle/macos/$APP_NAME"
