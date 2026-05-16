@@ -9,7 +9,9 @@
 //     Kill waits for the watcher to observe exit BEFORE allowing respawn.
 
 use crate::log_buffer::{LogBuffer, LogLine};
-use crate::types::{AutoRestartPolicy, LogStream, Script};
+use crate::types::{
+    clamp_shutdown_timeout_ms, AutoRestartPolicy, LogStream, Script, SHUTDOWN_TIMEOUT_MS_DEFAULT,
+};
 use dashmap::DashMap;
 use rand::Rng;
 use serde::Serialize;
@@ -23,16 +25,17 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout, Command};
 
 const LOG_CAPACITY_DEFAULT: usize = 5000;
-const KILL_GRACE_MS: u64 = 1500;
+const KILL_GRACE_MS: u64 = SHUTDOWN_TIMEOUT_MS_DEFAULT;
 const KILL_POLL_INTERVAL_MS: u64 = 50;
+const SHUTDOWN_PROGRESS_EMIT_INTERVAL_MS: u64 = 250;
 const AUTO_RESTART_BASE_MS: u64 = 1000;
 const AUTO_RESTART_MAX_MS: u64 = 30_000;
 const METRICS_BROADCAST_INTERVAL_MS: u64 = 5000;
 
 /// Phase B Worker L: ensure we spawn exactly one metrics broadcaster
 /// per app run. Multiple windows or repeated `setup()` entry (unlikely
-/// but defensive) would otherwise duplicate the `process://metrics`
-/// stream and double the `ps` load.
+/// but defensive) would otherwise duplicate the metrics streams and
+/// double the `ps` load.
 static METRICS_BROADCASTER_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
 /// B2: when the main window is hidden / unfocused we park the
@@ -61,6 +64,27 @@ pub struct StatusEvent {
     /// Number of auto-restart attempts so far. 0 means first run.
     #[serde(default)]
     pub restart_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShutdownPhase {
+    Terminating,
+    Waiting,
+    Killing,
+    Cleanup,
+    Stopped,
+    NotRunning,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShutdownEvent {
+    pub id: String,
+    pub phase: ShutdownPhase,
+    pub pid: Option<u32>,
+    pub elapsed_ms: u64,
+    pub timeout_ms: u64,
+    pub ts_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -142,6 +166,10 @@ impl ProcessManager {
         self.pid_index.get(&pid).map(|r| r.value().clone())
     }
 
+    pub fn is_running(&self, id: &str) -> bool {
+        self.procs.contains_key(id)
+    }
+
     /// Update log buffer capacity for new processes. Existing buffers keep
     /// their current capacity until the process restarts.
     pub fn set_log_capacity(&self, cap: usize) {
@@ -149,7 +177,9 @@ impl ProcessManager {
     }
 
     pub async fn spawn(&self, script: &Script, cwd: Option<String>) -> Result<u32, String> {
-        self.clone().spawn_inner(script.clone(), cwd, Arc::new(AtomicU32::new(0))).await
+        self.clone()
+            .spawn_inner(script.clone(), cwd, Arc::new(AtomicU32::new(0)))
+            .await
     }
 
     /// Inner spawn with shared restart_count for auto-restart bookkeeping.
@@ -169,49 +199,7 @@ impl ProcessManager {
             self.kill(&script.id).await?;
         }
 
-        // M5: Prepend env file sourcing if configured.
-        let base_cmd = if let Some(ref env_path) = script.env_file {
-            // Resolve relative env_file path against cwd.
-            let resolved = if env_path.starts_with('/') {
-                env_path.clone()
-            } else if let Some(ref d) = cwd {
-                format!("{}/{}", d, env_path)
-            } else {
-                env_path.clone()
-            };
-            // set -a exports all variables; set +a reverts to default.
-            // shell_quote prevents injection via single-quote in path.
-            format!("set -a; source {}; set +a; {}", shell_quote(&resolved), script.command)
-        } else {
-            script.command.clone()
-        };
-
-        // Auto-detect a Python virtualenv at the project root so that
-        // `python`, `python3`, `pip`, and installed console scripts
-        // (uvicorn, pytest, streamlit, …) resolve to the project's
-        // venv without requiring users to hard-code `.venv/bin/python`.
-        // Works for `.venv` (uv/hatch default), `venv` (common), and
-        // `env` (older convention). The prefix is a no-op when no
-        // venv is found, so non-Python projects are unaffected.
-        let venv_prefix = cwd
-            .as_deref()
-            .map(detect_venv_activation)
-            .unwrap_or_default();
-
-        // Source ~/.zshrc too. `zsh -l -c` is a login shell but it is
-        // NOT interactive, so zsh only sources .zshenv and .zprofile.
-        // In practice, most developers put their tool initializers
-        // (conda, nvm, pyenv, rbenv, direnv, custom PATH exports, …)
-        // inside .zshrc because that's where macOS Terminal picks them
-        // up. Without sourcing .zshrc, commands like `python3`, `nvm`,
-        // `pyenv` can fail with "command not found" even though the
-        // same command works in the user's terminal. We source .zshrc
-        // manually if it exists, suppressing errors so missing or
-        // misconfigured files don't break every script.
-        let command_line = format!(
-            "[ -f $HOME/.zshrc ] && source $HOME/.zshrc 2>/dev/null; {}{}",
-            venv_prefix, base_cmd
-        );
+        let command_line = command_line_for_script(&script, cwd.as_deref());
         let mut cmd = Command::new("/bin/zsh");
         cmd.args(["-l", "-c", &command_line])
             .stdout(std::process::Stdio::piped())
@@ -350,7 +338,9 @@ impl ProcessManager {
                         None => {
                             log::info!(
                                 "[auto-restart] {} giving up after {} attempts (max {})",
-                                id, attempt.saturating_sub(1), p.max_retries
+                                id,
+                                attempt.saturating_sub(1),
+                                p.max_retries
                             );
                             return;
                         }
@@ -359,19 +349,24 @@ impl ProcessManager {
                 };
                 log::info!(
                     "[auto-restart] {} attempt #{}, backoff {}ms",
-                    id, attempt, delay_ms
+                    id,
+                    attempt,
+                    delay_ms
                 );
                 let msg = format!(
                     "[procman] auto-restart #{} in {:.1}s…",
                     attempt,
                     delay_ms as f64 / 1000.0
                 );
-                let _ = app.emit(&format!("log://{}", id), crate::log_buffer::LogLine {
-                    seq: 0,
-                    stream: crate::types::LogStream::Stderr,
-                    ts_ms: now_ms(),
-                    text: msg,
-                });
+                let _ = app.emit(
+                    &format!("log://{}", id),
+                    crate::log_buffer::LogLine {
+                        seq: 0,
+                        stream: crate::types::LogStream::Stderr,
+                        ts_ms: now_ms(),
+                        text: msg,
+                    },
+                );
 
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
@@ -385,16 +380,20 @@ impl ProcessManager {
                 // All three are cheap to check.
                 let cancelled = respawn_cancelled_for_watcher.load(Ordering::SeqCst);
                 let user_now = killed_for_watcher.load(Ordering::SeqCst);
-                let replaced = procs.get(&id).map(|m| m.generation != my_generation).unwrap_or(false);
+                let replaced = procs
+                    .get(&id)
+                    .map(|m| m.generation != my_generation)
+                    .unwrap_or(false);
                 if cancelled || user_now || replaced {
                     log::info!(
                         "[auto-restart] {} skipped (cancelled={} user={} replaced={})",
-                        id, cancelled, user_now, replaced
+                        id,
+                        cancelled,
+                        user_now,
+                        replaced
                     );
                 } else if !procs.contains_key(&id) {
-                    pm_clone.schedule_auto_restart(
-                        script_clone, cwd_clone, restart_count,
-                    );
+                    pm_clone.schedule_auto_restart(script_clone, cwd_clone, restart_count);
                 }
             }
         });
@@ -424,8 +423,21 @@ impl ProcessManager {
     /// daemons like Gradle) are individually SIGKILL'd so they can't leak
     /// zombie ports.
     pub async fn kill(&self, id: &str) -> Result<(), String> {
+        self.kill_with_timeout(id, KILL_GRACE_MS).await
+    }
+
+    pub async fn kill_with_timeout(&self, id: &str, timeout_ms: u64) -> Result<(), String> {
+        let timeout_ms = clamp_shutdown_timeout_ms(timeout_ms);
         let (pid, killed_flag, exited_flag, generation, respawn_cancelled_flag) = {
             let Some(m) = self.procs.get(id) else {
+                emit_shutdown(
+                    &self.app,
+                    id,
+                    ShutdownPhase::NotRunning,
+                    None,
+                    0,
+                    timeout_ms,
+                );
                 return Ok(()); // Already gone — nothing to do.
             };
             (
@@ -441,6 +453,14 @@ impl ProcessManager {
         // observe crash → schedule restart → we clear the flag too late.
         respawn_cancelled_flag.store(true, Ordering::SeqCst);
         killed_flag.store(true, Ordering::SeqCst);
+        emit_shutdown(
+            &self.app,
+            id,
+            ShutdownPhase::Terminating,
+            Some(pid),
+            0,
+            timeout_ms,
+        );
 
         // Snapshot all descendant PIDs holding ports BEFORE kill.
         // This catches detached processes (Gradle daemon, etc.) that
@@ -459,17 +479,37 @@ impl ProcessManager {
             }
         }
 
-        // Poll for exit up to KILL_GRACE_MS.
+        // Poll for exit up to the configured grace timeout.
         let mut elapsed = 0u64;
-        while elapsed < KILL_GRACE_MS && !exited_flag.load(Ordering::SeqCst) {
+        let mut next_progress_emit = SHUTDOWN_PROGRESS_EMIT_INTERVAL_MS;
+        while elapsed < timeout_ms && !exited_flag.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(KILL_POLL_INTERVAL_MS)).await;
             elapsed += KILL_POLL_INTERVAL_MS;
+            if elapsed >= next_progress_emit || elapsed >= timeout_ms {
+                emit_shutdown(
+                    &self.app,
+                    id,
+                    ShutdownPhase::Waiting,
+                    Some(pid),
+                    elapsed.min(timeout_ms),
+                    timeout_ms,
+                );
+                next_progress_emit += SHUTDOWN_PROGRESS_EMIT_INTERVAL_MS;
+            }
         }
 
         // If still not exited, SIGKILL. Safe because the watcher hasn't
         // cleaned up yet — pid can't be reaped+reused while child wait() is
         // still pending on our side.
         if !exited_flag.load(Ordering::SeqCst) {
+            emit_shutdown(
+                &self.app,
+                id,
+                ShutdownPhase::Killing,
+                Some(pid),
+                elapsed.min(timeout_ms),
+                timeout_ms,
+            );
             unsafe {
                 libc::killpg(pid as i32, libc::SIGKILL);
             }
@@ -479,16 +519,30 @@ impl ProcessManager {
                 tokio::time::sleep(Duration::from_millis(25)).await;
                 waited += 25;
             }
+            elapsed = elapsed.saturating_add(waited);
         }
 
+        emit_shutdown(
+            &self.app,
+            id,
+            ShutdownPhase::Cleanup,
+            Some(pid),
+            elapsed,
+            timeout_ms,
+        );
         // Kill any descendant port holders that survived the group kill
         // (detached daemons, setsid'd children, etc.).
         for dpid in &descendant_pids {
-            if *dpid == pid { continue; }
+            if *dpid == pid {
+                continue;
+            }
             unsafe {
                 // Check if still alive before killing
                 if libc::kill(*dpid as i32, 0) == 0 {
-                    log::info!("killing orphan descendant pid {} (survived group kill)", dpid);
+                    log::info!(
+                        "killing orphan descendant pid {} (survived group kill)",
+                        dpid
+                    );
                     libc::kill(*dpid as i32, libc::SIGKILL);
                 }
             }
@@ -497,22 +551,48 @@ impl ProcessManager {
         // Ensure entry is removed (watcher may have beat us to it).
         self.procs.remove_if(id, |_, m| m.generation == generation);
         self.pid_index.remove(&pid);
+        emit_shutdown(
+            &self.app,
+            id,
+            ShutdownPhase::Stopped,
+            Some(pid),
+            elapsed,
+            timeout_ms,
+        );
         Ok(())
     }
 
-    pub async fn restart(&self, script: &Script, cwd: Option<String>) -> Result<u32, String> {
-        self.kill(&script.id).await?;
+    pub async fn restart_with_timeout(
+        &self,
+        script: &Script,
+        cwd: Option<String>,
+        timeout_ms: u64,
+    ) -> Result<u32, String> {
+        self.kill_with_timeout(&script.id, timeout_ms).await?;
         // log_clear is unnecessary here: kill() removed the DashMap entry
         // so the old LogBuffer is dropped; spawn_inner creates a fresh one.
-        if let Some(port) = script.expected_port {
+        let mut ports_to_free: Vec<u16> = script.ports.iter().map(|spec| spec.number).collect();
+        if ports_to_free.is_empty() {
+            if let Some(port) = script.expected_port {
+                ports_to_free.push(port);
+            }
+        }
+        ports_to_free.sort_unstable();
+        ports_to_free.dedup();
+        for port in ports_to_free {
             let _ = crate::commands::port::kill_port(port).await;
+        }
+        if !script.ports.is_empty() || script.expected_port.is_some() {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         }
-        self.clone().spawn_inner(script.clone(), cwd, Arc::new(AtomicU32::new(0))).await
+        self.clone()
+            .spawn_inner(script.clone(), cwd, Arc::new(AtomicU32::new(0)))
+            .await
     }
 
     pub fn list(&self) -> Vec<ProcessSnapshot> {
-        let base: Vec<ProcessSnapshot> = self.procs
+        let base: Vec<ProcessSnapshot> = self
+            .procs
             .iter()
             .map(|entry| ProcessSnapshot {
                 id: entry.key().clone(),
@@ -548,14 +628,19 @@ impl ProcessManager {
     ) -> Vec<LogLine> {
         self.procs
             .get(id)
-            .map(|m| m.log_buffer.lock().unwrap().search(query, case_sensitive, limit))
+            .map(|m| {
+                m.log_buffer
+                    .lock()
+                    .unwrap()
+                    .search(query, case_sensitive, limit)
+            })
             .unwrap_or_default()
     }
 
-    pub fn log_snapshot(&self, id: &str) -> Vec<LogLine> {
+    pub fn log_tail(&self, id: &str, limit: usize) -> Vec<LogLine> {
         self.procs
             .get(id)
-            .map(|m| m.log_buffer.lock().unwrap().snapshot())
+            .map(|m| m.log_buffer.lock().unwrap().tail(limit))
             .unwrap_or_default()
     }
 
@@ -569,10 +654,10 @@ impl ProcessManager {
     }
 
     /// E1: Kill all running processes. Used during graceful shutdown.
-    pub async fn kill_all(&self) {
+    pub async fn kill_all_with_timeout(&self, timeout_ms: u64) {
         let ids: Vec<String> = self.procs.iter().map(|e| e.key().clone()).collect();
         for id in ids {
-            let _ = self.kill(&id).await;
+            let _ = self.kill_with_timeout(&id, timeout_ms).await;
         }
     }
 
@@ -592,20 +677,25 @@ impl ProcessManager {
     /// transitively-dependent set. If a cycle exists, we still make
     /// forward progress (stop them all) since each `self.kill` is
     /// independently correct.
-    pub async fn stop_script_graceful(&self, id: &str, dependents: &[String]) -> Result<(), String> {
+    pub async fn stop_script_graceful_with_timeout(
+        &self,
+        id: &str,
+        dependents: &[String],
+        timeout_ms: u64,
+    ) -> Result<(), String> {
         // Kill dependents first (only those currently running).
         for dep_id in dependents {
             if self.procs.contains_key(dep_id) {
-                let _ = self.kill(dep_id).await;
+                let _ = self.kill_with_timeout(dep_id, timeout_ms).await;
             }
         }
-        self.kill(id).await
+        self.kill_with_timeout(id, timeout_ms).await
     }
 
     /// Phase B Worker L: start a single global task that samples CPU/RSS
-    /// for every managed PID every 2s and broadcasts the result on the
-    /// `process://metrics` event. Replaces the per-hook 2s polling of
-    /// `list_processes` from the frontend.
+    /// for every managed PID every 5s and broadcasts the result on
+    /// `runtime://delta` (plus legacy `process://metrics` compatibility).
+    /// Replaces the per-hook polling of `list_processes` from the frontend.
     ///
     /// Idempotent: guarded by a `OnceLock` so repeated calls from
     /// `setup()` (or tests) don't spawn duplicate loops.
@@ -626,25 +716,24 @@ impl ProcessManager {
         // here panics on macOS 26 because the AppDelegate callback runs
         // outside any entered runtime context.
         tauri::async_runtime::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_millis(
-                METRICS_BROADCAST_INTERVAL_MS,
-            ));
+            let mut tick =
+                tokio::time::interval(Duration::from_millis(METRICS_BROADCAST_INTERVAL_MS));
             // Skip the first immediate tick so we don't race with
-            // startup work; first emit happens after 2s.
+            // startup work; first emit happens after the configured interval.
             tick.tick().await;
             loop {
                 if METRICS_PAUSED.load(Ordering::Relaxed) {
                     METRICS_WAKE.notified().await;
                     // Reset interval phase — first emit after resume should be immediate.
-                    tick = tokio::time::interval(Duration::from_millis(
-                        METRICS_BROADCAST_INTERVAL_MS,
-                    ));
+                    tick =
+                        tokio::time::interval(Duration::from_millis(METRICS_BROADCAST_INTERVAL_MS));
                     tick.tick().await;
                     let snapshots = self.list();
                     if !snapshots.is_empty() {
                         if let Err(e) = self.app.emit("process://metrics", &snapshots) {
                             log::warn!("process://metrics emit failed: {}", e);
                         }
+                        crate::commands::runtime::emit_runtime_metrics_delta(&self.app, &snapshots);
                     }
                     continue;
                 }
@@ -656,9 +745,45 @@ impl ProcessManager {
                 if let Err(e) = self.app.emit("process://metrics", &snapshots) {
                     log::warn!("process://metrics emit failed: {}", e);
                 }
+                crate::commands::runtime::emit_runtime_metrics_delta(&self.app, &snapshots);
             }
         });
     }
+}
+
+pub(crate) fn command_line_for_script(script: &Script, cwd: Option<&str>) -> String {
+    // M5: Prepend env file sourcing if configured.
+    let base_cmd = if let Some(ref env_path) = script.env_file {
+        // Resolve relative env_file path against cwd.
+        let resolved = if env_path.starts_with('/') {
+            env_path.clone()
+        } else if let Some(d) = cwd {
+            format!("{}/{}", d, env_path)
+        } else {
+            env_path.clone()
+        };
+        // set -a exports all variables; set +a reverts to default.
+        // shell_quote prevents injection via single-quote in path.
+        format!(
+            "set -a; source {}; set +a; {}",
+            shell_quote(&resolved),
+            script.command
+        )
+    } else {
+        script.command.clone()
+    };
+
+    // Auto-detect a Python virtualenv at the project root so that
+    // `python`, `python3`, `pip`, and installed console scripts
+    // resolve to the project's venv without hard-coding activation.
+    let venv_prefix = cwd.map(detect_venv_activation).unwrap_or_default();
+
+    // Source ~/.zshrc too. `zsh -l -c` is a login shell but it is NOT
+    // interactive, so zsh only sources .zshenv and .zprofile.
+    format!(
+        "[ -f $HOME/.zshrc ] && source $HOME/.zshrc 2>/dev/null; {}{}",
+        venv_prefix, base_cmd
+    )
 }
 
 /// S3: One-shot metrics sample for a set of pids via a single `ps` call.
@@ -791,7 +916,9 @@ fn truncate_line(line: String) -> String {
 
 /// Shell-safe quoting: wraps in single quotes, escaping inner single quotes.
 fn shell_quote(s: &str) -> String {
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || "_-./=:".contains(c)) {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_-./=:".contains(c))
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -832,7 +959,33 @@ fn detect_venv_activation(cwd: &str) -> String {
 }
 
 fn emit_status(app: &AppHandle, evt: StatusEvent) {
+    let delay = match evt.status {
+        RuntimeStatus::Running => Duration::from_millis(500),
+        RuntimeStatus::Stopped | RuntimeStatus::Crashed => Duration::from_millis(150),
+    };
     let _ = app.emit("process://status", evt);
+    crate::commands::runtime::schedule_runtime_ports_delta_emit(app, delay);
+}
+
+fn emit_shutdown(
+    app: &AppHandle,
+    id: &str,
+    phase: ShutdownPhase,
+    pid: Option<u32>,
+    elapsed_ms: u64,
+    timeout_ms: u64,
+) {
+    let _ = app.emit(
+        "process://shutdown",
+        ShutdownEvent {
+            id: id.to_string(),
+            phase,
+            pid,
+            elapsed_ms,
+            timeout_ms,
+            ts_ms: now_ms(),
+        },
+    );
 }
 
 fn now_ms() -> i64 {
@@ -934,37 +1087,68 @@ mod tests {
 
     #[test]
     fn policy_disabled_returns_none() {
-        let p = AutoRestartPolicy { enabled: false, max_retries: 5, backoff_ms: 1000, jitter_ms: 0 };
+        let p = AutoRestartPolicy {
+            enabled: false,
+            max_retries: 5,
+            backoff_ms: 1000,
+            jitter_ms: 0,
+        };
         assert_eq!(compute_restart_delay_policy(&p, 1, |_| 0), None);
     }
 
     #[test]
     fn policy_max_retries_zero_is_unlimited() {
-        let p = AutoRestartPolicy { enabled: true, max_retries: 0, backoff_ms: 100, jitter_ms: 0 };
+        let p = AutoRestartPolicy {
+            enabled: true,
+            max_retries: 0,
+            backoff_ms: 100,
+            jitter_ms: 0,
+        };
         // Arbitrary high attempt still yields Some.
-        assert_eq!(compute_restart_delay_policy(&p, 1_000, |_| 0), Some(AUTO_RESTART_MAX_MS));
+        assert_eq!(
+            compute_restart_delay_policy(&p, 1_000, |_| 0),
+            Some(AUTO_RESTART_MAX_MS)
+        );
     }
 
     #[test]
     fn policy_exceeded_max_retries_stops() {
-        let p = AutoRestartPolicy { enabled: true, max_retries: 3, backoff_ms: 100, jitter_ms: 0 };
+        let p = AutoRestartPolicy {
+            enabled: true,
+            max_retries: 3,
+            backoff_ms: 100,
+            jitter_ms: 0,
+        };
         assert!(compute_restart_delay_policy(&p, 3, |_| 0).is_some());
         assert!(compute_restart_delay_policy(&p, 4, |_| 0).is_none());
     }
 
     #[test]
     fn policy_linear_backoff_plus_jitter() {
-        let p = AutoRestartPolicy { enabled: true, max_retries: 5, backoff_ms: 500, jitter_ms: 200 };
+        let p = AutoRestartPolicy {
+            enabled: true,
+            max_retries: 5,
+            backoff_ms: 500,
+            jitter_ms: 200,
+        };
         // attempt=2, jitter stub = 150 → 1000 + 150.
         assert_eq!(compute_restart_delay_policy(&p, 2, |_| 150), Some(1150));
     }
 
     #[test]
     fn policy_jitter_zero_means_no_randomness() {
-        let p = AutoRestartPolicy { enabled: true, max_retries: 5, backoff_ms: 1000, jitter_ms: 0 };
+        let p = AutoRestartPolicy {
+            enabled: true,
+            max_retries: 5,
+            backoff_ms: 1000,
+            jitter_ms: 0,
+        };
         // jitter_fn shouldn't even be invoked — use a panicking closure
         // to prove it (compute_restart_delay_policy skips calling it).
-        assert_eq!(compute_restart_delay_policy(&p, 1, |_| panic!("should not run")), Some(1000));
+        assert_eq!(
+            compute_restart_delay_policy(&p, 1, |_| panic!("should not run")),
+            Some(1000)
+        );
     }
 
     #[test]
@@ -1034,7 +1218,11 @@ mod tests {
         // A depends_on B. Stopping B must yield an ordering [A, B].
         let target = "db";
         let dependents = vec!["api".to_string()];
-        let order: Vec<String> = dependents.iter().cloned().chain(std::iter::once(target.to_string())).collect();
+        let order: Vec<String> = dependents
+            .iter()
+            .cloned()
+            .chain(std::iter::once(target.to_string()))
+            .collect();
         assert_eq!(order, vec!["api".to_string(), "db".to_string()]);
         // The last element is always the target.
         assert_eq!(order.last().map(|s| s.as_str()), Some(target));

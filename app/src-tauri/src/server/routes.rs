@@ -40,7 +40,10 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/processes/:id/restart", post(restart_process))
         .route("/api/projects", get(list_projects))
         .route("/api/ports", get(list_ports))
-        .route("/api/port-aliases", get(get_port_aliases).post(set_port_alias))
+        .route(
+            "/api/port-aliases",
+            get(get_port_aliases).post(set_port_alias),
+        )
         .route("/api/logs/:id", get(log_snapshot))
         .route("/api/logs/:id/search", get(search_log))
         .route("/api/ports/:script_id/status", get(port_status))
@@ -207,6 +210,7 @@ async fn list_projects(State(state): State<ServerState>) -> Json<serde_json::Val
                     "expected_port": s.expected_port,
                     "ports": s.ports,
                     "auto_restart": s.auto_restart,
+                    "schedule": s.schedule,
                     "depends_on": s.depends_on,
                 })).collect::<Vec<_>>(),
             })
@@ -249,7 +253,9 @@ async fn set_port_alias(
             if alias.trim().is_empty() {
                 cfg.settings.port_aliases.remove(&port);
             } else {
-                cfg.settings.port_aliases.insert(port, alias.trim().to_string());
+                cfg.settings
+                    .port_aliases
+                    .insert(port, alias.trim().to_string());
             }
         })
         .await
@@ -260,13 +266,17 @@ async fn set_port_alias(
 async fn log_snapshot(
     State(state): State<ServerState>,
     Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Json<Vec<crate::log_buffer::LogLine>> {
-    Json(state.pm.log_snapshot(&id))
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000usize)
+        .clamp(1, 5000);
+    Json(state.pm.log_tail(&id, limit))
 }
 
-async fn audit_snapshot(
-    State(state): State<ServerState>,
-) -> Json<Vec<super::audit::AuditEntry>> {
+async fn audit_snapshot(State(state): State<ServerState>) -> Json<Vec<super::audit::AuditEntry>> {
     Json(state.audit.snapshot().await)
 }
 
@@ -288,16 +298,45 @@ async fn start_process(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let Some((script, cwd)) = find_script(&state, &id).await else {
-        state.audit.record("start", &id, false, Some("not found".into())).await;
+        state
+            .audit
+            .record("start", &id, false, Some("not found".into()))
+            .await;
         return Err(StatusCode::NOT_FOUND);
     };
+    match crate::commands::port::blocking_conflicts_for_script(
+        &script.id,
+        &script.ports,
+        state.app_state.as_ref(),
+        &state.pm,
+    )
+    .await
+    {
+        Ok(conflicts) => {
+            if let Some(conflict) = conflicts.first() {
+                let message = crate::commands::port::describe_port_conflict(conflict);
+                state.audit.record("start", &id, false, Some(message)).await;
+                return Err(StatusCode::CONFLICT);
+            }
+        }
+        Err(e) => {
+            state.audit.record("start", &id, false, Some(e)).await;
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
     match state.pm.spawn(&script, Some(cwd)).await {
         Ok(pid) => {
-            state.audit.record("start", &id, true, Some(format!("pid {}", pid))).await;
+            state
+                .audit
+                .record("start", &id, true, Some(format!("pid {}", pid)))
+                .await;
             Ok(Json(serde_json::json!({ "pid": pid })))
         }
         Err(e) => {
-            state.audit.record("start", &id, false, Some(e.clone())).await;
+            state
+                .audit
+                .record("start", &id, false, Some(e.clone()))
+                .await;
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
@@ -307,7 +346,8 @@ async fn stop_process(
     State(state): State<ServerState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    match state.pm.kill(&id).await {
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    match state.pm.kill_with_timeout(&id, timeout_ms).await {
         Ok(_) => {
             state.audit.record("stop", &id, true, None).await;
             Ok(StatusCode::NO_CONTENT)
@@ -324,12 +364,46 @@ async fn restart_process(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let Some((script, cwd)) = find_script(&state, &id).await else {
-        state.audit.record("restart", &id, false, Some("not found".into())).await;
+        state
+            .audit
+            .record("restart", &id, false, Some("not found".into()))
+            .await;
         return Err(StatusCode::NOT_FOUND);
     };
-    match state.pm.restart(&script, Some(cwd)).await {
+    match crate::commands::port::blocking_conflicts_for_script(
+        &script.id,
+        &script.ports,
+        state.app_state.as_ref(),
+        &state.pm,
+    )
+    .await
+    {
+        Ok(conflicts) => {
+            if let Some(conflict) = conflicts.first() {
+                let message = crate::commands::port::describe_port_conflict(conflict);
+                state
+                    .audit
+                    .record("restart", &id, false, Some(message))
+                    .await;
+                return Err(StatusCode::CONFLICT);
+            }
+        }
+        Err(e) => {
+            state.audit.record("restart", &id, false, Some(e)).await;
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    match state
+        .pm
+        .restart_with_timeout(&script, Some(cwd), timeout_ms)
+        .await
+    {
         Ok(pid) => {
-            state.audit.record("restart", &id, true, Some(format!("pid {}", pid))).await;
+            state
+                .audit
+                .record("restart", &id, true, Some(format!("pid {}", pid)))
+                .await;
             Ok(Json(serde_json::json!({ "pid": pid })))
         }
         Err(e) => {
@@ -337,6 +411,11 @@ async fn restart_process(
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+}
+
+async fn shutdown_timeout_ms(state: &ServerState) -> u64 {
+    let guard = state.app_state.config.lock().await;
+    crate::types::clamp_shutdown_timeout_ms(guard.settings.shutdown_timeout_ms)
 }
 
 // --- S1-S5: new API handlers for remote clients ---
@@ -368,19 +447,14 @@ async fn port_status(
     let listening = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let managed_pids: std::collections::HashSet<u32> = if let Some(snap) = state
-        .pm
-        .list()
-        .into_iter()
-        .find(|s| s.id == script_id)
-    {
-        crate::commands::port::list_ports_for_script_pid(snap.pid)
-            .await
-            .map(|v| v.into_iter().map(|p| p.pid).collect())
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
+    let ownership = crate::commands::port::build_port_ownership_cache(
+        state.app_state.as_ref(),
+        &state.pm,
+        &listening,
+    )
+    .await;
+    let managed_pids =
+        crate::commands::port::managed_pids_for_script(&script_id, &listening, &ownership);
     let mut statuses =
         crate::commands::port::build_declared_status(&script.ports, &listening, &managed_pids);
     // TCP probe each port
@@ -411,9 +485,17 @@ async fn port_conflicts(
     let listening = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(crate::commands::port::build_conflicts(
+    let ownership = crate::commands::port::build_port_ownership_cache(
+        state.app_state.as_ref(),
+        &state.pm,
+        &listening,
+    )
+    .await;
+    Ok(Json(crate::commands::port::build_conflicts_with_ownership(
+        &script_id,
         &script.ports,
         &listening,
+        &ownership,
     )))
 }
 
@@ -427,27 +509,20 @@ async fn ports_for_script(
     let all = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let by_port: std::collections::HashMap<u16, PortInfo> =
-        all.iter().map(|p| (p.port, p.clone())).collect();
-    let mut seen = std::collections::HashSet::new();
-    let mut out: Vec<PortInfo> = Vec::new();
-    for spec in &script.ports {
-        if let Some(info) = by_port.get(&spec.number) {
-            if seen.insert(spec.number) {
-                out.push(info.clone());
-            }
-        }
-    }
-    if let Some(snap) = state.pm.list().into_iter().find(|s| s.id == script_id) {
-        if let Ok(v) = crate::commands::port::list_ports_for_script_pid(snap.pid).await {
-            for info in v {
-                if seen.insert(info.port) {
-                    out.push(info);
-                }
-            }
-        }
-    }
-    Ok(Json(out))
+    let ownership = crate::commands::port::build_port_ownership_cache(
+        state.app_state.as_ref(),
+        &state.pm,
+        &all,
+    )
+    .await;
+    Ok(Json(
+        crate::commands::port::list_ports_for_script_from_snapshot(
+            &script_id,
+            &script.ports,
+            &all,
+            &ownership,
+        ),
+    ))
 }
 
 async fn lookup_script_from_state(
@@ -491,7 +566,9 @@ mod tests {
     #[test]
     fn cors_rejects_substring_spoof() {
         // The old .contains("trycloudflare.com") implementation accepted these.
-        assert!(!origin_is_allowed("http://attacker-trycloudflare.com.evil.com"));
+        assert!(!origin_is_allowed(
+            "http://attacker-trycloudflare.com.evil.com"
+        ));
         assert!(!origin_is_allowed("https://evil.com/trycloudflare.com"));
         assert!(!origin_is_allowed("http://trycloudflare.com.evil.co"));
     }
@@ -523,10 +600,7 @@ mod tests {
             parse_origin("https://foo.trycloudflare.com/path"),
             Some(("https", "foo.trycloudflare.com"))
         );
-        assert_eq!(
-            parse_origin("http://[::1]:8080/x"),
-            Some(("http", "[::1]"))
-        );
+        assert_eq!(parse_origin("http://[::1]:8080/x"), Some(("http", "[::1]")));
     }
 
     #[test]

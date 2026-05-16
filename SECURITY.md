@@ -29,9 +29,9 @@ procman is a **local development tool** that can optionally expose a remote cont
   - File permissions 0600 on sensitive files
 
 ### Known Limitations
-- LAN mode uses HTTP (not HTTPS). Use Cloudflare Tunnel for encrypted external access.
+- LAN mode is opt-in and can use a self-signed HTTPS certificate. Pairing payloads include the certificate SHA-256 fingerprint for client pinning; use Cloudflare Tunnel for untrusted networks.
 - The remote API can start/stop processes registered in config — equivalent to shell access for those commands.
-- Self-signed TLS module is included but not yet wired to the server start flow.
+- WebSocket token-in-query authentication is not accepted. Use bearer auth for HTTP and `Sec-WebSocket-Protocol` for WebSocket clients.
 
 ## Supported Versions
 

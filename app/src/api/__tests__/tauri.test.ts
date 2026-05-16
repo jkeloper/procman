@@ -60,6 +60,7 @@ describe('api wrapper (mocked invoke)', () => {
         envFile: null,
         ports: [],
         dependsOn: [],
+        schedule: null,
       }),
     );
     // Default population from schema.
@@ -74,6 +75,57 @@ describe('api wrapper (mocked invoke)', () => {
     expect(invokeMock).toHaveBeenCalledWith('spawn_process', {
       projectId: 'p1',
       scriptId: 's1',
+      ignorePortConflicts: false,
     });
+  });
+
+  it('spawnProcess can explicitly bypass port conflicts', async () => {
+    invokeMock.mockResolvedValueOnce(43);
+    const pid = await api.spawnProcess('p1', 's1', true);
+    expect(pid).toBe(43);
+    expect(invokeMock).toHaveBeenCalledWith('spawn_process', {
+      projectId: 'p1',
+      scriptId: 's1',
+      ignorePortConflicts: true,
+    });
+  });
+
+  it('startPtySession wires dimensions and validates metadata', async () => {
+    invokeMock.mockResolvedValueOnce({
+      id: 'pty1',
+      project_id: 'p1',
+      script_id: 's1',
+      pid: 1234,
+      command: 'python -i',
+      started_at_ms: 1_700_000_000_000,
+    });
+    const out = await api.startPtySession('p1', 's1', 120, 32);
+    expect(invokeMock).toHaveBeenCalledWith('start_pty_session', {
+      projectId: 'p1',
+      scriptId: 's1',
+      cols: 120,
+      rows: 32,
+    });
+    expect(out.id).toBe('pty1');
+  });
+
+  it('runtimePorts validates the lightweight ports snapshot', async () => {
+    invokeMock.mockResolvedValueOnce({
+      generated_at_ms: 1_700_000_000_000,
+      ports: [
+        {
+          port: 3000,
+          pid: 1234,
+          process_name: 'node',
+          command: 'node server.js',
+          managed: true,
+          owner_project_id: 'p1',
+          owner_script_id: 's1',
+        },
+      ],
+    });
+    const out = await api.runtimePorts();
+    expect(invokeMock).toHaveBeenCalledWith('runtime_ports', {});
+    expect(out.ports[0].managed).toBe(true);
   });
 });

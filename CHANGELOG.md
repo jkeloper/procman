@@ -18,20 +18,26 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 - **Audit log rotation** — remote API audit log rotates at 5 MB × 3 keep.
 - **Start-at-login** — LaunchAgent plist generated on demand.
 - **VSCode extension** — sidebar for process control (read-only scan of `launch.json` / `tasks.json`).
+- **Runtime snapshot IPC/events** — desktop frontend can bootstrap process + port ownership state from one backend command, then consume lightweight `runtime://delta` metrics and ports updates instead of stitching together separate process, port, and descendant PID calls.
+- **Visibility-aware frontend polling** — dashboard, remote status, tunnel status, and declared-port probes pause while the document is hidden.
+- **Multi-window logs + terminal** — process logs can be torn off into dedicated Tauri windows, and scripts can run in an interactive xterm.js PTY shell with stdin/resize support.
+- **Scheduled execution** — scripts can repeat on five-field local-time cron expressions.
+- **Mobile notifications** — the mobile companion can alert on script crashes, declared-port conflicts, and sustained procman unreachable states.
 
 ### Changed
 - **Remote API hardening** — LAN mode is opt-in (off by default) and can be bound to TLS via a self-signed certificate when enabled. Rate-limiting on authenticated routes. CORS tightened. WebSocket bearer token moved from query string to `Sec-WebSocket-Protocol`.
 - **Config migration v2 → v3** — schema carries `auto_restart_policy`, `lan_mode_opt_in`, `start_at_login`, `onboarded`. Safe downgrade-compatible via serde defaults.
-- **Process status** — backend broadcasts CPU/RSS metrics as a `process://metrics` event, replacing per-client polling.
-- **Port scanning** — 500 ms cache on `lsof` listings avoids N× calls per polling interval.
-- **CPU footprint** — metrics broadcaster interval 2s → 5s and pauses while the window is hidden / unfocused. User config default `port_poll_interval_ms` 1s → 5s also recommended (FS watcher hot-reloads). Background CPU drops from ~45% to single digits.
+- **Process status** — backend broadcasts CPU/RSS metrics as `runtime://delta` updates, with the legacy `process://metrics` event kept for compatibility, replacing per-client polling.
+- **Port scanning** — 500 ms cache on `lsof` listings and a batched runtime ownership cache avoid N× calls per polling interval.
+- **CPU footprint** — metrics broadcaster interval 2s → 5s and pauses while the window is hidden / unfocused. New user config default `port_poll_interval_ms` is 5s. Background CPU drops from ~45% to single digits.
+- **Remote access UX** — LAN server status now reports whether TLS is active, QR/URL display switches to `https://` for TLS sessions, and backend LAN start is gated by the user opt-in setting.
 - **Docs** — planning artefacts moved to `docs/archive/`. Active design docs live directly under `docs/`.
 
 ### Security
 See [SECURITY.md](SECURITY.md) for the current threat model and how to report issues. Detailed incident history is maintained privately; the public changelog summarises fixes at release granularity.
 
 ### Testing
-Rust: 167 unit tests. TypeScript (vitest): 23 tests across schemas / tauri IPC / components. CI runs `cargo test --lib`, `cargo clippy -- -D warnings`, and `pnpm tsc --noEmit` on `macos-latest` for every push / PR.
+Rust: 179 unit tests. TypeScript (vitest): 36 tests across schemas / tauri IPC / components. CI runs `cargo test --lib`, `cargo clippy -- -D warnings`, and `pnpm tsc --noEmit` on `macos-latest` for every push / PR.
 
 ---
 

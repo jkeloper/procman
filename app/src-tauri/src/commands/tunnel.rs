@@ -63,9 +63,15 @@ impl TunnelState {
 
         let mut guard = self.inner.lock().await;
         for cf in running {
-            let Some(ref target_url) = cf.url else { continue };
-            let Some(port) = parse_port_from_url(target_url) else { continue };
-            let Some(script_id) = port_to_script.get(&port) else { continue };
+            let Some(ref target_url) = cf.url else {
+                continue;
+            };
+            let Some(port) = parse_port_from_url(target_url) else {
+                continue;
+            };
+            let Some(script_id) = port_to_script.get(&port) else {
+                continue;
+            };
             // Don't overwrite if already tracked (e.g. user started a
             // fresh tunnel in this session).
             if guard.contains_key(*script_id) {
@@ -73,7 +79,9 @@ impl TunnelState {
             }
             log::info!(
                 "tunnel recovery: cloudflared pid {} on :{} → script {}",
-                cf.pid, port, script_id
+                cf.pid,
+                port,
+                script_id
             );
             guard.insert(
                 script_id.to_string(),
@@ -89,10 +97,7 @@ impl TunnelState {
 
 fn parse_port_from_url(url: &str) -> Option<u16> {
     // Strip scheme ("http://...") if present.
-    let rest = url
-        .find("://")
-        .map(|i| &url[i + 3..])
-        .unwrap_or(url);
+    let rest = url.find("://").map(|i| &url[i + 3..]).unwrap_or(url);
     // Cut off path/query so "localhost:3000/foo" → "localhost:3000".
     let host_port = rest.split(['/', '?', '#']).next()?;
     // IPv6 literal: "[::1]:3000". Take everything after the closing bracket.
@@ -105,7 +110,10 @@ fn parse_port_from_url(url: &str) -> Option<u16> {
     // "host" with no port at all.
     let port_str = after_bracket.rsplit_once(':')?.1;
     // Strip anything past the numeric run (defensive).
-    let digits: String = port_str.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = port_str
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     digits.parse().ok()
 }
 
@@ -137,7 +145,10 @@ mod parse_tests {
 
     #[test]
     fn with_path() {
-        assert_eq!(parse_port_from_url("http://localhost:8000/ready"), Some(8000));
+        assert_eq!(
+            parse_port_from_url("http://localhost:8000/ready"),
+            Some(8000)
+        );
     }
 }
 

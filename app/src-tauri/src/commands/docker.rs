@@ -39,10 +39,7 @@ async fn run_docker(args: Vec<&str>) -> Result<std::process::Output, String> {
     match tokio::time::timeout(Duration::from_secs(COMPOSE_TIMEOUT_SECS), exec).await {
         Ok(Ok(out)) => Ok(out),
         Ok(Err(e)) => Err(format!("docker spawn failed: {}", e)),
-        Err(_) => Err(format!(
-            "docker timed out after {}s",
-            COMPOSE_TIMEOUT_SECS
-        )),
+        Err(_) => Err(format!("docker timed out after {}s", COMPOSE_TIMEOUT_SECS)),
     }
 }
 
@@ -94,10 +91,7 @@ pub async fn compose_add_project(
     }
     let p = Path::new(&compose_path);
     if !p.exists() || !p.is_file() {
-        return Err(format!(
-            "compose file does not exist: {}",
-            compose_path
-        ));
+        return Err(format!("compose file does not exist: {}", compose_path));
     }
     // Normalize to absolute path so later `docker compose -f` works from anywhere.
     let canon = p
@@ -121,7 +115,9 @@ pub async fn compose_add_project(
         id: Uuid::new_v4().to_string(),
         name: name.trim().to_string(),
         compose_path: canon,
-        project_name: project_name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        project_name: project_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
     };
     let to_return = cp.clone();
     state
@@ -144,10 +140,7 @@ pub async fn compose_remove_project(
 }
 
 #[tauri::command]
-pub async fn compose_up(
-    id: String,
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<(), String> {
+pub async fn compose_up(id: String, state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
     let snap = snapshot(state.inner().as_ref()).await;
     let cp = lookup(&snap, &id)?;
     let args = {
@@ -343,7 +336,8 @@ mod tests {
 
     #[test]
     fn parses_json_array_legacy_output() {
-        let text = r#"[{"service":"web","image":"nginx","state":"running","ports":"80/tcp, 443/tcp"}]"#;
+        let text =
+            r#"[{"service":"web","image":"nginx","state":"running","ports":"80/tcp, 443/tcp"}]"#;
         let parsed = parse_compose_ps(text);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].service, "web");

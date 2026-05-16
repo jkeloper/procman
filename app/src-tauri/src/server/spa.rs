@@ -78,7 +78,13 @@ mod tests {
 
     #[test]
     fn cache_control_cacheable_for_assets() {
-        assert_eq!(cache_control_for("assets/app-abcd1234.js"), "public, max-age=3600");
-        assert_eq!(cache_control_for("icons/icon-192.png"), "public, max-age=3600");
+        assert_eq!(
+            cache_control_for("assets/app-abcd1234.js"),
+            "public, max-age=3600"
+        );
+        assert_eq!(
+            cache_control_for("icons/icon-192.png"),
+            "public, max-age=3600"
+        );
     }
 }

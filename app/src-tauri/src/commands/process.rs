@@ -5,9 +5,12 @@ use crate::process::{ProcessManager, ProcessSnapshot};
 use crate::state::AppState;
 use std::sync::Arc;
 
+const LOG_SNAPSHOT_LIMIT_DEFAULT: usize = 5000;
+const LOG_SNAPSHOT_LIMIT_MAX: usize = 5000;
+
 /// Resolve (project_id, script_id) → (Script, cwd) from the in-memory config.
 /// Uses async lock to avoid blocking the tokio runtime (UNI-1 fix).
-async fn find_script(
+pub(crate) async fn find_script(
     state: &AppState,
     project_id: &str,
     script_id: &str,
@@ -18,16 +21,34 @@ async fn find_script(
     Some((script, proj.path.clone()))
 }
 
+async fn shutdown_timeout_ms(state: &AppState) -> u64 {
+    let guard = state.config.lock().await;
+    crate::types::clamp_shutdown_timeout_ms(guard.settings.shutdown_timeout_ms)
+}
+
 #[tauri::command]
 pub async fn spawn_process(
     project_id: String,
     script_id: String,
+    ignore_port_conflicts: Option<bool>,
     state: tauri::State<'_, Arc<AppState>>,
     pm: tauri::State<'_, ProcessManager>,
 ) -> Result<u32, String> {
     let (script, cwd) = find_script(&state, &project_id, &script_id)
         .await
         .ok_or_else(|| format!("script not found: {}/{}", project_id, script_id))?;
+    if !ignore_port_conflicts.unwrap_or(false) {
+        let conflicts = crate::commands::port::blocking_conflicts_for_script(
+            &script.id,
+            &script.ports,
+            &state,
+            &pm,
+        )
+        .await?;
+        if let Some(conflict) = conflicts.first() {
+            return Err(crate::commands::port::describe_port_conflict(conflict));
+        }
+    }
     // S4: wait for dependencies to be reachable before spawning.
     if !script.depends_on.is_empty() {
         wait_for_dependencies(&state, &pm, &script.depends_on).await?;
@@ -39,7 +60,7 @@ pub async fn spawn_process(
 /// ProcessManager AND (b) all its declared ports pass a TCP probe.
 /// Times out after 30 seconds. Returns a descriptive error describing
 /// which dep isn't ready so the user can start / fix it.
-async fn wait_for_dependencies(
+pub(crate) async fn wait_for_dependencies(
     state: &AppState,
     pm: &ProcessManager,
     dep_ids: &[String],
@@ -98,9 +119,11 @@ async fn wait_for_dependencies(
 #[tauri::command]
 pub async fn kill_process(
     script_id: String,
+    state: tauri::State<'_, Arc<AppState>>,
     pm: tauri::State<'_, ProcessManager>,
 ) -> Result<(), String> {
-    pm.kill(&script_id).await
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    pm.kill_with_timeout(&script_id, timeout_ms).await
 }
 
 /// v3 고도화 6: Graceful stop. Resolves all scripts that declare
@@ -117,16 +140,15 @@ pub async fn stop_script_graceful(
     pm: tauri::State<'_, ProcessManager>,
 ) -> Result<(), String> {
     let dependents = resolve_dependents(&state, &script_id).await?;
-    pm.stop_script_graceful(&script_id, &dependents).await
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    pm.stop_script_graceful_with_timeout(&script_id, &dependents, timeout_ms)
+        .await
 }
 
 /// Return every script id whose transitive `depends_on` graph contains
 /// `target_id`. Order is BFS — closer dependents first. Returns Err on
 /// a cycle reaching `target_id` (the caller can still force-kill).
-async fn resolve_dependents(
-    state: &AppState,
-    target_id: &str,
-) -> Result<Vec<String>, String> {
+async fn resolve_dependents(state: &AppState, target_id: &str) -> Result<Vec<String>, String> {
     let guard = state.config.lock().await;
     let mut all_scripts: Vec<(String, Vec<String>)> = Vec::new();
     for project in &guard.projects {
@@ -163,7 +185,19 @@ pub async fn restart_process(
     let (script, cwd) = find_script(&state, &project_id, &script_id)
         .await
         .ok_or_else(|| format!("script not found: {}/{}", project_id, script_id))?;
-    pm.restart(&script, Some(cwd)).await
+    let conflicts = crate::commands::port::blocking_conflicts_for_script(
+        &script.id,
+        &script.ports,
+        &state,
+        &pm,
+    )
+    .await?;
+    if let Some(conflict) = conflicts.first() {
+        return Err(crate::commands::port::describe_port_conflict(conflict));
+    }
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    pm.restart_with_timeout(&script, Some(cwd), timeout_ms)
+        .await
 }
 
 #[tauri::command]
@@ -176,9 +210,13 @@ pub async fn list_processes(
 #[tauri::command]
 pub async fn log_snapshot(
     script_id: String,
+    limit: Option<usize>,
     pm: tauri::State<'_, ProcessManager>,
 ) -> Result<Vec<LogLine>, String> {
-    Ok(pm.log_snapshot(&script_id))
+    let limit = limit
+        .unwrap_or(LOG_SNAPSHOT_LIMIT_DEFAULT)
+        .clamp(1, LOG_SNAPSHOT_LIMIT_MAX);
+    Ok(pm.log_tail(&script_id, limit))
 }
 
 #[tauri::command]
@@ -193,10 +231,14 @@ pub async fn clear_log(
 /// E1: Kill all running processes and exit the app.
 #[tauri::command]
 pub async fn force_quit(
+    state: tauri::State<'_, Arc<AppState>>,
     pm: tauri::State<'_, ProcessManager>,
+    pty: tauri::State<'_, crate::commands::pty::PtyManager>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    pm.kill_all().await;
+    let timeout_ms = shutdown_timeout_ms(&state).await;
+    pm.kill_all_with_timeout(timeout_ms).await;
+    pty.kill_all();
     app.exit(0);
     Ok(())
 }

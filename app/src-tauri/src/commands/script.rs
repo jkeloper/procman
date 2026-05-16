@@ -11,7 +11,7 @@
 
 use crate::process::ProcessManager;
 use crate::state::AppState;
-use crate::types::{PortSpec, Script};
+use crate::types::{PortSpec, ScheduleSpec, Script};
 use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -65,6 +65,22 @@ pub(crate) fn validate_ports(input: &[PortSpec]) -> Result<Vec<PortSpec>, String
     Ok(out)
 }
 
+fn normalize_schedule(input: Option<ScheduleSpec>) -> Result<Option<ScheduleSpec>, String> {
+    let Some(mut spec) = input else {
+        return Ok(None);
+    };
+    spec.cron = spec.cron.trim().to_string();
+    if spec.cron.is_empty() {
+        return if spec.enabled {
+            Err("schedule cron cannot be empty".to_string())
+        } else {
+            Ok(None)
+        };
+    }
+    crate::scheduler::validate_cron_expr(&spec.cron)?;
+    Ok(Some(spec))
+}
+
 #[tauri::command]
 pub async fn list_scripts(
     project_id: String,
@@ -89,6 +105,7 @@ pub async fn create_script(
     auto_restart: bool,
     env_file: Option<String>,
     depends_on: Option<Vec<String>>,
+    schedule: Option<ScheduleSpec>,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Script, String> {
     if name.trim().is_empty() {
@@ -109,7 +126,10 @@ pub async fn create_script(
             .find(|p| p.id == project_id)
             .ok_or_else(|| format!("project not found: {}", project_id))?;
         if proj.scripts.iter().any(|s| s.name == trimmed_name) {
-            return Err(format!("script with name '{}' already exists", trimmed_name));
+            return Err(format!(
+                "script with name '{}' already exists",
+                trimmed_name
+            ));
         }
         if proj.scripts.iter().any(|s| s.command == trimmed_cmd) {
             return Err("script with identical command already exists".to_string());
@@ -120,10 +140,8 @@ pub async fn create_script(
     // expected_port is synced from ports[0] at save time. Falling back to
     // legacy expected_port is still allowed when ports is None/empty.
     let validated_ports = validate_ports(&ports.unwrap_or_default())?;
-    let effective_expected = validated_ports
-        .first()
-        .map(|p| p.number)
-        .or(expected_port);
+    let effective_expected = validated_ports.first().map(|p| p.number).or(expected_port);
+    let schedule = normalize_schedule(schedule)?;
 
     let script = Script {
         id: Uuid::new_v4().to_string(),
@@ -134,6 +152,7 @@ pub async fn create_script(
         auto_restart,
         auto_restart_policy: None,
         env_file: env_file.filter(|s| !s.trim().is_empty()),
+        schedule,
         depends_on: depends_on.unwrap_or_default(),
     };
     let to_return = script.clone();
@@ -161,15 +180,20 @@ pub async fn update_script(
     name: Option<String>,
     command: Option<String>,
     expected_port: Option<Option<u16>>, // Some(None) = clear, None = don't change
-    ports: Option<Vec<PortSpec>>,       // S1: None = don't change, Some(vec) = replace (empty clears)
+    ports: Option<Vec<PortSpec>>, // S1: None = don't change, Some(vec) = replace (empty clears)
     auto_restart: Option<bool>,
-    env_file: Option<Option<String>>,   // Some(None) = clear, None = don't change
-    depends_on: Option<Vec<String>>,    // S4: None = don't change, Some(vec) = replace
+    env_file: Option<Option<String>>, // Some(None) = clear, None = don't change
+    depends_on: Option<Vec<String>>,  // S4: None = don't change, Some(vec) = replace
+    schedule: Option<Option<ScheduleSpec>>, // Some(None) = clear, None = don't change
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Script, String> {
     // Validate ports up front so we can bail without mutating state.
     let validated_ports = match ports {
         Some(v) => Some(validate_ports(&v)?),
+        None => None,
+    };
+    let validated_schedule = match schedule {
+        Some(value) => Some(normalize_schedule(value)?),
         None => None,
     };
 
@@ -199,6 +223,9 @@ pub async fn update_script(
             }
             if let Some(ef) = env_file {
                 script.env_file = ef.filter(|s| !s.trim().is_empty());
+            }
+            if let Some(schedule) = validated_schedule {
+                script.schedule = schedule;
             }
             if let Some(deps) = depends_on {
                 script.depends_on = deps;

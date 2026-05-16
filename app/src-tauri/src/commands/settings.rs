@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::types::AppSettings;
+use crate::types::{clamp_shutdown_timeout_ms, AppSettings};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ pub struct AppSettingsPatch {
     pub lan_mode_opt_in: Option<bool>,
     pub start_at_login: Option<bool>,
     pub onboarded: Option<bool>,
+    pub shutdown_timeout_ms: Option<u64>,
 }
 
 impl AppSettingsPatch {
@@ -39,13 +40,14 @@ impl AppSettingsPatch {
         if let Some(v) = self.onboarded {
             s.onboarded = v;
         }
+        if let Some(v) = self.shutdown_timeout_ms {
+            s.shutdown_timeout_ms = clamp_shutdown_timeout_ms(v);
+        }
     }
 }
 
 #[tauri::command]
-pub async fn get_settings(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<AppSettings, String> {
+pub async fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<AppSettings, String> {
     let guard = state.config.lock().await;
     Ok(guard.settings.clone())
 }

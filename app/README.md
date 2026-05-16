@@ -36,7 +36,10 @@ brew install fswatch                  # one-time
 ## Testing
 ```bash
 cd src-tauri
-cargo test --lib                      # 167 unit tests
+cargo test --lib                      # 179 unit tests
+
+cd ..
+pnpm test                             # 36 frontend tests
 ```
 
 ## Directory layout
@@ -64,10 +67,9 @@ app/
         ├── log_buffer.rs             # 5000-line ring buffer + search
         ├── watcher.rs                # config.yaml FS watcher
         ├── state.rs                  # AppState
-        ├── metrics.rs                # CPU/RSS 2s polling
-        ├── port_probe.rs             # TCP liveness probe
         ├── cloudflared.rs            # tunnel run/kill/recover
-        ├── remote.rs                 # REST + WebSocket remote API
+        ├── runtime_state.rs          # persisted last-running state
+        ├── server/                   # REST + WebSocket remote API
         └── commands/                 # IPC commands (project/script/process/port/scan/group/session)
 ```
 
@@ -119,7 +121,10 @@ brew install fswatch                  # 최초 1회
 ## 테스트
 ```bash
 cd src-tauri
-cargo test --lib                      # 167 unit tests
+cargo test --lib                      # 179 unit tests
+
+cd ..
+pnpm test                             # 프론트엔드 36개 테스트
 ```
 
 ## 디렉토리 구조
@@ -147,10 +152,9 @@ app/
         ├── log_buffer.rs             # 5000-line ring buffer + search
         ├── watcher.rs                # config.yaml FS watcher
         ├── state.rs                  # AppState
-        ├── metrics.rs                # CPU/RSS 2s 폴링
-        ├── port_probe.rs             # TCP liveness probe
         ├── cloudflared.rs            # 터널 run/kill/recover
-        ├── remote.rs                 # REST + WebSocket 원격 API
+        ├── runtime_state.rs          # 마지막 실행 상태 영속화
+        ├── server/                   # REST + WebSocket 원격 API
         └── commands/                 # IPC 명령 (project/script/process/port/scan/group/session)
 ```
 

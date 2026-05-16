@@ -41,8 +41,9 @@ pub struct ServerHandle {
     pub port: u16,
     pub mode: ServerMode,
     /// True when axum-server is terminating TLS locally (LAN mode).
-    #[allow(dead_code)]
     pub tls: bool,
+    /// SHA-256 fingerprint of the active LAN TLS certificate.
+    pub cert_fingerprint_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -59,21 +60,8 @@ pub async fn start(
     port: u16,
     mode: ServerMode,
 ) -> Result<ServerHandle, String> {
-    // LAN mode advertises TLS but mobile clients can't fully validate a
-    // self-signed cert without pinning the fingerprint first. Until that
-    // flow lands, surface a loud warning so the user understands the
-    // exposure. A hard gate on `AppSettings.lan_mode_opt_in` will replace
-    // this once Worker E adds the field.
-    // TODO(worker-e): wire AppSettings.lan_mode_opt_in and error out
-    // with "LAN mode disabled — TLS pinning incomplete. Set
-    // lan_mode_opt_in=true to enable at your own risk." when false.
     if matches!(mode, ServerMode::Lan) {
-        log::warn!(
-            "LAN mode enabled: TLS pinning flow is incomplete — clients must verify the cert fingerprint manually."
-        );
-        crate::crash_log::record(
-            "LAN mode started without lan_mode_opt_in gate (pending Worker E)",
-        );
+        log::warn!("LAN mode enabled: clients should pin the pairing certificate fingerprint.");
     }
 
     let router = routes::build_router(state.clone());
@@ -104,20 +92,31 @@ pub async fn start(
         None
     };
     let use_tls = matches!(mode, ServerMode::Lan) && tls_files.is_some();
+    let cert_fingerprint_sha256 = if use_tls {
+        tls_files.as_ref().and_then(
+            |files| match tls::fingerprint_sha256_file(&files.cert_path) {
+                Ok(fp) => Some(fp),
+                Err(e) => {
+                    log::warn!("TLS cert fingerprint failed: {}", e);
+                    None
+                }
+            },
+        )
+    } else {
+        None
+    };
 
     let (actual_addr, port_n) = if use_tls {
         let files = tls_files.expect("use_tls implies tls_files");
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-            &files.cert_path,
-            &files.key_path,
-        )
-        .await
-        .map_err(|e| format!("load TLS cert/key: {}", e))?;
+        let tls_config =
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(&files.cert_path, &files.key_path)
+                .await
+                .map_err(|e| format!("load TLS cert/key: {}", e))?;
 
         // Pre-bind with std to discover the actual port (port=0 gives an
         // ephemeral one). axum-server flips the listener to non-blocking.
-        let std_listener = std::net::TcpListener::bind(addr)
-            .map_err(|e| format!("bind {}: {}", addr, e))?;
+        let std_listener =
+            std::net::TcpListener::bind(addr).map_err(|e| format!("bind {}: {}", addr, e))?;
         let actual = std_listener
             .local_addr()
             .map_err(|e| format!("local_addr: {}", e))?;
@@ -129,8 +128,7 @@ pub async fn start(
             let handle_for_shutdown = handle.clone();
             tokio::spawn(async move {
                 let _ = shutdown_rx.await;
-                handle_for_shutdown
-                    .graceful_shutdown(Some(std::time::Duration::from_secs(2)));
+                handle_for_shutdown.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
             });
             let server = axum_server::from_tcp_rustls(std_listener, tls_config);
             if let Err(e) = server.handle(handle).serve(app_service).await {
@@ -172,6 +170,7 @@ pub async fn start(
         port: port_n,
         mode,
         tls: use_tls,
+        cert_fingerprint_sha256,
     })
 }
 

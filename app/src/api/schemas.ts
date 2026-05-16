@@ -27,6 +27,12 @@ export const AutoRestartPolicySchema = z.object({
 });
 export type AutoRestartPolicy = z.infer<typeof AutoRestartPolicySchema>;
 
+export const ScheduleSpecSchema = z.object({
+  enabled: z.boolean().default(false),
+  cron: z.string(),
+});
+export type ScheduleSpec = z.infer<typeof ScheduleSpecSchema>;
+
 export const ScriptSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -37,6 +43,8 @@ export const ScriptSchema = z.object({
   // v3: Optional structured policy. null = fall back to `auto_restart`.
   auto_restart_policy: AutoRestartPolicySchema.nullable().default(null),
   env_file: z.string().nullable().default(null),
+  // Optional local five-field cron schedule.
+  schedule: ScheduleSpecSchema.nullable().default(null),
   // S4: IDs of other scripts that must be running + reachable first.
   depends_on: z.array(z.string()).default([]),
 });
@@ -65,7 +73,7 @@ export type Group = z.infer<typeof GroupSchema>;
 
 export const AppSettingsSchema = z.object({
   log_buffer_size: z.number().int().default(5000),
-  port_poll_interval_ms: z.number().int().default(1000),
+  port_poll_interval_ms: z.number().int().default(5000),
   theme: z.string().default('system'),
   // Rust `HashMap<u16, String>` — JSON serializes keys as strings.
   // Default empty; backend omits the field when absent from YAML.
@@ -77,6 +85,8 @@ export const AppSettingsSchema = z.object({
   start_at_login: z.boolean().default(false),
   // v3: flipped to true after the 3-step onboarding completes.
   onboarded: z.boolean().default(false),
+  // Grace period between SIGTERM and fallback SIGKILL when stopping scripts.
+  shutdown_timeout_ms: z.number().int().min(250).max(30000).default(1500),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -88,12 +98,13 @@ export const AppConfigSchema = z.object({
   groups: z.array(GroupSchema).default([]),
   settings: AppSettingsSchema.default({
     log_buffer_size: 5000,
-    port_poll_interval_ms: 1000,
+    port_poll_interval_ms: 5000,
     theme: 'system',
     port_aliases: {},
     lan_mode_opt_in: false,
     start_at_login: false,
     onboarded: false,
+    shutdown_timeout_ms: 1500,
   }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -113,6 +124,26 @@ export const StatusEventSchema = z.object({
 });
 export type StatusEvent = z.infer<typeof StatusEventSchema>;
 
+export const ShutdownPhaseSchema = z.enum([
+  'terminating',
+  'waiting',
+  'killing',
+  'cleanup',
+  'stopped',
+  'not_running',
+]);
+export type ShutdownPhase = z.infer<typeof ShutdownPhaseSchema>;
+
+export const ShutdownEventSchema = z.object({
+  id: z.string(),
+  phase: ShutdownPhaseSchema,
+  pid: z.number().int().nullable(),
+  elapsed_ms: z.number().int(),
+  timeout_ms: z.number().int(),
+  ts_ms: z.number().int(),
+});
+export type ShutdownEvent = z.infer<typeof ShutdownEventSchema>;
+
 export const ProcessSnapshotSchema = z.object({
   id: z.string(),
   pid: z.number().int(),
@@ -122,9 +153,48 @@ export const ProcessSnapshotSchema = z.object({
   // S3: Observability metrics (nullable when ps failed).
   cpu_pct: z.number().nullable().default(null),
   rss_kb: z.number().int().nullable().default(null),
+  wrapper_pid: z.number().int().nullable().default(null),
+  bound_at_ms: z.number().int().nullable().default(null),
 });
 export type ProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 
+export const RuntimePortInfoSchema = z.object({
+  port: z.number().int().min(1).max(65535),
+  pid: z.number().int(),
+  process_name: z.string(),
+  command: z.string().default(''),
+  managed: z.boolean().default(false),
+  owner_project_id: z.string().nullable().default(null),
+  owner_script_id: z.string().nullable().default(null),
+});
+export type RuntimePortInfo = z.infer<typeof RuntimePortInfoSchema>;
+
+export const RuntimeSnapshotSchema = z.object({
+  generated_at_ms: z.number().int(),
+  processes: z.array(ProcessSnapshotSchema).default([]),
+  ports: z.array(RuntimePortInfoSchema).default([]),
+});
+export type RuntimeSnapshot = z.infer<typeof RuntimeSnapshotSchema>;
+
+export const RuntimePortsSnapshotSchema = z.object({
+  generated_at_ms: z.number().int(),
+  ports: z.array(RuntimePortInfoSchema).default([]),
+});
+export type RuntimePortsSnapshot = z.infer<typeof RuntimePortsSnapshotSchema>;
+
+export const RuntimeDeltaSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('metrics'),
+    generated_at_ms: z.number().int(),
+    processes: z.array(ProcessSnapshotSchema).default([]),
+  }),
+  z.object({
+    kind: z.literal('ports'),
+    generated_at_ms: z.number().int(),
+    ports: z.array(RuntimePortInfoSchema).default([]),
+  }),
+]);
+export type RuntimeDelta = z.infer<typeof RuntimeDeltaSchema>;
 
 export const LogStreamSchema = z.enum(['stdout', 'stderr']);
 export type LogStream = z.infer<typeof LogStreamSchema>;
@@ -156,6 +226,31 @@ export const LogStorageStatsSchema = z.object({
   newest_ts: z.number().int().nullable(),
 });
 export type LogStorageStats = z.infer<typeof LogStorageStatsSchema>;
+
+export const PtySessionSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  script_id: z.string(),
+  pid: z.number().int().nullable(),
+  command: z.string(),
+  started_at_ms: z.number().int(),
+});
+export type PtySession = z.infer<typeof PtySessionSchema>;
+
+export const PtyDataEventSchema = z.object({
+  id: z.string(),
+  script_id: z.string(),
+  data: z.string(),
+});
+export type PtyDataEvent = z.infer<typeof PtyDataEventSchema>;
+
+export const PtyExitEventSchema = z.object({
+  id: z.string(),
+  script_id: z.string(),
+  exit_code: z.number().int(),
+  success: z.boolean(),
+});
+export type PtyExitEvent = z.infer<typeof PtyExitEventSchema>;
 
 export const LaunchConfigCandidateSchema = z.object({
   name: z.string(),

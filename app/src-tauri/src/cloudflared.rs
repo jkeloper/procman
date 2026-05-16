@@ -73,9 +73,20 @@ pub async fn list_cf_tunnels() -> Result<Vec<NamedTunnel>, String> {
     let arr = parsed.as_array().cloned().unwrap_or_default();
     let mut result = Vec::new();
     for item in arr {
-        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let created_at = item.get("created_at").and_then(|v| v.as_str()).map(String::from);
+        let id = item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let name = item
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let created_at = item
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let connections = item
             .get("connections")
             .and_then(|v| v.as_array())
@@ -108,7 +119,9 @@ fn parse_ps_for_cloudflared(text: &str) -> Vec<RunningCloudflared> {
     let mut result = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
-        let Some(space) = trimmed.find(char::is_whitespace) else { continue };
+        let Some(space) = trimmed.find(char::is_whitespace) else {
+            continue;
+        };
         let pid_str = &trimmed[..space];
         let rest = trimmed[space..].trim_start();
         // Match binaries named cloudflared (not e.g. grep cloudflared)
@@ -183,7 +196,11 @@ pub async fn kill_cloudflared_pid(pid: u32) -> Result<(), String> {
     let cmd = String::from_utf8_lossy(&check.stdout);
     let first_token = cmd.split_whitespace().next().unwrap_or("");
     if first_token != "cloudflared" && !first_token.ends_with("/cloudflared") {
-        return Err(format!("PID {} is not a cloudflared process ({})", pid, cmd.trim()));
+        return Err(format!(
+            "PID {} is not a cloudflared process ({})",
+            pid,
+            cmd.trim()
+        ));
     }
     unsafe {
         libc::kill(pid as i32, libc::SIGTERM);

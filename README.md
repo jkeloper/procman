@@ -10,17 +10,18 @@ Mac-only process manager GUI for solo developers juggling many local servers, tu
 
 ## Status
 
-**v0.2.0 released.** Post-MVP S1–S5 shipped and the mobile/remote stack is live.
+**v0.2.0 release candidate.** Post-MVP S1–S5 shipped; the project is in final packaging, signing, and docs hardening.
 
-Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **167 tests passing** on the backend and **23 tests passing** on the frontend.
+Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **179 tests passing** on the backend and **36 tests passing** on the frontend.
 
 ## Features
 
 - **Scripts** — Auto-detect `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json`; start/stop/restart with one click; login-shell (`zsh -l -c`) wrapping so `nvm`/`pyenv` PATHs survive.
-- **Logs** — 5,000-line ring buffer per process, virtualized (`react-window`), ANSI color rendering, substring search, and multi-tab switching. Backed by a SQLite FTS index for persistent history.
-- **Ports** — Declarative `PortSpec` (multi-port per script) + 2s `lsof` polling + 400ms TCP liveness probes; one-click kill on conflicts.
+- **Logs & terminal** — 5,000-line ring buffer per process, virtualized (`react-window`), ANSI color rendering, substring search, multi-tab switching, tear-off log windows, and an xterm.js PTY shell for interactive scripts. Backed by a SQLite FTS index for persistent history.
+- **Ports** — Declarative `PortSpec` (multi-port per script) + visibility-aware `lsof` polling + 400ms TCP liveness probes; one-click kill on conflicts.
 - **Groups** — "Morning Stack" style batches that launch multiple scripts sequentially with a 400ms stagger; individual failures don't block the rest.
-- **Mobile** — iOS/PWA companion via Capacitor; QR-code pairing, full S1–S5 feature parity, reachable over Cloudflare Tunnel.
+- **Mobile** — iOS/PWA companion via Capacitor; QR-code pairing, full S1–S5 feature parity, local notifications for crashes/port conflicts/unreachable procman, reachable over Cloudflare Tunnel.
+- **Scheduling** — Five-field local-time cron schedules can repeat scripts without adding external cron jobs.
 - **Auto-updater** — Tauri signed update feed from the GitHub Releases channel.
 - **Docker Compose** — First-class project type; compose services are treated as scripts.
 - **Session restore** — Running scripts are snapshotted on exit and offered back on the next launch.
@@ -28,7 +29,7 @@ Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare 
 
 ## Quick Start
 
-Install the latest signed DMG:
+Install the latest signed DMG once the release is published:
 
 ```bash
 # Option A — one-liner installer
@@ -74,11 +75,11 @@ For day-to-day work prefer `pnpm tauri dev`; `watch-install.sh` is for "keep the
 ## Testing
 
 ```bash
-# Rust (backend) — 167 unit tests
+# Rust (backend) — 179 unit tests
 cd app/src-tauri
 cargo test --lib
 
-# Frontend — 23 tests
+# Frontend — 36 tests
 cd app
 pnpm test
 ```
@@ -98,18 +99,18 @@ procman/
 ```
 
 ### Tech stack
-- **Desktop** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 18/TS, Vite, shadcn/ui, Tailwind v4
+- **Desktop** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
 - **Logs** — `react-window` virtualization + `ansi-to-html` + SQLite FTS5
 - **Mobile** — Capacitor + React/TS (shares shadcn/Tailwind with desktop)
-- **Remote API** — REST + WebSocket over Cloudflare Tunnel, bearer token auth, rate limiting
+- **Remote API** — REST + WebSocket over loopback/LAN/Tunnel, bearer token auth, rate limiting, optional self-signed TLS for LAN
 
 ## Remote Access
 
-1. Desktop → **Dashboard → Network → Start (LAN)**
-2. Click **Expose via Cloudflare** for a public HTTPS URL.
-3. Open the QR code on your phone → scan → connected.
+1. Desktop → **Dashboard → Network → Start (LAN)** for local pairing, or keep loopback-only for desktop use.
+2. Click **Expose via Cloudflare** for a public HTTPS URL when you need access outside the LAN.
+3. Open the QR code on your phone → scan → connected. LAN QR payloads include the TLS certificate SHA-256 fingerprint in the URL fragment for client pinning.
 
-Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is enforced per-IP, and the API surface only exposes actions on registered scripts.
+Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is enforced per-IP, LAN mode can be served with a self-signed certificate, WebSocket auth uses bearer/subprotocol credentials rather than query-string tokens, and the API surface only exposes actions on registered scripts.
 
 ## Documentation
 
@@ -145,17 +146,18 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 ## 상태
 
-**v0.2.0 릴리즈 완료.** Post-MVP S1~S5 및 모바일/원격 통합까지 전부 반영된 상태.
+**v0.2.0 릴리스 후보.** Post-MVP S1~S5는 반영됐고, 현재 패키징·서명·문서 하드닝 단계.
 
-스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **167개 테스트 통과**, 프론트엔드 **23개 테스트 통과**.
+스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **179개 테스트 통과**, 프론트엔드 **36개 테스트 통과**.
 
 ## 기능
 
 - **스크립트** — `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json` 자동 감지, 원클릭 start/stop/restart, `zsh -l -c` 로그인 쉘 래핑으로 `nvm`/`pyenv` PATH 보존.
-- **로그** — 프로세스당 5,000라인 ring buffer, `react-window` 가상 스크롤, ANSI 컬러 렌더링, substring 검색, 멀티탭. SQLite FTS 인덱스로 영구 히스토리 지원.
+- **로그 & 터미널** — 프로세스당 5,000라인 ring buffer, `react-window` 가상 스크롤, ANSI 컬러 렌더링, substring 검색, 멀티탭, 분리 로그 창, interactive script용 xterm.js PTY 셸. SQLite FTS 인덱스로 영구 히스토리 지원.
 - **포트** — 선언형 `PortSpec`(스크립트별 멀티 포트) + 2초 `lsof` 폴링 + 400ms TCP liveness probe, 충돌 시 원클릭 kill.
 - **그룹** — "Morning Stack" 스타일로 여러 스크립트를 400ms 간격으로 순차 실행. 개별 실패가 나머지를 막지 않음.
-- **모바일** — Capacitor 기반 iOS/PWA 동반 앱. QR 코드 페어링, S1~S5 기능 전부 미러링, Cloudflare Tunnel 경유 접근.
+- **모바일** — Capacitor 기반 iOS/PWA 동반 앱. QR 코드 페어링, S1~S5 기능 전부 미러링, 크래시/포트 충돌/procman 접속 불가 로컬 알림, Cloudflare Tunnel 경유 접근.
+- **스케줄링** — 외부 cron 없이 5필드 로컬 시간 cron 표현식으로 스크립트 반복 실행.
 - **자동 업데이터** — GitHub Releases 채널에서 Tauri 서명 업데이트 피드 수신.
 - **Docker Compose** — 1급 프로젝트 타입. compose 서비스를 스크립트로 취급.
 - **세션 복원** — 앱 종료 시 running 스크립트를 스냅샷, 재시작 시 복원 프롬프트.
@@ -163,7 +165,7 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 ## 빠른 시작
 
-최신 서명 DMG 설치:
+릴리스가 게시된 뒤 최신 서명 DMG 설치:
 
 ```bash
 # 옵션 A — 원라이너 설치 스크립트
@@ -209,11 +211,11 @@ brew install fswatch
 ## 테스트
 
 ```bash
-# Rust 백엔드 — 167개 unit test
+# Rust 백엔드 — 179개 unit test
 cd app/src-tauri
 cargo test --lib
 
-# 프론트엔드 — 23개 test
+# 프론트엔드 — 36개 test
 cd app
 pnpm test
 ```
@@ -233,18 +235,18 @@ procman/
 ```
 
 ### 기술 스택
-- **데스크톱** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 18/TS, Vite, shadcn/ui, Tailwind v4
+- **데스크톱** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
 - **로그** — `react-window` 가상화 + `ansi-to-html` + SQLite FTS5
 - **모바일** — Capacitor + React/TS (데스크톱과 shadcn/Tailwind 공유)
-- **원격 API** — REST + WebSocket (Cloudflare Tunnel 경유), bearer token 인증, rate limiting
+- **원격 API** — loopback/LAN/Tunnel 위의 REST + WebSocket, bearer token 인증, rate limiting, LAN self-signed TLS 옵션
 
 ## 원격 접근
 
-1. 데스크톱 → **Dashboard → Network → Start (LAN)**
-2. **Expose via Cloudflare** 클릭 → 공개 HTTPS URL 획득
-3. 폰에서 QR 코드 스캔 → 연결 완료
+1. 데스크톱 → **Dashboard → Network → Start (LAN)** 으로 로컬 페어링, 또는 데스크톱 전용이면 loopback-only 유지
+2. 외부 접근이 필요하면 **Expose via Cloudflare** 클릭 → 공개 HTTPS URL 획득
+3. 폰에서 QR 코드 스캔 → 연결 완료. LAN QR payload에는 client pinning을 위한 TLS certificate SHA-256 fingerprint가 포함됩니다.
 
-토큰은 256-bit CSPRNG bearer token. CORS 제한, per-IP rate limiting 적용, API 표면은 등록된 스크립트에 대한 액션만 노출.
+토큰은 256-bit CSPRNG bearer token. CORS 제한, per-IP rate limiting 적용, LAN 모드는 self-signed certificate로 서빙 가능하고, WebSocket 인증은 query-string token 대신 bearer/subprotocol credentials를 사용하며, API 표면은 등록된 스크립트에 대한 액션만 노출.
 
 ## 문서
 

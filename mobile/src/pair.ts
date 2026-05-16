@@ -5,7 +5,7 @@ const KEY = 'procman.pair';
 /**
  * Detect a pairing payload in the current URL hash and store it
  * automatically. The desktop QR code encodes:
- *   https://procman.example.com/#token=<token>
+ *   https://procman.example.com/#token=<token>&fp=<cert-sha256>
  *
  * When a mobile camera scans the QR and opens the URL, this function
  * runs on first PWA load, extracts the token, derives host/port from
@@ -21,16 +21,24 @@ export function tryAutoPairFromHash(): PairInfo | null {
   const params = new URLSearchParams(hash.slice(1));
   const token = params.get('token');
   if (!token) return null;
+  const certFingerprintSha256 = params.get('fp') ?? params.get('cert_sha256');
   // Pull host/port from the current location
   const loc = window.location;
-  const host = loc.hostname;
   const isHttps = loc.protocol === 'https:';
+  const scheme = isHttps ? 'https' : 'http';
+  const host = loc.hostname;
   const port = loc.port
     ? parseInt(loc.port, 10)
     : isHttps
     ? 443
     : 80;
-  const info: PairInfo = { host, port, token };
+  const info: PairInfo = {
+    host,
+    port,
+    scheme,
+    token,
+    certFingerprintSha256,
+  };
   savePair(info);
   // Clean the URL bar so the token isn't visible to bystanders
   history.replaceState(
@@ -44,7 +52,9 @@ export function tryAutoPairFromHash(): PairInfo | null {
 export interface PairInfo {
   host: string;
   port: number;
+  scheme: 'http' | 'https';
   token: string;
+  certFingerprintSha256?: string | null;
 }
 
 export function savePair(info: PairInfo) {
@@ -61,9 +71,25 @@ export function loadPair(): PairInfo | null {
       typeof parsed.port === 'number' &&
       typeof parsed.token === 'string'
     ) {
-      return parsed;
+      return {
+        host: parsed.host,
+        port: parsed.port,
+        scheme:
+          parsed.scheme === 'http' || parsed.scheme === 'https'
+            ? parsed.scheme
+            : parsed.port === 443
+            ? 'https'
+            : 'http',
+        token: parsed.token,
+        certFingerprintSha256:
+          typeof parsed.certFingerprintSha256 === 'string'
+            ? parsed.certFingerprintSha256
+            : null,
+      };
     }
-  } catch {}
+  } catch {
+    // Ignore corrupt persisted pairing data and fall back to login.
+  }
   return null;
 }
 
@@ -74,14 +100,12 @@ export function clearPair() {
 export function baseUrl(p?: PairInfo | null): string {
   const pair = p ?? loadPair();
   if (!pair) throw new Error('not paired');
-  // Tunnel URLs use https on port 443 (no :port suffix needed)
-  if (pair.port === 443) {
-    return `https://${pair.host}`;
+  const scheme = pair.scheme ?? (pair.port === 443 ? 'https' : 'http');
+  const defaultPort = scheme === 'https' ? 443 : 80;
+  if (pair.port === defaultPort) {
+    return `${scheme}://${pair.host}`;
   }
-  if (pair.port === 80) {
-    return `http://${pair.host}`;
-  }
-  return `http://${pair.host}:${pair.port}`;
+  return `${scheme}://${pair.host}:${pair.port}`;
 }
 
 export function authHeader(p?: PairInfo | null): HeadersInit {

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { ExternalLink } from 'lucide-react';
 import { LogPanel } from './LogPanel';
 import { api, type StatusEvent } from '@/api/tauri';
+import { openDetachedLogWindow } from './logWindow';
 
 interface Tab {
   projectId: string;
@@ -188,6 +190,24 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
               >
                 <span className="min-w-0 truncate font-mono">{t.name}</span>
                 <button
+                  aria-label="Open log in new window"
+                  title="Open log in new window"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openDetachedLogWindow({
+                      scriptId: t.scriptId,
+                      scriptName: t.name,
+                    }).catch((err) => {
+                      console.warn('[log-window] open failed', err);
+                    });
+                  }}
+                  className={`ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-log-muted transition-colors hover:bg-foreground/10 hover:text-log-fg ${
+                    isActive ? '' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  <ExternalLink size={11} />
+                </button>
+                <button
                   aria-label="Close tab"
                   onClick={(e) => closeTab(t.scriptId, e)}
                   className={`close-circle ml-0.5 shrink-0 ${
@@ -207,6 +227,7 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
           // snapshot + listener pair per script.
           <LogPanel
             key={activeTab.scriptId}
+            projectId={activeTab.projectId}
             scriptId={activeTab.scriptId}
             scriptName={activeTab.name}
           />

@@ -14,10 +14,12 @@ export function PairView({ onPaired }: Props) {
     window.location.port !== '' && window.location.hostname !== 'localhost';
 
   const [mode, setMode] = useState<Mode>('lan');
+  const [scheme, setScheme] = useState<'http' | 'https'>('https');
   const [host, setHost] = useState(isEmbedded ? window.location.hostname : '');
   const [port, setPort] = useState(isEmbedded ? window.location.port : '7777');
   const [tunnelUrl, setTunnelUrl] = useState('');
   const [token, setToken] = useState('');
+  const [certFingerprint, setCertFingerprint] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [abortCtrl, setAbortCtrl] = useState<AbortController | null>(null);
@@ -34,10 +36,11 @@ export function PairView({ onPaired }: Props) {
   function handleQrScan(text: string) {
     setScanning(false);
     try {
-      // QR format: "http(s)://host:port#token=xxx"
+      // QR format: "http(s)://host:port#token=xxx&fp=cert-sha256"
       const url = new URL(text);
       const hashParams = new URLSearchParams(url.hash.slice(1));
       const scannedToken = hashParams.get('token');
+      const scannedFingerprint = hashParams.get('fp') ?? hashParams.get('cert_sha256');
       if (!scannedToken) {
         setErr('QR code has no token. Generate a new QR from procman Remote Access.');
         return;
@@ -46,12 +49,15 @@ export function PairView({ onPaired }: Props) {
       if (isTunnel) {
         setMode('tunnel');
         setTunnelUrl(`${url.protocol}//${url.host}`);
+        setScheme(url.protocol === 'https:' ? 'https' : 'http');
       } else {
         setMode('lan');
+        setScheme(url.protocol === 'https:' ? 'https' : 'http');
         setHost(url.hostname);
         setPort(url.port || (url.protocol === 'https:' ? '443' : '80'));
       }
       setToken(scannedToken);
+      setCertFingerprint(scannedFingerprint);
       setErr(null);
     } catch {
       setErr('Invalid QR code. Expected a procman pairing URL.');
@@ -90,7 +96,7 @@ export function PairView({ onPaired }: Props) {
       }
       pairHost = host.trim();
       pairPort = parseInt(port, 10);
-      baseUrl = `http://${pairHost}:${pairPort}`;
+      baseUrl = `${scheme}://${pairHost}:${pairPort}`;
     }
 
     setBusy(true);
@@ -119,17 +125,18 @@ export function PairView({ onPaired }: Props) {
         setAbortCtrl(null);
         return;
       }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
         setBusy(false);
         setAbortCtrl(null);
         return;
       }
-      const msg = e?.message?.includes('timed out')
-        ? e.message
-        : e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')
+      const message = e instanceof Error ? e.message : String(e);
+      const msg = message.includes('timed out')
+        ? message
+        : message.includes('Failed to fetch') || message.includes('NetworkError')
         ? `Can't reach ${mode === 'tunnel' ? 'tunnel' : 'server'}. Check:\n• ${mode === 'lan' ? 'Same Wi-Fi network?' : 'Tunnel still running?'}\n• IP address correct?\n• procman server started?`
-        : `Connection failed: ${e?.message ?? e}`;
+        : `Connection failed: ${message}`;
       setErr(msg);
       setBusy(false);
       setAbortCtrl(null);
@@ -137,7 +144,13 @@ export function PairView({ onPaired }: Props) {
     }
     setAbortCtrl(null);
 
-    savePair({ host: pairHost, port: pairPort, token: token.trim() });
+    savePair({
+      host: pairHost,
+      port: pairPort,
+      scheme: mode === 'tunnel' ? (baseUrl.startsWith('https:') ? 'https' : 'http') : scheme,
+      token: token.trim(),
+      certFingerprintSha256: certFingerprint,
+    });
     onPaired();
   }
 
@@ -218,7 +231,7 @@ export function PairView({ onPaired }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => { setMode('tunnel'); setErr(null); }}
+            onClick={() => { setMode('tunnel'); setScheme('https'); setCertFingerprint(null); setErr(null); }}
             style={{
               flex: 1,
               padding: '10px 0',
@@ -270,27 +283,59 @@ export function PairView({ onPaired }: Props) {
 
         <form onSubmit={submit} className="login-form">
           {mode === 'lan' ? (
-            <div style={{ display: 'flex', gap: 8, width: '100%', boxSizing: 'border-box' }}>
-              <label className="field" style={{ flex: 1, minWidth: 0 }}>
-                <span>Host / IP</span>
-                <input
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="192.168.1.10"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                />
-              </label>
-              <label className="field" style={{ flex: 'none', width: 70 }}>
-                <span>Port</span>
-                <input
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  placeholder="7777"
-                  inputMode="numeric"
-                />
-              </label>
-            </div>
+            <>
+              <div style={{ display: 'flex', gap: 8, width: '100%', boxSizing: 'border-box' }}>
+                <label className="field" style={{ flex: 'none', width: 88 }}>
+                  <span>Scheme</span>
+                  <select
+                    value={scheme}
+                    onChange={(e) => setScheme(e.target.value as 'http' | 'https')}
+                    style={{
+                      width: '100%',
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      background: '#101a14',
+                      color: 'var(--fg)',
+                      padding: '0 10px',
+                    }}
+                  >
+                    <option value="https">HTTPS</option>
+                    <option value="http">HTTP</option>
+                  </select>
+                </label>
+                <label className="field" style={{ flex: 1, minWidth: 0 }}>
+                  <span>Host / IP</span>
+                  <input
+                    value={host}
+                    onChange={(e) => setHost(e.target.value)}
+                    placeholder="192.168.1.10"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                  />
+                </label>
+                <label className="field" style={{ flex: 'none', width: 70 }}>
+                  <span>Port</span>
+                  <input
+                    value={port}
+                    onChange={(e) => setPort(e.target.value)}
+                    placeholder="7777"
+                    inputMode="numeric"
+                  />
+                </label>
+              </div>
+              {certFingerprint && (
+                <p style={{
+                  margin: '0 0 4px',
+                  color: 'var(--fg3)',
+                  fontSize: 11,
+                  lineHeight: 1.4,
+                  wordBreak: 'break-all',
+                }}>
+                  TLS pin: {certFingerprint}
+                </p>
+              )}
+            </>
           ) : (
             <label className="field">
               <span>Cloudflare Tunnel URL</span>

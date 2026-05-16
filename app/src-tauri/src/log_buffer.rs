@@ -57,6 +57,7 @@ impl LogBuffer {
         line
     }
 
+    #[cfg(test)]
     pub fn snapshot(&self) -> Vec<LogLine> {
         self.buf.iter().cloned().collect()
     }

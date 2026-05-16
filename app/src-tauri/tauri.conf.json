@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "procman",
-  "version": "0.1.0",
-  "identifier": "kr.procman.app",
+  "version": "0.2.0",
+  "identifier": "kr.procman.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",

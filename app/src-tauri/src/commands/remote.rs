@@ -31,6 +31,8 @@ pub struct ServerStatus {
     pub running: bool,
     pub port: Option<u16>,
     pub mode: Option<ServerMode>,
+    pub tls: bool,
+    pub cert_fingerprint_sha256: Option<String>,
     pub token: String,
 }
 
@@ -45,12 +47,16 @@ pub async fn server_status(
             running: true,
             port: Some(h.port),
             mode: Some(h.mode),
+            tls: h.tls,
+            cert_fingerprint_sha256: h.cert_fingerprint_sha256.clone(),
             token,
         },
         None => ServerStatus {
             running: false,
             port: None,
             mode: None,
+            tls: false,
+            cert_fingerprint_sha256: None,
             token,
         },
     })
@@ -63,6 +69,14 @@ pub async fn start_server(
     app: AppHandle,
     remote: tauri::State<'_, RemoteServerState>,
 ) -> Result<ServerStatus, String> {
+    if matches!(mode, ServerMode::Lan) {
+        let app_state = app.state::<Arc<AppState>>().inner().clone();
+        let cfg = app_state.config.lock().await;
+        if !cfg.settings.lan_mode_opt_in {
+            return Err("LAN mode is disabled. Enable it in Settings first.".into());
+        }
+    }
+
     // Stop any existing instance first.
     {
         let mut guard = remote.handle.lock().await;
@@ -87,6 +101,8 @@ pub async fn start_server(
         running: true,
         port: Some(handle.port),
         mode: Some(handle.mode),
+        tls: handle.tls,
+        cert_fingerprint_sha256: handle.cert_fingerprint_sha256.clone(),
         token: remote.token.read().await.clone(),
     };
     *remote.handle.lock().await = Some(handle);
@@ -94,9 +110,7 @@ pub async fn start_server(
 }
 
 #[tauri::command]
-pub async fn stop_server(
-    remote: tauri::State<'_, RemoteServerState>,
-) -> Result<(), String> {
+pub async fn stop_server(remote: tauri::State<'_, RemoteServerState>) -> Result<(), String> {
     let mut guard = remote.handle.lock().await;
     if let Some(h) = guard.take() {
         let _ = h.shutdown.send(());
@@ -111,7 +125,10 @@ pub async fn rotate_token(
 ) -> Result<String, String> {
     let new_token = auth::generate_token();
     *remote.token.write().await = new_token.clone();
-    store.set_remote_token(new_token.clone()).await.map_err(|e| e.to_string())?;
+    store
+        .set_remote_token(new_token.clone())
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(new_token)
 }
 

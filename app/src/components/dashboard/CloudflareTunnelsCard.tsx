@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   api,
   type CfInstalled,
@@ -8,6 +8,7 @@ import {
 } from '@/api/tauri';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
 interface Props {
   projects: Project[];
@@ -41,11 +42,7 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
     }
   }, []);
 
-  useEffect(() => {
-    reload();
-    const id = setInterval(reload, 4000);
-    return () => clearInterval(id);
-  }, [reload]);
+  useVisibleInterval(reload, 4000);
 
   async function registerAndRun(tunnel: NamedTunnel) {
     if (projects.length === 0) {

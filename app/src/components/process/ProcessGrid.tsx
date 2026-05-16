@@ -10,8 +10,9 @@ import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { UptimeLabel } from '@/hooks/useUptime';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import { Cable, Equal } from 'lucide-react';
-import type { PortInfo, DeclaredPortStatus } from '@/api/tauri';
+import type { PortInfo, DeclaredPortStatus, ShutdownEvent } from '@/api/tauri';
 
 interface Props {
   projectId: string;
@@ -43,6 +44,32 @@ function inferPortFromCommand(cmd: string): number | null {
   return null;
 }
 
+function isShutdownActive(evt: ShutdownEvent | undefined): boolean {
+  return Boolean(evt && evt.phase !== 'stopped' && evt.phase !== 'not_running');
+}
+
+function shutdownProgress(evt: ShutdownEvent): number {
+  if (evt.phase === 'stopped' || evt.phase === 'not_running') return 100;
+  if (evt.timeout_ms <= 0) return 0;
+  return Math.min(100, Math.max(3, (evt.elapsed_ms / evt.timeout_ms) * 100));
+}
+
+function shutdownLabel(evt: ShutdownEvent): string {
+  switch (evt.phase) {
+    case 'terminating':
+    case 'waiting':
+      return `Stopping (${Math.ceil(Math.max(0, evt.timeout_ms - evt.elapsed_ms) / 1000)}s)`;
+    case 'killing':
+      return 'Force stopping';
+    case 'cleanup':
+      return 'Cleaning up ports';
+    case 'stopped':
+      return 'Stopped';
+    case 'not_running':
+      return 'Already stopped';
+  }
+}
+
 export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props) {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +77,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editorOpen, setEditorOpen] = useState(false);
   const [vscodeOpen, setVscodeOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
-  const { statuses, pids, startTimes, restartCounts, metrics } = useProcessStatus();
+  const { statuses, pids, startTimes, restartCounts, metrics, shutdowns } = useProcessStatus();
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [tunnels, setTunnels] = useState<Record<string, { url: string; port: number }>>({});
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -92,7 +119,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   // S2: Poll declared-port statuses (includes TCP liveness probe) for
   // running scripts with declared ports. Every 3 seconds. Cleared when
   // the set of running scripts changes or the component unmounts.
-  useEffect(() => {
+  const reloadPortStatuses = useCallback(async () => {
     const targets = scripts.filter(
       (s) => statuses[s.id] === 'running' && s.ports && s.ports.length > 0,
     );
@@ -100,25 +127,17 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
       setPortStatuses({});
       return;
     }
-    let cancelled = false;
-    async function tick() {
-      const next: Record<string, DeclaredPortStatus[]> = {};
-      await Promise.all(
-        targets.map(async (s) => {
-          try {
-            next[s.id] = await api.portStatusForScript(s.id);
-          } catch {}
-        }),
-      );
-      if (!cancelled) setPortStatuses(next);
-    }
-    tick();
-    const iv = setInterval(tick, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
+    const next: Record<string, DeclaredPortStatus[]> = {};
+    await Promise.all(
+      targets.map(async (s) => {
+        try {
+          next[s.id] = await api.portStatusForScript(s.id);
+        } catch {}
+      }),
+    );
+    setPortStatuses(next);
   }, [scripts, statuses]);
+  useVisibleInterval(reloadPortStatuses, 3000);
 
   // Restore tunnel state from the backend on mount / project change.
   // Without this, the tunnel URL badge under each script disappears
@@ -404,7 +423,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     if (!conflict) return;
     const { script } = conflict;
     setConflict(null);
-    await withBusy(script.id, () => api.spawnProcess(projectId, script.id));
+    await withBusy(script.id, () => api.spawnProcess(projectId, script.id, true));
   }
 
   const onSaved = () => {
@@ -419,6 +438,27 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   async function startAll() {
     for (const s of stoppedScripts) {
       if (!busy.has(s.id)) {
+        if (s.ports && s.ports.length > 0) {
+          try {
+            const conflicts = await api.checkPortConflicts(s.id);
+            const first = conflicts.find((c) => c.severity === 'blocking');
+            if (first) {
+              setConflict({
+                script: s,
+                port: first.spec.number,
+                info: {
+                  port: first.spec.number,
+                  pid: first.holder_pid,
+                  process_name: first.holder_command,
+                  command: first.holder_command,
+                },
+              });
+              return;
+            }
+          } catch (e) {
+            console.warn('[start-all] checkPortConflicts failed', e);
+          }
+        }
         await withBusy(s.id, () => api.spawnProcess(projectId, s.id));
       }
     }
@@ -434,7 +474,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     if (!ok) return;
     await Promise.all(
       runningScripts
-        .filter((s) => !busy.has(s.id))
+        .filter((s) => !busy.has(s.id) && !isShutdownActive(shutdowns[s.id]))
         .map((s) => withBusy(s.id, () => api.killProcess(s.id))),
     );
   }
@@ -495,6 +535,10 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
               const tunnel = tunnels[s.id];
               const restarts = restartCounts[s.id] ?? 0;
               const isDragging = draggingId === s.id;
+              const shutdown = shutdowns[s.id];
+              const stopping = isShutdownActive(shutdown);
+              const progress = shutdown ? shutdownProgress(shutdown) : 0;
+              const actionBusy = b || stopping;
               return (
                 <li
                   key={s.id}
@@ -504,7 +548,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                   }`}
                   onDoubleClick={async () => {
                     if (draggingId) return;
-                    if (b) return;
+                    if (actionBusy) return;
                     if (isRunning) {
                       const ok = await confirm({ title: `Stop "${s.name}"?`, description: 'Double-click detected. Stop this process?', confirmLabel: 'Stop', destructive: true });
                       if (ok) withBusy(s.id, () => api.killProcess(s.id));
@@ -579,6 +623,19 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           auto-restart{restarts > 0 ? ` #${restarts}` : ''}
                         </span>
                       )}
+                      {s.schedule?.enabled && (
+                        <span
+                          className="max-w-[150px] truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
+                          title={`Scheduled: ${s.schedule.cron}`}
+                        >
+                          cron {s.schedule.cron}
+                        </span>
+                      )}
+                      {shutdown && (
+                        <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[12px] text-amber-700 dark:text-amber-300">
+                          {shutdownLabel(shutdown)}
+                        </span>
+                      )}
                       {s.env_file && (
                         <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground" title={s.env_file}>
                           .env
@@ -599,6 +656,20 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                     <div className="truncate font-mono text-[12px] text-muted-foreground">
                       $ {s.command}
                     </div>
+                    {shutdown && (
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            shutdown.phase === 'killing'
+                              ? 'bg-destructive'
+                              : shutdown.phase === 'stopped' || shutdown.phase === 'not_running'
+                                ? 'bg-emerald-500'
+                                : 'bg-primary'
+                          }`}
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -609,7 +680,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           variant="ghost"
                           size="sm"
                           className="h-7 opacity-0 group-hover:opacity-100"
-                          disabled={b}
+                          disabled={actionBusy}
                           title={s.expected_port ? `Tunnel :${s.expected_port}` : 'Tunnel via Cloudflare'}
                           onClick={() => handleTunnelClick(s)}
                         >
@@ -619,7 +690,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           variant="ghost"
                           size="sm"
                           className="h-7"
-                          disabled={b}
+                          disabled={actionBusy}
                           onClick={() =>
                             withBusy(s.id, () => api.restartProcess(projectId, s.id))
                           }
@@ -630,7 +701,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                           variant="destructive"
                           size="sm"
                           className="h-7"
-                          disabled={b}
+                          disabled={actionBusy}
                           onClick={async () => {
                             const ok = await confirm({
                               title: `Stop "${s.name}"?`,
@@ -648,8 +719,8 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
                         </Button>
                       </>
                     ) : (
-                      <Button size="sm" className="h-7" disabled={b} onClick={() => handleStart(s)}>
-                        {b ? '…' : 'Start'}
+                      <Button size="sm" className="h-7" disabled={actionBusy} onClick={() => handleStart(s)}>
+                        {actionBusy ? '…' : 'Start'}
                       </Button>
                     )}
                     <span className="w-1" />

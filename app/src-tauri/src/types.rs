@@ -78,11 +78,24 @@ pub struct Script {
     /// M5: Optional path to a .env file. Variables are exported before running.
     #[serde(default)]
     pub env_file: Option<String>,
+    /// Optional local cron-style schedule. When enabled, the backend scheduler
+    /// starts this script once for each matching local minute.
+    #[serde(default)]
+    pub schedule: Option<ScheduleSpec>,
     /// S4: IDs of other scripts (within the same config) that must be
     /// running + reachable before this one spawns. Circular deps are
     /// detected at spawn time and fail fast. Empty = no dependencies.
     #[serde(default)]
     pub depends_on: Vec<String>,
+}
+
+/// Per-script scheduled execution. `cron` is a five-field local-time
+/// expression: minute hour day-of-month month day-of-week.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleSpec {
+    #[serde(default)]
+    pub enabled: bool,
+    pub cron: String,
 }
 
 /// S1: Per-script declared port. A PortSpec is purely a *declaration* — it
@@ -180,6 +193,18 @@ pub struct GroupMember {
 }
 
 /// Application-wide settings.
+pub const SHUTDOWN_TIMEOUT_MS_DEFAULT: u64 = 1500;
+pub const SHUTDOWN_TIMEOUT_MS_MIN: u64 = 250;
+pub const SHUTDOWN_TIMEOUT_MS_MAX: u64 = 30_000;
+
+pub fn default_shutdown_timeout_ms() -> u64 {
+    SHUTDOWN_TIMEOUT_MS_DEFAULT
+}
+
+pub fn clamp_shutdown_timeout_ms(ms: u64) -> u64 {
+    ms.clamp(SHUTDOWN_TIMEOUT_MS_MIN, SHUTDOWN_TIMEOUT_MS_MAX)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     pub log_buffer_size: usize,
@@ -201,18 +226,22 @@ pub struct AppSettings {
     /// v3: First-run onboarding has been completed. Hides welcome / tips.
     #[serde(default)]
     pub onboarded: bool,
+    /// Grace period between SIGTERM and fallback SIGKILL when stopping scripts.
+    #[serde(default = "default_shutdown_timeout_ms")]
+    pub shutdown_timeout_ms: u64,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             log_buffer_size: 5000,
-            port_poll_interval_ms: 1000,
+            port_poll_interval_ms: 5000,
             theme: "system".to_string(),
             port_aliases: std::collections::HashMap::new(),
             lan_mode_opt_in: false,
             start_at_login: false,
             onboarded: false,
+            shutdown_timeout_ms: SHUTDOWN_TIMEOUT_MS_DEFAULT,
         }
     }
 }
@@ -295,6 +324,7 @@ mod tests {
                         auto_restart: false,
                         auto_restart_policy: None,
                         env_file: None,
+                        schedule: None,
                         depends_on: Vec::new(),
                     },
                     Script {
@@ -306,6 +336,7 @@ mod tests {
                         auto_restart: true,
                         auto_restart_policy: None,
                         env_file: None,
+                        schedule: None,
                         depends_on: Vec::new(),
                     },
                 ],
@@ -326,6 +357,7 @@ mod tests {
                 lan_mode_opt_in: false,
                 start_at_login: false,
                 onboarded: false,
+                shutdown_timeout_ms: SHUTDOWN_TIMEOUT_MS_DEFAULT,
             },
             compose_projects: Vec::new(),
         };
@@ -413,6 +445,7 @@ mod tests {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&s).unwrap();
@@ -444,6 +477,7 @@ mod tests {
         assert!(!s.lan_mode_opt_in);
         assert!(!s.start_at_login);
         assert!(!s.onboarded);
+        assert_eq!(s.shutdown_timeout_ms, SHUTDOWN_TIMEOUT_MS_DEFAULT);
     }
 
     #[test]
@@ -457,6 +491,7 @@ mod tests {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&script).unwrap();

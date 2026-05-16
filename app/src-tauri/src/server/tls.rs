@@ -8,7 +8,7 @@
 use rcgen::{CertificateParams, DnType, KeyPair, SanType};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct TlsFiles {
     pub cert_path: PathBuf,
@@ -20,7 +20,10 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
     let key_path = config_dir.join("server.key");
 
     if cert_path.exists() && key_path.exists() {
-        return Ok(TlsFiles { cert_path, key_path });
+        return Ok(TlsFiles {
+            cert_path,
+            key_path,
+        });
     }
 
     log::info!("Generating self-signed TLS certificate...");
@@ -57,15 +60,15 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
     }
 
     log::info!("TLS cert generated at {:?}", cert_path);
-    Ok(TlsFiles { cert_path, key_path })
+    Ok(TlsFiles {
+        cert_path,
+        key_path,
+    })
 }
 
 /// SHA-256 fingerprint of the cert's DER-encoded form, formatted as
 /// uppercase colon-separated hex (the format `openssl x509 -fingerprint`
 /// emits). Used during mobile pairing to pin the server identity.
-// No production caller yet — mobile pairing flow will consume this once
-// the pinning UX lands. Remove this allow when the first caller ships.
-#[allow(dead_code)]
 pub fn fingerprint_sha256(cert_pem: &str) -> Result<String, String> {
     let der = pem_to_der(cert_pem).ok_or("invalid PEM")?;
     let digest = Sha256::digest(&der);
@@ -73,7 +76,11 @@ pub fn fingerprint_sha256(cert_pem: &str) -> Result<String, String> {
     Ok(hex.join(":"))
 }
 
-#[allow(dead_code)]
+pub fn fingerprint_sha256_file(cert_path: &Path) -> Result<String, String> {
+    let pem = fs::read_to_string(cert_path).map_err(|e| format!("read cert: {}", e))?;
+    fingerprint_sha256(&pem)
+}
+
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
     use base64::{engine::general_purpose, Engine as _};
     let start = pem.find("-----BEGIN CERTIFICATE-----")?;

@@ -22,14 +22,24 @@ Public roadmap. Internal planning, decision logs, and completed-issue detail are
 - Auto-restart policy UI
 - Onboarding overlay
 - Start-at-login (LaunchAgent)
+- Runtime snapshot IPC + frontend `RuntimeProvider`
+- Backend `runtime://delta` metrics + ports events for lightweight runtime updates
+- Batched runtime port ownership cache for process-tree / cwd matching
+- Port ownership v3: backend-owned conflict checks across start / restart / start-all / group / remote paths
+- Frontend visibility-aware polling for dashboard / remote / declared-port hooks
+- LAN remote URL/TLS status display + backend LAN opt-in gate
+- Remote pairing TLS hardening: certificate fingerprint in status/QR/mobile pairing + WebSocket query-token fallback removed
+- Graceful shutdown UX: `process://shutdown` progress events, group Stop button, and configurable SIGTERM timeout
+- Multi-window / tear-off log panel: individual process logs can open in dedicated Tauri windows
+- Scheduled / cron execution: repeat a script on a five-field local-time cron expression
+- xterm.js PTY shell: run a script in an interactive pseudo-terminal with stdin/resize support
+- Mobile push notifications: mobile alerts for script crashes, port conflicts, and unreachable procman
 
 ## Planned (next)
-- **Frontend visibility-aware hook polling** — `document.visibilitychange`로 port/process hook polling freeze (backend metrics pause는 B2에서 완료, frontend hook은 여전히 tick 중)
-- **Multi-window / tear-off log panel** — pop individual process log streams into their own windows.
-- **Scheduled / cron execution** — repeat a script on a cron expression.
-- **xterm.js PTY shell** — interactive terminal tab for processes that need stdin (REPL, `docker exec`).
-- **Mobile push notifications** — crash / port-conflict notifications when procman is unreachable.
-- **Graceful shutdown UX** — progress indicator + configurable timeout when stopping groups.
+- v0.2.0 release hardening: restore local/CI Developer ID private-key access; local `codesign` currently times out in the preflight probe.
+- v0.2.0 release hardening: verify a signed release build with Apple notarization credentials and `TAURI_SIGNING_PRIVATE_KEY` in CI.
+- v0.2.0 release hardening: manual QA for desktop lifecycle/logs/terminal/ports/remote pairing/mobile notifications.
+- v0.2.0 release hardening: publish a draft GitHub Release and verify the generated updater `latest.json`.
 
 ## Not planned
 - Team sharing / multi-user sync. procman stays a single-user tool.

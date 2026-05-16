@@ -53,13 +53,7 @@ impl AuditLog {
         }
     }
 
-    pub async fn record(
-        &self,
-        action: &str,
-        target: &str,
-        ok: bool,
-        detail: Option<String>,
-    ) {
+    pub async fn record(&self, action: &str, target: &str, ok: bool, detail: Option<String>) {
         let entry = AuditEntry {
             ts_ms: now_ms(),
             action: action.to_string(),
@@ -120,10 +114,7 @@ impl RotatingWriter {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
             file,
@@ -137,10 +128,7 @@ impl RotatingWriter {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
             file,
@@ -151,9 +139,8 @@ impl RotatingWriter {
 
     fn append(&mut self, entry: &AuditEntry) -> std::io::Result<()> {
         self.maybe_rotate()?;
-        let line = serde_json::to_string(entry).map_err(|e| {
-            std::io::Error::other(format!("serialize: {}", e))
-        })?;
+        let line = serde_json::to_string(entry)
+            .map_err(|e| std::io::Error::other(format!("serialize: {}", e)))?;
         writeln!(self.file, "{}", line)?;
         Ok(())
     }

@@ -1,6 +1,6 @@
 [package]
 name = "procman"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mac process manager GUI"
 authors = ["procman"]
 license = "MIT"

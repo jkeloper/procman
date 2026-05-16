@@ -80,10 +80,7 @@ impl RuntimeStore {
         self.state.lock().await.remote_token.clone()
     }
 
-    pub async fn set_remote_token(
-        self: &Arc<Self>,
-        token: String,
-    ) -> Result<(), ConfigError> {
+    pub async fn set_remote_token(self: &Arc<Self>, token: String) -> Result<(), ConfigError> {
         {
             let mut guard = self.state.lock().await;
             guard.remote_token = token;
@@ -100,10 +97,7 @@ impl RuntimeStore {
     }
 
     fn schedule_flush(self: &Arc<Self>) {
-        if self
-            .pending
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
+        if self.pending.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return; // Already scheduled.
         }
         let me = Arc::clone(self);
@@ -127,7 +121,8 @@ impl RuntimeStore {
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         std::io::Write::write_all(&mut tmp, json.as_bytes())?;
         tmp.as_file().sync_all()?;
-        tmp.persist(&self.path).map_err(|e| ConfigError::Io(e.error))?;
+        tmp.persist(&self.path)
+            .map_err(|e| ConfigError::Io(e.error))?;
         // SEC-13: restrict file permissions to owner-only (0600)
         #[cfg(unix)]
         {
@@ -156,7 +151,10 @@ mod tests {
         assert_eq!(snap.last_running, vec!["s2".to_string()]);
         assert!(path.exists());
         let reloaded = RuntimeStore::load(path).unwrap();
-        assert_eq!(reloaded.snapshot().await.last_running, vec!["s2".to_string()]);
+        assert_eq!(
+            reloaded.snapshot().await.last_running,
+            vec!["s2".to_string()]
+        );
     }
 
     #[tokio::test]

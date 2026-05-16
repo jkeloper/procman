@@ -15,8 +15,11 @@ import {
   LogLineSchema,
   LogLineRecordSchema,
   LogStorageStatsSchema,
+  PtySessionSchema,
   PortInfoSchema,
   ProcessSnapshotSchema,
+  RuntimeSnapshotSchema,
+  RuntimePortsSnapshotSchema,
   DeclaredPortStatusSchema,
   PortConflictSchema,
   AppSettingsSchema,
@@ -26,6 +29,7 @@ import {
   type Script,
   type PortSpec,
   type AutoRestartPolicy,
+  type ScheduleSpec,
   type AppSettings,
   type DeclaredPortStatus,
   type PortConflict,
@@ -37,9 +41,17 @@ import {
   type LogLine,
   type LogLineRecord,
   type LogStorageStats,
+  type PtyDataEvent,
+  type PtyExitEvent,
+  type PtySession,
   type PortInfo,
+  type RuntimePortInfo,
+  type RuntimeDelta,
   type ProcessSnapshot,
+  type RuntimeSnapshot,
+  type RuntimePortsSnapshot,
   type StatusEvent,
+  type ShutdownEvent,
   type RuntimeStatus,
   type ComposeProject,
   type ComposeService,
@@ -87,6 +99,7 @@ export const api = {
     envFile?: string | null,
     ports?: PortSpec[],
     dependsOn?: string[],
+    schedule?: ScheduleSpec | null,
   ) =>
     call(
       'create_script',
@@ -99,6 +112,7 @@ export const api = {
         envFile: envFile ?? null,
         ports: ports ?? [],
         dependsOn: dependsOn ?? [],
+        schedule: schedule ?? null,
       },
       ScriptSchema,
     ),
@@ -114,6 +128,7 @@ export const api = {
       envFile?: string | null;
       ports?: PortSpec[];
       dependsOn?: string[];
+      schedule?: ScheduleSpec | null;
     },
   ) => call('update_script', { projectId, id, ...patch }, ScriptSchema),
   deleteScript: (projectId: string, id: string) =>
@@ -126,16 +141,20 @@ export const api = {
     call('scan_directory', { path }, z.array(ProjectCandidateSchema)),
 
   // Processes (runtime control)
-  spawnProcess: (projectId: string, scriptId: string) =>
-    callRaw<number>('spawn_process', { projectId, scriptId }),
+  spawnProcess: (projectId: string, scriptId: string, ignorePortConflicts = false) =>
+    callRaw<number>('spawn_process', { projectId, scriptId, ignorePortConflicts }),
   killProcess: (scriptId: string) =>
     callRaw<null>('kill_process', { scriptId }),
   restartProcess: (projectId: string, scriptId: string) =>
     callRaw<number>('restart_process', { projectId, scriptId }),
   listProcesses: () =>
     call('list_processes', {}, z.array(ProcessSnapshotSchema)),
-  logSnapshot: (scriptId: string) =>
-    call('log_snapshot', { scriptId }, z.array(LogLineSchema)),
+  runtimeSnapshot: () =>
+    call('runtime_snapshot', {}, RuntimeSnapshotSchema),
+  runtimePorts: () =>
+    call('runtime_ports', {}, RuntimePortsSnapshotSchema),
+  logSnapshot: (scriptId: string, limit?: number) =>
+    call('log_snapshot', { scriptId, limit: limit ?? null }, z.array(LogLineSchema)),
   clearLog: (scriptId: string) => callRaw<null>('clear_log', { scriptId }),
   forceQuit: () => callRaw<null>('force_quit', {}),
 
@@ -160,6 +179,21 @@ export const api = {
   getLogStorageStats: () =>
     call('get_log_storage_stats', {}, LogStorageStatsSchema),
 
+  // Interactive PTY sessions
+  startPtySession: (projectId: string, scriptId: string, cols?: number, rows?: number) =>
+    call(
+      'start_pty_session',
+      { projectId, scriptId, cols: cols ?? null, rows: rows ?? null },
+      PtySessionSchema,
+    ),
+  writePty: (id: string, data: string) => callRaw<null>('write_pty', { id, data }),
+  resizePty: (id: string, cols: number, rows: number) =>
+    callRaw<null>('resize_pty', { id, cols, rows }),
+  killPty: (id: string) => callRaw<null>('kill_pty', { id }),
+  listPtySessions: () => call('list_pty_sessions', {}, z.array(PtySessionSchema)),
+  ptySnapshot: (id: string) => call('pty_snapshot', { id }, z.array(z.string())),
+  killAllPtySessions: () => callRaw<null>('kill_all_pty_sessions', {}),
+
   // Groups
   listGroups: () => callRaw('list_groups', {}),
   createGroup: (name: string, members: Array<{ project_id: string; script_id: string }>) =>
@@ -170,6 +204,7 @@ export const api = {
   ) => callRaw('update_group', { id, ...patch }),
   deleteGroup: (id: string) => callRaw<null>('delete_group', { id }),
   runGroup: (id: string) => callRaw('run_group', { id }),
+  stopGroup: (id: string) => callRaw('stop_group', { id }),
 
   // Ports
   listPorts: () => call('list_ports', {}, z.array(PortInfoSchema)),
@@ -214,6 +249,8 @@ export const api = {
       running: boolean;
       port: number | null;
       mode: 'loopback' | 'lan' | null;
+      tls: boolean;
+      cert_fingerprint_sha256: string | null;
       token: string;
     }>('server_status', {}),
   startServer: (port: number, mode: 'loopback' | 'lan') =>
@@ -323,9 +360,17 @@ export type {
   LogLine,
   LogLineRecord,
   LogStorageStats,
+  PtyDataEvent,
+  PtyExitEvent,
+  PtySession,
   PortInfo,
+  RuntimePortInfo,
+  RuntimeDelta,
   ProcessSnapshot,
+  RuntimeSnapshot,
+  RuntimePortsSnapshot,
   StatusEvent,
+  ShutdownEvent,
   RuntimeStatus,
   ComposeProject,
   ComposeService,

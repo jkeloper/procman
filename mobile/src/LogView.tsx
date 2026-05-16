@@ -10,6 +10,7 @@ interface Props {
 }
 
 const MAX = 2000;
+const ANSI_ESCAPE_RE = new RegExp(String.raw`\u001B\[[0-9;]*[A-Za-z]`, 'g');
 
 export function LogView({ scriptId, scriptName, onBack }: Props) {
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -19,7 +20,9 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    api.logs(scriptId).then(setLines).catch(() => {});
+    api.logs(scriptId).then(setLines).catch(() => {
+      // Keep the live stream usable even if the initial snapshot fails.
+    });
     const stop = openStream((ev) => {
       if (ev.type === 'log' && ev.script_id === scriptId) {
         setLines((prev) => {
@@ -106,7 +109,7 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
               }}
             >
               <span className="log-seq">{l.seq}</span>
-              <span style={{ flex: 1 }}>{l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')}</span>
+              <span style={{ flex: 1 }}>{l.text.replace(ANSI_ESCAPE_RE, '')}</span>
             </div>
           ))
         )}

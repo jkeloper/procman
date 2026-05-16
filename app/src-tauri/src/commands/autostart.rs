@@ -28,15 +28,13 @@ fn resolve_app_path() -> Option<PathBuf> {
 
 #[tauri::command]
 pub async fn get_autostart_status() -> Result<bool, String> {
-    let plist = autostart::default_plist_path()
-        .ok_or_else(|| "no home directory".to_string())?;
+    let plist = autostart::default_plist_path().ok_or_else(|| "no home directory".to_string())?;
     Ok(autostart::is_autostart_enabled(&plist))
 }
 
 #[tauri::command]
 pub async fn set_autostart(enabled: bool) -> Result<(), String> {
-    let plist = autostart::default_plist_path()
-        .ok_or_else(|| "no home directory".to_string())?;
+    let plist = autostart::default_plist_path().ok_or_else(|| "no home directory".to_string())?;
     if enabled {
         let app = resolve_app_path().ok_or_else(|| "cannot resolve app path".to_string())?;
         autostart::enable_autostart(&app, &plist).map_err(|e| e.to_string())

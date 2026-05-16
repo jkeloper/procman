@@ -9,12 +9,13 @@ import { api, type AppSettings } from '@/api/tauri';
 
 const DEFAULTS: AppSettings = {
   log_buffer_size: 5000,
-  port_poll_interval_ms: 1000,
+  port_poll_interval_ms: 5000,
   theme: 'system',
   port_aliases: {},
   lan_mode_opt_in: false,
   start_at_login: false,
   onboarded: false,
+  shutdown_timeout_ms: 1500,
 };
 
 export function useSettings() {

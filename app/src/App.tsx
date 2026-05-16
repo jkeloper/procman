@@ -6,8 +6,25 @@ import { ToastProvider } from '@/components/Toast';
 import { OnboardingOverlay } from '@/components/onboarding/OnboardingOverlay';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
 import { useSettings } from '@/hooks/useSettings';
+import { RuntimeProvider } from '@/context/RuntimeProvider';
+import { LogPanel } from '@/components/log/LogPanel';
+import { getDetachedLogRoute } from '@/components/log/logWindow';
 
 export default function App() {
+  const detachedLog = getDetachedLogRoute();
+  if (detachedLog) {
+    return (
+      <ErrorBoundary>
+        <div className="h-screen w-screen overflow-hidden bg-log-bg">
+          <LogPanel
+            scriptId={detachedLog.scriptId}
+            scriptName={detachedLog.scriptName}
+          />
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <ToastProvider>
@@ -49,7 +66,9 @@ function Shell() {
 
   return (
     <>
-      <MainLayout />
+      <RuntimeProvider>
+        <MainLayout />
+      </RuntimeProvider>
       <OnboardingOverlay open={onboardingOpen} onFinish={finishOnboarding} />
       <SettingsDialog
         open={settingsOpen}

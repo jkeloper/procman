@@ -81,12 +81,10 @@ pub fn enable_autostart(app_path: &Path, plist_path: &Path) -> std::io::Result<(
         .arg(plist_path)
         .output()?;
     if !out.status.success() {
-        return Err(std::io::Error::other(
-            format!(
-                "launchctl load failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        ));
+        return Err(std::io::Error::other(format!(
+            "launchctl load failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
     }
     Ok(())
 }
@@ -129,7 +127,9 @@ mod tests {
 
     #[test]
     fn render_plist_contains_label_and_program() {
-        let xml = render_plist(&PathBuf::from("/Applications/procman.app/Contents/MacOS/procman"));
+        let xml = render_plist(&PathBuf::from(
+            "/Applications/procman.app/Contents/MacOS/procman",
+        ));
         assert!(xml.contains("<key>Label</key>"));
         assert!(xml.contains(LAUNCH_AGENT_LABEL));
         assert!(xml.contains("/Applications/procman.app/Contents/MacOS/procman"));
@@ -148,7 +148,10 @@ mod tests {
     #[test]
     fn resolve_program_binary_from_app_bundle() {
         let out = resolve_program_binary(&PathBuf::from("/Applications/procman.app"));
-        assert_eq!(out, PathBuf::from("/Applications/procman.app/Contents/MacOS/procman"));
+        assert_eq!(
+            out,
+            PathBuf::from("/Applications/procman.app/Contents/MacOS/procman")
+        );
     }
 
     #[test]

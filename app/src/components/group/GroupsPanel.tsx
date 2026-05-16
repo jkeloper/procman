@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Project } from '@/api/tauri';
 import { NewGroupDialog } from './NewGroupDialog';
 import { Button } from '@/components/ui/button';
+import { useProcessStatus } from '@/hooks/useProcessStatus';
+import type { ShutdownEvent } from '@/api/tauri';
 
 interface Group {
   id: string;
@@ -17,6 +19,8 @@ export function GroupsPanel({ projects }: Props) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [stopping, setStopping] = useState<string | null>(null);
+  const { statuses, shutdowns } = useProcessStatus();
 
   const reload = useCallback(async () => {
     try {
@@ -44,6 +48,21 @@ export function GroupsPanel({ projects }: Props) {
       alert(`Run failed: ${e?.message ?? e}`);
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function handleStop(id: string) {
+    setStopping(id);
+    try {
+      const result = (await api.stopGroup(id)) as Array<{ ok: boolean; error?: string | null }>;
+      const failed = result.find((row) => !row.ok);
+      if (failed) {
+        alert(`Stop failed: ${failed.error ?? 'unknown error'}`);
+      }
+    } catch (e: any) {
+      alert(`Stop failed: ${e?.message ?? e}`);
+    } finally {
+      setStopping(null);
     }
   }
 
@@ -81,21 +100,40 @@ export function GroupsPanel({ projects }: Props) {
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {groups.map((g) => (
-            <li
-              key={g.id}
-              className="group rounded-lg border border-border/60 bg-card p-3 transition-all hover:border-border hover:shadow-sm"
-            >
+          {groups.map((g) => {
+            const activeShutdown = g.members
+              .map((m) => shutdowns[m.script_id])
+              .find((evt): evt is ShutdownEvent => isShutdownActive(evt));
+            const groupStopping = stopping === g.id || Boolean(activeShutdown);
+            const groupRunning = g.members.some(
+              (m) => statuses[m.script_id] === 'running' || isShutdownActive(shutdowns[m.script_id]),
+            );
+            const progress = activeShutdown ? shutdownProgress(activeShutdown) : 0;
+            return (
+              <li
+                key={g.id}
+                className="group rounded-lg border border-border/60 bg-card p-3 transition-all hover:border-border hover:shadow-sm"
+              >
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="text-[13px] font-medium">{g.name}</span>
                 <div className="flex items-center gap-0.5">
                   <Button
                     size="sm"
-                    disabled={busy === g.id || g.members.length === 0}
+                    disabled={busy === g.id || groupStopping || g.members.length === 0}
                     onClick={() => handleRun(g.id)}
                   >
                     {busy === g.id ? 'Launching...' : 'Run'}
                   </Button>
+                  {(groupRunning || groupStopping) && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={groupStopping || busy === g.id}
+                      onClick={() => handleStop(g.id)}
+                    >
+                      {groupStopping ? 'Stopping...' : 'Stop'}
+                    </Button>
+                  )}
                   <button
                     className="close-circle opacity-0 group-hover:opacity-100"
                     onClick={() => handleDelete(g.id)}
@@ -114,8 +152,19 @@ export function GroupsPanel({ projects }: Props) {
                   </span>
                 ))}
               </div>
-            </li>
-          ))}
+              {activeShutdown && (
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      activeShutdown.phase === 'killing' ? 'bg-destructive' : 'bg-primary'
+                    }`}
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              )}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -127,4 +176,13 @@ export function GroupsPanel({ projects }: Props) {
       />
     </section>
   );
+}
+
+function isShutdownActive(evt: ShutdownEvent | undefined): boolean {
+  return Boolean(evt && evt.phase !== 'stopped' && evt.phase !== 'not_running');
+}
+
+function shutdownProgress(evt: ShutdownEvent): number {
+  if (evt.timeout_ms <= 0) return 0;
+  return Math.min(100, Math.max(3, (evt.elapsed_ms / evt.timeout_ms) * 100));
 }

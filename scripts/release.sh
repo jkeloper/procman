@@ -6,6 +6,7 @@
 #   ./scripts/release.sh --version 0.2.0        # bump to 0.2.0 (package.json/tauri.conf.json/Cargo.toml)
 #   ./scripts/release.sh --version 0.2.0-rc.1   # pre-release tag
 #   ./scripts/release.sh --skip-notarize        # sign only
+#   ./scripts/release.sh --skip-updater-artifacts  # local app/dmg candidate only
 #   ./scripts/release.sh --dry-run              # print actions without executing build
 #
 # Environment variables (optional):
@@ -14,6 +15,7 @@
 #   APPLE_TEAM_ID             # 10-char team id (e.g. ABCDE12345)
 #   APPLE_NOTARIZE_PASSWORD   # App-specific password (notarytool --password)
 #   APPLE_KEYCHAIN_PROFILE    # notarytool stored profile (alternative to the 3 above)
+#   CODESIGN_PROBE_TIMEOUT_SECONDS # fail fast if Developer ID keychain access hangs (default: 30)
 #
 # Exit codes:
 #   0 = OK, 1 = setup error, 2 = build failure, 3 = sign failure, 4 = notarize failure.
@@ -27,12 +29,14 @@ TAURI_DIR="$APP_DIR/src-tauri"
 
 VERSION=""
 SKIP_NOTARIZE=0
+SKIP_UPDATER_ARTIFACTS=0
 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
     --version=*) VERSION="${1#*=}"; shift ;;
     --skip-notarize) SKIP_NOTARIZE=1; shift ;;
+    --skip-updater-artifacts) SKIP_UPDATER_ARTIFACTS=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) sed -n '1,30p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -42,6 +46,38 @@ done
 log() { printf "\033[1;34m▶ %s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m⚠ %s\033[0m\n" "$*" >&2; }
 err() { printf "\033[1;31m✗ %s\033[0m\n" "$*" >&2; }
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  local timeout_marker
+  timeout_marker="$(mktemp "${TMPDIR:-/tmp}/procman-timeout.XXXXXX")"
+  rm -f "$timeout_marker"
+
+  "$@" &
+  local child_pid=$!
+  (
+    sleep "$timeout_seconds"
+    if kill -0 "$child_pid" 2>/dev/null; then
+      touch "$timeout_marker"
+      kill "$child_pid" 2>/dev/null || true
+      sleep 2
+      kill -9 "$child_pid" 2>/dev/null || true
+    fi
+  ) &
+  local watchdog_pid=$!
+
+  local exit_code=0
+  wait "$child_pid" || exit_code=$?
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  if [[ -f "$timeout_marker" ]]; then
+    rm -f "$timeout_marker"
+    return 124
+  fi
+  rm -f "$timeout_marker"
+  return "$exit_code"
+}
 
 # ───────── 1. Version sync ─────────
 sync_version() {
@@ -101,6 +137,45 @@ fi
 command -v pnpm >/dev/null 2>&1 || { err "pnpm not found"; exit 1; }
 command -v cargo >/dev/null 2>&1 || { err "cargo not found"; exit 1; }
 
+if [[ "$DRY_RUN" != "1" && "$SKIP_UPDATER_ARTIFACTS" != "1" && -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  err "TAURI_SIGNING_PRIVATE_KEY is required because tauri.conf.json creates updater artifacts."
+  err "For a local app/dmg candidate build, pass --skip-updater-artifacts."
+  exit 1
+fi
+
+verify_codesign_identity_access() {
+  if [[ "$DRY_RUN" == "1" || "$IDENTITY" == "-" ]]; then
+    return 0
+  fi
+
+  command -v codesign >/dev/null 2>&1 || { err "codesign not found"; exit 1; }
+
+  local timeout_seconds="${CODESIGN_PROBE_TIMEOUT_SECONDS:-30}"
+  local probe_file probe_log
+  probe_file="$(mktemp "${TMPDIR:-/tmp}/procman-codesign-probe.XXXXXX")"
+  probe_log="$(mktemp "${TMPDIR:-/tmp}/procman-codesign-probe-log.XXXXXX")"
+  cp /bin/ls "$probe_file"
+
+  log "Checking Developer ID signing access (timeout ${timeout_seconds}s)"
+  if run_with_timeout "$timeout_seconds" codesign --force --sign "$IDENTITY" --timestamp=none "$probe_file" >"$probe_log" 2>&1; then
+    rm -f "$probe_file" "$probe_log"
+    return 0
+  fi
+
+  local exit_code=$?
+  if [[ "$exit_code" == "124" || "$exit_code" == "137" || "$exit_code" == "143" ]] || grep -q 'Terminated: 15' "$probe_log"; then
+    err "codesign probe timed out. macOS is likely waiting on Keychain access for the Developer ID private key."
+    err "Open Keychain Access and allow codesign access, or run security set-key-partition-list for the build keychain."
+  else
+    err "codesign probe failed before the Tauri build."
+    sed -n '1,20p' "$probe_log" >&2
+  fi
+  rm -f "$probe_file" "$probe_log"
+  exit 3
+}
+
+verify_codesign_identity_access
+
 # ───────── 4. Build ─────────
 if [[ "$DRY_RUN" == "1" ]]; then
   log "DRY-RUN: skipping build"
@@ -117,9 +192,18 @@ else
   if [[ "$IDENTITY" != "-" ]]; then
     export APPLE_SIGNING_IDENTITY="$IDENTITY"
   fi
-  if ! pnpm tauri build --bundles dmg app; then
+  tauri_args=(tauri build --bundles dmg app)
+  if [[ "$SKIP_UPDATER_ARTIFACTS" == "1" ]]; then
+    tauri_args+=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+  fi
+  if ! pnpm "${tauri_args[@]}"; then
     err "Tauri build failed"; exit 2
   fi
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  log "DRY-RUN: would locate artifacts, verify signatures, notarize, and print release paths"
+  exit 0
 fi
 
 DMG_PATH="$(ls -t "$TAURI_DIR"/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"

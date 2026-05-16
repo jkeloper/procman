@@ -148,6 +148,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         });
         scripts.push(Script {
@@ -159,6 +160,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         });
     }
@@ -174,6 +176,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         });
     }
@@ -190,6 +193,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
                 auto_restart: false,
                 auto_restart_policy: None,
                 env_file: None,
+                schedule: None,
                 depends_on: Vec::new(),
             });
         }
@@ -220,6 +224,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         });
         scripts.push(Script {
@@ -231,6 +236,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         });
     }
@@ -476,6 +482,7 @@ fn scripts_from_package_json(path: &Path) -> Vec<Script> {
                 auto_restart: false,
                 auto_restart_policy: None,
                 env_file: None,
+                schedule: None,
                 depends_on: Vec::new(),
             })
         })
@@ -577,7 +584,8 @@ mod tests {
         std::fs::write(
             dir.path().join("package.json"),
             r#"{"name": "my-awesome-app", "scripts": {"dev": "vite"}}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let c = detect_project(dir.path()).unwrap();
         assert_eq!(c.name, "my-awesome-app");
     }
@@ -588,7 +596,8 @@ mod tests {
         std::fs::write(
             dir.path().join("package.json"),
             r#"{"name": "@acme/api-server"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         // package.json alone needs another marker to register — add Docker
         std::fs::write(dir.path().join("docker-compose.yml"), "version: '3'").unwrap();
         let c = detect_project(dir.path()).unwrap();
@@ -604,7 +613,8 @@ mod tests {
 name = "my-rust-crate"
 version = "0.1.0"
 "#,
-        ).unwrap();
+        )
+        .unwrap();
         let c = detect_project(dir.path()).unwrap();
         assert_eq!(c.name, "my-rust-crate");
     }
@@ -620,7 +630,8 @@ version = "0.1.0"
   <artifactId>arch-planner</artifactId>
   <name>Arch Planner Backend</name>
 </project>"#,
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(dir.path().join("docker-compose.yml"), "version: '3'").unwrap();
         let c = detect_project(dir.path()).unwrap();
         // <name> wins over <artifactId>
@@ -675,7 +686,12 @@ version = "0.1.0"
     fn falls_back_to_dirname_when_no_manifest_name() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("docker-compose.yml"), "version: '3'").unwrap();
-        let expected = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+        let expected = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let c = detect_project(dir.path()).unwrap();
         assert_eq!(c.name, expected);
     }

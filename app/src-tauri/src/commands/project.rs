@@ -14,9 +14,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[tauri::command]
-pub async fn list_projects(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<Project>, String> {
+pub async fn list_projects(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Project>, String> {
     let guard = state.config.lock().await;
     Ok(guard.projects.clone())
 }

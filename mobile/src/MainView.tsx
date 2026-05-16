@@ -4,6 +4,15 @@ import { clearPair, loadPair } from './pair';
 import { LogView } from './LogView';
 import { PortsView } from './PortsView';
 import { ArrowLeft, Menu, RefreshCw, Settings, WifiOff, Loader, ChevronRight, RotateCcw } from './icons';
+import { useMobileAlerts } from './useMobileAlerts';
+import {
+  checkNotificationPermission,
+  loadNotificationSettings,
+  requestNotificationPermission,
+  saveNotificationSettings,
+  type MobileNotificationSettings,
+  type NotificationCapability,
+} from './notifications';
 import './mobile.css';
 
 interface Props {
@@ -27,6 +36,8 @@ export function MainView({ onUnpair }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set('__init__'));
   const [busy, setBusy] = useState<string | null>(null);
   const [portStatuses, setPortStatuses] = useState<Record<string, DeclaredPortStatus[]>>({});
+  const [notificationSettings, setNotificationSettings] = useState<MobileNotificationSettings>(() => loadNotificationSettings());
+  const [notificationPermission, setNotificationPermission] = useState<NotificationCapability>('prompt');
 
   const initialLoadDone = useRef(false);
   const refresh = useCallback(async () => {
@@ -37,17 +48,29 @@ export function MainView({ onUnpair }: Props) {
       setLoadError(null);
       if (!initialLoadDone.current) {
         initialLoadDone.current = true;
-        setCollapsed(new Set(cfg.projects.map((p: any) => p.id)));
+        setCollapsed(new Set(cfg.projects.map((p) => p.id)));
       }
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Connection failed');
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : 'Connection failed');
     }
+  }, []);
+
+  const { notifyProcessStatus } = useMobileAlerts({
+    projects,
+    connected,
+    loadError,
+    settings: notificationSettings,
+  });
+
+  useEffect(() => {
+    void checkNotificationPermission().then(setNotificationPermission);
   }, []);
 
   useEffect(() => {
     refresh();
     const stop = openStream((ev) => {
       if (ev.type === 'status') {
+        notifyProcessStatus(ev);
         setProcesses((prev) => {
           if (ev.status === 'running') {
             const idx = prev.findIndex((p) => p.id === ev.id);
@@ -59,10 +82,10 @@ export function MainView({ onUnpair }: Props) {
       }
     }, (c) => {
       setConnected(c);
-      if (c) refresh();
+      void refresh();
     });
     return stop;
-  }, [refresh]);
+  }, [refresh, notifyProcessStatus]);
 
   function toggleCollapse(pid: string) {
     setCollapsed((prev) => { const n = new Set(prev); if (n.has(pid)) n.delete(pid); else n.add(pid); return n; });
@@ -75,8 +98,32 @@ export function MainView({ onUnpair }: Props) {
       else if (action === 'stop') await api.stop(scriptId);
       else await api.restart(scriptId);
       setTimeout(refresh, 300);
-    } catch (e: any) { alert(action + ': ' + (e?.message ?? e)); }
+    } catch (e: unknown) {
+      alert(`${action}: ${e instanceof Error ? e.message : String(e)}`);
+    }
     finally { setBusy(null); }
+  }
+
+  function updateNotificationSettings(patch: Partial<MobileNotificationSettings>) {
+    setNotificationSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveNotificationSettings(next);
+      return next;
+    });
+  }
+
+  async function toggleNotifications(enabled: boolean) {
+    if (!enabled) {
+      updateNotificationSettings({ enabled: false });
+      return;
+    }
+    const status = await requestNotificationPermission();
+    setNotificationPermission(status);
+    if (status !== 'granted') {
+      updateNotificationSettings({ enabled: false });
+      return;
+    }
+    updateNotificationSettings({ enabled: true });
   }
 
   // S2: poll port statuses for running scripts with declared ports
@@ -89,7 +136,9 @@ export function MainView({ onUnpair }: Props) {
     async function tick() {
       const next: Record<string, DeclaredPortStatus[]> = {};
       await Promise.all(targets.map(async (s) => {
-        try { next[s.id] = await api.portStatus(s.id); } catch {}
+        try { next[s.id] = await api.portStatus(s.id); } catch {
+          // A single failed probe should not clear the rest of the status panel.
+        }
       }));
       if (!cancelled) setPortStatuses(next);
     }
@@ -112,18 +161,71 @@ export function MainView({ onUnpair }: Props) {
         <button className="btn-ghost" onClick={() => setScreen({ name: 'list' })}><ArrowLeft size={18} /> Back</button>
         <span className="topbar-title">Settings</span>
       </div>
-      <div className="settings-group">
-        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-          <span style={{ fontSize: 13, color: 'var(--fg3)' }}>Server</span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 15, wordBreak: 'break-all' as const }}>{pair?.host}:{pair?.port}</span>
+      <div className="settings-scroll">
+        <div className="settings-group">
+          <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+            <span style={{ fontSize: 13, color: 'var(--fg3)' }}>Server</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 15, wordBreak: 'break-all' as const }}>{pair?.scheme ?? 'http'}://{pair?.host}:{pair?.port}</span>
+          </div>
+          {pair?.certFingerprintSha256 && (
+            <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--fg3)' }}>TLS fingerprint</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, wordBreak: 'break-all' as const }}>{pair.certFingerprintSha256}</span>
+            </div>
+          )}
+          <div className="settings-row"><span>Connection</span><span style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>{connected ? 'Connected' : 'Disconnected'}</span></div>
+          <div className="settings-row"><span>Projects</span><span>{projects.length}</span></div>
+          <div className="settings-row"><span>Running</span><span>{totalRunning}</span></div>
         </div>
-        <div className="settings-row"><span>Connection</span><span style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>{connected ? 'Connected' : 'Disconnected'}</span></div>
-        <div className="settings-row"><span>Projects</span><span>{projects.length}</span></div>
-        <div className="settings-row"><span>Running</span><span>{totalRunning}</span></div>
-      </div>
-      <div style={{ padding: '0 20px' }}>
-        <button className="btn-outline" style={{ width: '100%', padding: 16, marginTop: 24, color: 'var(--red)', fontSize: 16, minHeight: 52 }}
-          onClick={() => { if (window.confirm('Disconnect?')) { clearPair(); onUnpair(); } }}>Disconnect & log out</button>
+
+        <div className="settings-group">
+          <div className="settings-row"><span>Notifications</span><span>{notificationLabel(notificationPermission)}</span></div>
+          <label className="settings-row">
+            <span>Enabled</span>
+            <input
+              className="settings-switch"
+              type="checkbox"
+              checked={notificationSettings.enabled && notificationPermission === 'granted'}
+              disabled={notificationPermission === 'unsupported'}
+              onChange={(e) => void toggleNotifications(e.currentTarget.checked)}
+            />
+          </label>
+          <label className="settings-row">
+            <span>Script crashes</span>
+            <input
+              className="settings-switch"
+              type="checkbox"
+              checked={notificationSettings.processCrashes}
+              disabled={!notificationSettings.enabled || notificationPermission !== 'granted'}
+              onChange={(e) => updateNotificationSettings({ processCrashes: e.currentTarget.checked })}
+            />
+          </label>
+          <label className="settings-row">
+            <span>Port conflicts</span>
+            <input
+              className="settings-switch"
+              type="checkbox"
+              checked={notificationSettings.portConflicts}
+              disabled={!notificationSettings.enabled || notificationPermission !== 'granted'}
+              onChange={(e) => updateNotificationSettings({ portConflicts: e.currentTarget.checked })}
+            />
+          </label>
+          <label className="settings-row">
+            <span>Unreachable</span>
+            <input
+              className="settings-switch"
+              type="checkbox"
+              checked={notificationSettings.unreachable}
+              disabled={!notificationSettings.enabled || notificationPermission !== 'granted'}
+              onChange={(e) => updateNotificationSettings({ unreachable: e.currentTarget.checked })}
+            />
+          </label>
+        </div>
+
+        <div style={{ padding: '0 20px 24px' }}>
+          <button className="btn-outline" style={{ width: '100%', padding: 16, marginTop: 8, color: 'var(--red)', fontSize: 16, minHeight: 52 }}
+            onClick={() => { if (window.confirm('Disconnect?')) { clearPair(); onUnpair(); } }}>Disconnect & log out</button>
+        </div>
       </div>
     </div>
   );
@@ -238,4 +340,17 @@ export function MainView({ onUnpair }: Props) {
       </>)}
     </div>
   );
+}
+
+function notificationLabel(status: NotificationCapability): string {
+  switch (status) {
+    case 'granted':
+      return 'Allowed';
+    case 'denied':
+      return 'Blocked';
+    case 'unsupported':
+      return 'Unsupported';
+    default:
+      return 'Ask';
+  }
 }

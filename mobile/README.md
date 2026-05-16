@@ -54,6 +54,7 @@ The iOS project is committed under [ios/App/](ios/App/). Leave the Capacitor-gen
 - Script start/stop/restart with live status
 - Log viewer (with substring search)
 - Port dashboard + liveness dot
+- Mobile notifications for crashes, port conflicts, and unreachable procman
 - CPU/RSS metric display
 - Cloudflare tunnel run/kill
 - Group execution
@@ -135,6 +136,7 @@ iOS 프로젝트는 [ios/App/](ios/App/)에 커밋되어 있음. Capacitor가 �
 - 스크립트 start/stop/restart + 실시간 상태
 - 로그 뷰어 (substring 검색 포함)
 - 포트 dashboard + liveness dot
+- 크래시, 포트 충돌, procman 접속 불가 모바일 알림
 - CPU/RSS 메트릭 표시
 - Cloudflare tunnel run/kill
 - 그룹 실행

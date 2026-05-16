@@ -18,17 +18,23 @@ pub async fn ws_handler(
     headers: HeaderMap,
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
-    // If the client negotiated our token-bearing subprotocol, echo it back
-    // on the response so the browser accepts the connection. (The
-    // require_token middleware already validated the token.)
+    // New clients offer both `procman` and a token-bearing subprotocol.
+    // Echo the stable `procman` protocol when present so the token does not
+    // appear in the response headers. Older clients that only offer
+    // `procman-token.<token>` still work because auth already validated it.
     let selected = headers
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| {
-            s.split(',')
-                .map(str::trim)
-                .find(|p| p.starts_with("procman-token."))
-                .map(str::to_string)
+            let protocols: Vec<&str> = s.split(',').map(str::trim).collect();
+            if protocols.contains(&"procman") {
+                Some("procman".to_string())
+            } else {
+                protocols
+                    .into_iter()
+                    .find(|p| p.starts_with("procman-token."))
+                    .map(str::to_string)
+            }
         });
 
     let upgrade = ws.on_upgrade(move |socket| handle_socket(socket, state));
@@ -47,7 +53,10 @@ pub async fn ws_handler(
 #[serde(tag = "type")]
 enum OutEvent {
     #[serde(rename = "hello")]
-    Hello { name: &'static str, version: &'static str },
+    Hello {
+        name: &'static str,
+        version: &'static str,
+    },
     #[serde(rename = "status")]
     Status(serde_json::Value),
     #[serde(rename = "log")]
@@ -105,22 +114,17 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
                 }
                 let id_for_handler = id.clone();
                 let tx = tx_log.clone();
-                let handle = app_for_log.listen(
-                    format!("log://{}", id),
-                    move |ev| {
-                        if let Ok(v) =
-                            serde_json::from_str::<serde_json::Value>(ev.payload())
-                        {
-                            let out = OutEvent::Log {
-                                script_id: id_for_handler.clone(),
-                                line: v,
-                            };
-                            if let Ok(s) = serde_json::to_string(&out) {
-                                let _ = tx.send(s);
-                            }
+                let handle = app_for_log.listen(format!("log://{}", id), move |ev| {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(ev.payload()) {
+                        let out = OutEvent::Log {
+                            script_id: id_for_handler.clone(),
+                            line: v,
+                        };
+                        if let Ok(s) = serde_json::to_string(&out) {
+                            let _ = tx.send(s);
                         }
-                    },
-                );
+                    }
+                });
                 active.insert(id.clone(), handle);
             }
             // Unsubscribe ones that exited

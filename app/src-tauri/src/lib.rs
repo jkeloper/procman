@@ -22,6 +22,7 @@ mod log_buffer;
 mod log_storage;
 mod process;
 mod runtime_state;
+mod scheduler;
 mod server;
 mod state;
 mod types;
@@ -38,27 +39,21 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let config_path = config_store::default_config_path()
-        .expect("could not determine config directory");
+    let config_path =
+        config_store::default_config_path().expect("could not determine config directory");
 
     // Crash logger first so any panic during the rest of bootstrap
     // still gets recorded. Place it next to config.yaml.
     if let Some(config_dir) = config_path.parent() {
         crash_log::init(config_dir.join("crash.log"));
-        crash_log::record(&format!(
-            "procman {} starting",
-            env!("CARGO_PKG_VERSION")
-        ));
+        crash_log::record(&format!("procman {} starting", env!("CARGO_PKG_VERSION")));
     }
 
-    let app_state = Arc::new(
-        AppState::new(config_path.clone())
-            .expect("failed to load or initialize config"),
-    );
-    let runtime_path = runtime_state::default_runtime_path()
-        .expect("could not determine runtime state directory");
-    let runtime_store = RuntimeStore::load(runtime_path)
-        .expect("failed to load runtime state");
+    let app_state =
+        Arc::new(AppState::new(config_path.clone()).expect("failed to load or initialize config"));
+    let runtime_path =
+        runtime_state::default_runtime_path().expect("could not determine runtime state directory");
+    let runtime_store = RuntimeStore::load(runtime_path).expect("failed to load runtime state");
 
     // Phase B Worker K: boot the persistent log-storage writer. Best-effort
     // — if init fails (disk full, perms) the ring buffer keeps working and
@@ -89,10 +84,15 @@ pub fn run() {
                     pm.set_log_capacity(cfg.settings.log_buffer_size);
                 }
             }
-            // Phase B Worker L: emit `process://metrics` every 2s so the
+            // Phase B Worker L: emit runtime metrics every 5s so the
             // frontend can drop its per-hook listProcesses polling.
             pm.clone().start_metrics_broadcaster();
+            scheduler::start_scheduler(
+                app.state::<Arc<AppState>>().inner().clone(),
+                pm.clone(),
+            );
             app.manage(pm);
+            app.manage(commands::pty::PtyManager::new(app.handle().clone()));
 
             // Remote server state (bearer token loaded from runtime_state).
             let rs = app.state::<Arc<RuntimeStore>>().inner().clone();
@@ -250,6 +250,7 @@ pub fn run() {
             commands::update_group,
             commands::delete_group,
             commands::run_group,
+            commands::stop_group,
             // Session
             commands::get_last_running,
             commands::clear_last_running,
@@ -260,6 +261,8 @@ pub fn run() {
             commands::stop_script_graceful,
             commands::restart_process,
             commands::list_processes,
+            commands::runtime_snapshot,
+            commands::runtime_ports,
             commands::log_snapshot,
             commands::clear_log,
             commands::force_quit,
@@ -310,16 +313,31 @@ pub fn run() {
             commands::compose_up,
             commands::compose_down,
             commands::compose_ps,
+            // Interactive PTY sessions
+            commands::start_pty_session,
+            commands::write_pty,
+            commands::resize_pty,
+            commands::kill_pty,
+            commands::list_pty_sessions,
+            commands::pty_snapshot,
+            commands::kill_all_pty_sessions,
         ])
         .on_window_event(|window, event| {
             use tauri::Emitter;
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() != "main" {
+                        return;
+                    }
                     if let Some(pm) = window.try_state::<ProcessManager>() {
-                        let running = pm.list();
-                        if !running.is_empty() {
+                        let running = pm.list().len();
+                        let pty_count = window
+                            .try_state::<commands::pty::PtyManager>()
+                            .map(|pty| pty.active_count())
+                            .unwrap_or(0);
+                        let count = running + pty_count;
+                        if count > 0 {
                             api.prevent_close();
-                            let count = running.len();
                             let _ = window.emit("procman://confirm-quit", count);
                         }
                     }

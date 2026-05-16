@@ -19,6 +19,11 @@ const config: CapacitorConfig = {
     scheme: 'procman',
     scrollEnabled: true,
   },
+  plugins: {
+    LocalNotifications: {
+      presentationOptions: ['badge', 'sound', 'banner', 'list'],
+    },
+  },
 };
 
 export default config;

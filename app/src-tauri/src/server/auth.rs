@@ -110,26 +110,7 @@ fn extract_bearer(req: &Request) -> Option<String> {
             }
         }
     }
-    // Legacy fallback for WS from clients that predate subprotocol support.
-    // NOTE: query tokens leak into access logs; new clients should use the
-    // subprotocol path. Kept for backward compatibility only.
-    let uri = req.uri();
-    let query = uri.query()?;
-    for pair in query.split('&') {
-        if let Some(v) = pair.strip_prefix("token=") {
-            return Some(urlencoding_decode(v));
-        }
-    }
     None
-}
-
-/// Minimal percent-decoding for token strings. This intentionally only
-/// handles the three base64url-adjacent characters we might see here
-/// (`+`, `/`, `=`); anything else is treated as a literal byte. Tokens are
-/// always emitted as base64url-no-pad so real-world tokens contain none of
-/// these — this is strictly for defensive handling of malformed clients.
-fn urlencoding_decode(s: &str) -> String {
-    s.replace("%2B", "+").replace("%2F", "/").replace("%3D", "=")
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -160,5 +141,32 @@ mod tests {
         assert!(constant_time_eq(b"hello", b"hello"));
         assert!(!constant_time_eq(b"hello", b"world"));
         assert!(!constant_time_eq(b"hello", b"hello!"));
+    }
+
+    #[test]
+    fn extracts_authorization_bearer() {
+        let req = Request::builder()
+            .header(header::AUTHORIZATION, "Bearer abc123")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(extract_bearer(&req), Some("abc123".into()));
+    }
+
+    #[test]
+    fn extracts_websocket_token_subprotocol() {
+        let req = Request::builder()
+            .header("sec-websocket-protocol", "procman, procman-token.abc123")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(extract_bearer(&req), Some("abc123".into()));
+    }
+
+    #[test]
+    fn ignores_legacy_query_token() {
+        let req = Request::builder()
+            .uri("/api/stream?token=abc123")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(extract_bearer(&req), None);
     }
 }

@@ -16,9 +16,7 @@ use uuid::Uuid;
 const INTER_LAUNCH_DELAY_MS: u64 = 400;
 
 #[tauri::command]
-pub async fn list_groups(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<Group>, String> {
+pub async fn list_groups(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<Group>, String> {
     let guard = state.config.lock().await;
     Ok(guard.groups.clone())
 }
@@ -96,6 +94,14 @@ pub struct GroupRunResult {
     pub pid: Option<u32>,
 }
 
+#[derive(Serialize)]
+pub struct GroupStopResult {
+    pub project_id: String,
+    pub script_id: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 #[tauri::command]
 pub async fn run_group(
     id: String,
@@ -113,14 +119,32 @@ pub async fn run_group(
             .filter_map(|m| {
                 let proj = guard.projects.iter().find(|p| p.id == m.project_id)?;
                 let script = proj.scripts.iter().find(|s| s.id == m.script_id)?.clone();
-                Some((m.project_id.clone(), m.script_id.clone(), script, proj.path.clone()))
+                Some((
+                    m.project_id.clone(),
+                    m.script_id.clone(),
+                    script,
+                    proj.path.clone(),
+                ))
             })
             .collect()
     };
 
     let mut out = Vec::new();
     for (project_id, script_id, script, cwd) in members {
-        let res = pm.spawn(&script, Some(cwd)).await;
+        let res = match crate::commands::port::blocking_conflicts_for_script(
+            &script.id,
+            &script.ports,
+            &state,
+            &pm,
+        )
+        .await
+        {
+            Ok(conflicts) => match conflicts.first() {
+                Some(conflict) => Err(crate::commands::port::describe_port_conflict(conflict)),
+                None => pm.spawn(&script, Some(cwd)).await,
+            },
+            Err(e) => Err(e),
+        };
         out.push(match res {
             Ok(pid) => GroupRunResult {
                 project_id,
@@ -138,6 +162,55 @@ pub async fn run_group(
             },
         });
         tokio::time::sleep(std::time::Duration::from_millis(INTER_LAUNCH_DELAY_MS)).await;
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn stop_group(
+    id: String,
+    state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<Vec<GroupStopResult>, String> {
+    let (timeout_ms, mut members): (u64, Vec<(String, String)>) = {
+        let guard = state.config.lock().await;
+        let Some(g) = guard.groups.iter().find(|g| g.id == id) else {
+            return Err(format!("group not found: {}", id));
+        };
+        let members = g
+            .members
+            .iter()
+            .filter_map(|m| {
+                let project = guard.projects.iter().find(|p| p.id == m.project_id)?;
+                let script = project.scripts.iter().find(|s| s.id == m.script_id)?;
+                Some((m.project_id.clone(), script.id.clone()))
+            })
+            .collect();
+        (
+            crate::types::clamp_shutdown_timeout_ms(guard.settings.shutdown_timeout_ms),
+            members,
+        )
+    };
+
+    // Stop in reverse launch order so dependency-style groups unwind cleanly.
+    members.reverse();
+    let mut out = Vec::with_capacity(members.len());
+    for (project_id, script_id) in members {
+        let result = pm.kill_with_timeout(&script_id, timeout_ms).await;
+        out.push(match result {
+            Ok(()) => GroupStopResult {
+                project_id,
+                script_id,
+                ok: true,
+                error: None,
+            },
+            Err(e) => GroupStopResult {
+                project_id,
+                script_id,
+                ok: false,
+                error: Some(e),
+            },
+        });
     }
     Ok(out)
 }

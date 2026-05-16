@@ -68,6 +68,8 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [autoRestart, setAutoRestart] = useState(false);
   const [autoRestartPolicy, setAutoRestartPolicy] = useState<AutoRestartPolicy | null>(null);
   const [envFile, setEnvFile] = useState('');
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleCron, setScheduleCron] = useState('0 9 * * 1-5');
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [siblings, setSiblings] = useState<Script[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -83,6 +85,8 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setAutoRestart(existing?.auto_restart ?? false);
       setAutoRestartPolicy(existing?.auto_restart_policy ?? null);
       setEnvFile(existing?.env_file ?? '');
+      setScheduleEnabled(existing?.schedule?.enabled ?? false);
+      setScheduleCron(existing?.schedule?.cron ?? '0 9 * * 1-5');
       setDependsOn(existing?.depends_on ?? []);
       setErr(null);
       // Load sibling scripts for depends_on picker.
@@ -151,6 +155,14 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       trimmedPorts.push({ ...p, name: nm });
     }
     const envVal = envFile.trim() || null;
+    const schedule = scheduleEnabled
+      ? { enabled: true, cron: scheduleCron.trim() }
+      : null;
+    if (scheduleEnabled && !schedule?.cron) {
+      setErr('Schedule cron is required');
+      setBusy(false);
+      return;
+    }
     try {
       if (existing) {
         await api.updateScript(projectId, existing.id, {
@@ -162,6 +174,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           envFile: envVal,
           ports: trimmedPorts,
           dependsOn,
+          schedule,
         });
       } else {
         const created = await api.createScript(
@@ -173,6 +186,7 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           envVal,
           trimmedPorts,
           dependsOn,
+          schedule,
         );
         // Backend create_script does not yet accept the structured
         // policy — patch it in immediately so creation + advanced
@@ -433,6 +447,31 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
                   />
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={scheduleEnabled}
+              onChange={(e) => setScheduleEnabled(e.target.checked)}
+              disabled={busy}
+              className="accent-primary"
+            />
+            Schedule
+          </label>
+          {scheduleEnabled && (
+            <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+              <span className="shrink-0 text-[12px] text-muted-foreground">Cron</span>
+              <Input
+                value={scheduleCron}
+                onChange={(e) => setScheduleCron(e.target.value)}
+                placeholder="*/30 * * * *"
+                disabled={busy}
+                className="h-8 flex-1 font-mono text-[12px]"
+              />
             </div>
           )}
         </div>

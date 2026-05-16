@@ -12,7 +12,7 @@ use crate::process::ProcessManager;
 use crate::state::AppState;
 use crate::types::{PortInfo, PortSpec};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -29,6 +29,140 @@ static LISTENING_PORTS_CACHE: std::sync::OnceLock<StdMutex<Option<(Instant, Vec<
 
 fn cache_cell() -> &'static StdMutex<Option<(Instant, Vec<PortInfo>)>> {
     LISTENING_PORTS_CACHE.get_or_init(|| StdMutex::new(None))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PortOwnerRoot {
+    pub root_pid: u32,
+    pub project_id: String,
+    pub script_id: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PortOwnershipCache {
+    pid_owner: HashMap<u32, (String, String)>,
+}
+
+impl PortOwnershipCache {
+    /// Build a per-runtime-scan ownership cache with one process-tree scan
+    /// and batched cwd lookups. This replaces N calls to
+    /// `list_ports_for_script_pid` when the runtime snapshot/delta needs to
+    /// classify every listening port.
+    pub(crate) fn build(ports: &[PortInfo], roots: &[PortOwnerRoot]) -> Self {
+        let mut pid_owner = HashMap::new();
+        if ports.is_empty() || roots.is_empty() {
+            return Self { pid_owner };
+        }
+
+        let ps_out = match Command::new("ps")
+            .args(["-ax", "-o", "pid=,ppid=,pgid="])
+            .output()
+        {
+            Ok(out) => out,
+            Err(_) => return Self { pid_owner },
+        };
+        let text = String::from_utf8_lossy(&ps_out.stdout);
+        let (pid_pgid, children) = process_ownership_maps(&text);
+
+        for root in roots {
+            for pid in collect_owned_pids(root.root_pid, &pid_pgid, &children) {
+                pid_owner
+                    .entry(pid)
+                    .or_insert_with(|| (root.project_id.clone(), root.script_id.clone()));
+            }
+        }
+
+        // Cwd matching catches detached daemons. Batch both sides so the
+        // runtime snapshot pays at most two lsof calls for cwd ownership.
+        let root_pids = unique_pids(roots.iter().map(|root| root.root_pid));
+        let listening_pids = unique_pids(ports.iter().map(|port| port.pid));
+        let root_cwds = lsof_cwds(&root_pids);
+        if !root_cwds.is_empty() {
+            let listening_cwds = lsof_cwds(&listening_pids);
+            for root in roots {
+                let Some(root_cwd) = root_cwds.get(&root.root_pid) else {
+                    continue;
+                };
+                for (pid, cwd) in &listening_cwds {
+                    if cwd == root_cwd {
+                        pid_owner
+                            .entry(*pid)
+                            .or_insert_with(|| (root.project_id.clone(), root.script_id.clone()));
+                    }
+                }
+            }
+        }
+
+        Self { pid_owner }
+    }
+
+    pub(crate) fn owner_for(&self, pid: u32) -> Option<&(String, String)> {
+        self.pid_owner.get(&pid)
+    }
+
+    fn owned_by_script(&self, pid: u32, script_id: &str) -> bool {
+        self.owner_for(pid)
+            .map(|(_, owner_script_id)| owner_script_id == script_id)
+            .unwrap_or(false)
+    }
+}
+
+pub(crate) async fn build_port_ownership_cache(
+    state: &AppState,
+    pm: &ProcessManager,
+    ports: &[PortInfo],
+) -> PortOwnershipCache {
+    let script_projects = script_project_index(state).await;
+    let roots: Vec<PortOwnerRoot> = pm
+        .list()
+        .into_iter()
+        .filter_map(|process| {
+            let project_id = script_projects.get(&process.id)?;
+            Some(PortOwnerRoot {
+                root_pid: process.pid,
+                project_id: project_id.clone(),
+                script_id: process.id,
+            })
+        })
+        .collect();
+    PortOwnershipCache::build(ports, &roots)
+}
+
+pub(crate) async fn blocking_conflicts_for_script(
+    script_id: &str,
+    specs: &[PortSpec],
+    state: &AppState,
+    pm: &ProcessManager,
+) -> Result<Vec<PortConflict>, String> {
+    if specs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let listening = list_ports().await?;
+    let ownership = build_port_ownership_cache(state, pm, &listening).await;
+    Ok(
+        build_conflicts_with_ownership(script_id, specs, &listening, &ownership)
+            .into_iter()
+            .filter(|conflict| conflict.severity == ConflictSeverity::Blocking)
+            .collect(),
+    )
+}
+
+pub(crate) fn describe_port_conflict(conflict: &PortConflict) -> String {
+    format!(
+        "port :{} is already used by pid {} ({})",
+        conflict.spec.number, conflict.holder_pid, conflict.holder_command
+    )
+}
+
+async fn script_project_index(state: &AppState) -> HashMap<String, String> {
+    let guard = state.config.lock().await;
+    let mut out = HashMap::new();
+    for project in &guard.projects {
+        for script in &project.scripts {
+            out.insert(script.id.clone(), project.id.clone());
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -83,7 +217,9 @@ fn parse_lsof(text: &str) -> Vec<PortInfo> {
     let mut cur_pid: Option<u32> = None;
     let mut cur_cmd: Option<String> = None;
     for line in text.lines() {
-        let Some((prefix, rest)) = line.split_at_checked(1) else { continue };
+        let Some((prefix, rest)) = line.split_at_checked(1) else {
+            continue;
+        };
         match prefix {
             "p" => {
                 cur_pid = rest.parse().ok();
@@ -232,49 +368,15 @@ pub async fn list_ports_for_script_pid(root_pid: u32) -> Result<Vec<PortInfo>, S
         .map_err(|e| format!("ps: {}", e))?;
     let text = String::from_utf8_lossy(&ps_out.stdout);
 
-    let mut pid_ppid: HashMap<u32, u32> = HashMap::new();
-    let mut pid_pgid: HashMap<u32, u32> = HashMap::new();
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let pid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
-        let ppid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
-        let pgid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
-        if let (Some(pid), Some(ppid), Some(pgid)) = (pid, ppid, pgid) {
-            pid_ppid.insert(pid, ppid);
-            pid_pgid.insert(pid, pgid);
-            children.entry(ppid).or_default().push(pid);
-        }
-    }
-
-    // BFS descendants of root_pid via ppid tree.
-    let mut owned: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    owned.insert(root_pid);
-    let mut queue: Vec<u32> = vec![root_pid];
-    while let Some(p) = queue.pop() {
-        if let Some(kids) = children.get(&p) {
-            for k in kids {
-                if owned.insert(*k) {
-                    queue.push(*k);
-                }
-            }
-        }
-    }
-
-    // Union with pgid==root_pid (catches double-forked daemons).
-    for (pid, pgid) in pid_pgid.iter() {
-        if *pgid == root_pid {
-            owned.insert(*pid);
-        }
-    }
+    let (pid_pgid, children) = process_ownership_maps(&text);
+    let mut owned = collect_owned_pids(root_pid, &pid_pgid, &children);
 
     // Resolve root_pid's cwd via lsof. If we get one, also include any
     // listening process whose cwd points at the same directory — this
     // is how we follow Gradle/Maven daemon JVMs that get reparented to
     // launchd. `-a` AND-combines `-p`/`-d` so we only get the cwd row.
     if let Some(root_cwd) = lsof_cwd(root_pid) {
-        let listening_pids: Vec<u32> =
-            ports.iter().map(|p| p.pid).collect();
+        let listening_pids: Vec<u32> = ports.iter().map(|p| p.pid).collect();
         let cwds = lsof_cwds(&listening_pids);
         for (pid, cwd) in cwds {
             if cwd == root_cwd {
@@ -289,6 +391,65 @@ pub async fn list_ports_for_script_pid(root_pid: u32) -> Result<Vec<PortInfo>, S
         .collect();
     matched.sort_by_key(|p| p.port);
     Ok(matched)
+}
+
+fn process_ownership_maps(text: &str) -> (HashMap<u32, u32>, HashMap<u32, Vec<u32>>) {
+    let mut pid_pgid: HashMap<u32, u32> = HashMap::new();
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let pid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
+        let ppid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
+        let pgid: Option<u32> = parts.next().and_then(|s| s.parse().ok());
+        if let (Some(pid), Some(ppid), Some(pgid)) = (pid, ppid, pgid) {
+            pid_pgid.insert(pid, pgid);
+            children.entry(ppid).or_default().push(pid);
+        }
+    }
+    (pid_pgid, children)
+}
+
+fn collect_owned_pids(
+    root_pid: u32,
+    pid_pgid: &HashMap<u32, u32>,
+    children: &HashMap<u32, Vec<u32>>,
+) -> HashSet<u32> {
+    // BFS descendants of root_pid via ppid tree.
+    let mut owned: HashSet<u32> = HashSet::new();
+    owned.insert(root_pid);
+    let mut queue: Vec<u32> = vec![root_pid];
+    while let Some(pid) = queue.pop() {
+        if let Some(kids) = children.get(&pid) {
+            for child in kids {
+                if owned.insert(*child) {
+                    queue.push(*child);
+                }
+            }
+        }
+    }
+
+    // Union with pgid==root_pid (catches double-forked daemons).
+    for (pid, pgid) in pid_pgid {
+        if *pgid == root_pid {
+            owned.insert(*pid);
+        }
+    }
+
+    owned
+}
+
+fn unique_pids<I>(pids: I) -> Vec<u32>
+where
+    I: IntoIterator<Item = u32>,
+{
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for pid in pids {
+        if seen.insert(pid) {
+            out.push(pid);
+        }
+    }
+    out
 }
 
 /// Return the current working directory of `pid`, or None if lsof fails.
@@ -364,13 +525,14 @@ pub async fn set_port_alias(
             if alias.trim().is_empty() {
                 cfg.settings.port_aliases.remove(&port);
             } else {
-                cfg.settings.port_aliases.insert(port, alias.trim().to_string());
+                cfg.settings
+                    .port_aliases
+                    .insert(port, alias.trim().to_string());
             }
         })
         .await
         .map_err(|e| e.to_string())
 }
-
 
 // ----------------------------------------------------------------------
 // S1: Declared port status + conflict detection + tunnel-oriented lookup
@@ -477,20 +639,8 @@ pub async fn port_status_for_script(
     }
 
     let listening = list_ports().await?;
-    // If running, fetch the set of pids considered "ours" for managed vs other.
-    let managed_pids: std::collections::HashSet<u32> = match pm
-        .list()
-        .into_iter()
-        .find(|s| s.id == script_id)
-    {
-        Some(snap) => list_ports_for_script_pid(snap.pid)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| p.pid)
-            .collect(),
-        None => std::collections::HashSet::new(),
-    };
+    let ownership = build_port_ownership_cache(&state, &pm, &listening).await;
+    let managed_pids: HashSet<u32> = managed_pids_for_script(&script_id, &listening, &ownership);
 
     let mut statuses = build_declared_status(&script.ports, &listening, &managed_pids);
     // S2: probe each declared port in parallel. Keep timeout short (400ms)
@@ -517,6 +667,7 @@ pub async fn port_status_for_script(
 pub async fn check_port_conflicts(
     script_id: String,
     state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
 ) -> Result<Vec<PortConflict>, String> {
     let (_proj_id, script) = lookup_script(&state, &script_id)
         .await
@@ -525,7 +676,13 @@ pub async fn check_port_conflicts(
         return Ok(Vec::new());
     }
     let listening = list_ports().await?;
-    Ok(build_conflicts(&script.ports, &listening))
+    let ownership = build_port_ownership_cache(&state, &pm, &listening).await;
+    Ok(build_conflicts_with_ownership(
+        &script_id,
+        &script.ports,
+        &listening,
+        &ownership,
+    ))
 }
 
 /// Return every listening port associated with this script, via the union
@@ -543,14 +700,28 @@ pub async fn list_ports_for_script(
         .ok_or_else(|| format!("script not found: {}", script_id))?;
 
     let all = list_ports().await?;
-    let by_port: HashMap<u16, PortInfo> =
-        all.iter().map(|p| (p.port, p.clone())).collect();
+    let ownership = build_port_ownership_cache(&state, &pm, &all).await;
+    Ok(list_ports_for_script_from_snapshot(
+        &script_id,
+        &script.ports,
+        &all,
+        &ownership,
+    ))
+}
+
+pub(crate) fn list_ports_for_script_from_snapshot(
+    script_id: &str,
+    specs: &[PortSpec],
+    all: &[PortInfo],
+    ownership: &PortOwnershipCache,
+) -> Vec<PortInfo> {
+    let by_port: HashMap<u16, PortInfo> = all.iter().map(|p| (p.port, p.clone())).collect();
 
     let mut seen: std::collections::HashSet<u16> = std::collections::HashSet::new();
     let mut out: Vec<PortInfo> = Vec::new();
 
     // Declared first, in declaration order.
-    for spec in &script.ports {
+    for spec in specs {
         if let Some(info) = by_port.get(&spec.number) {
             if seen.insert(spec.number) {
                 out.push(info.clone());
@@ -558,28 +729,24 @@ pub async fn list_ports_for_script(
         }
     }
 
-    // Append descendants from the existing heuristic, if running.
-    if let Some(snap) = pm.list().into_iter().find(|s| s.id == script_id) {
-        if let Ok(v) = list_ports_for_script_pid(snap.pid).await {
-            for info in v {
-                if seen.insert(info.port) {
-                    out.push(info);
-                }
-            }
+    // Append every live port that the shared ownership cache attributes
+    // to this script, even if it was not declared.
+    for info in all {
+        if ownership.owned_by_script(info.pid, script_id) && seen.insert(info.port) {
+            out.push(info.clone());
         }
     }
 
-    Ok(out)
+    out
 }
 
-
-/// S1: Pure helper used by unit tests and `check_port_conflicts`.
+/// S1: Pure helper used by unit tests.
 /// Compares a set of declared PortSpecs against a listing snapshot and
 /// builds the resulting PortConflict vector. Kept pure so the test
 /// harness doesn't need a live `lsof` or Tauri state.
+#[cfg(test)]
 pub(crate) fn build_conflicts(specs: &[PortSpec], listening: &[PortInfo]) -> Vec<PortConflict> {
-    let lookup: HashMap<u16, &PortInfo> =
-        listening.iter().map(|p| (p.port, p)).collect();
+    let lookup: HashMap<u16, &PortInfo> = listening.iter().map(|p| (p.port, p)).collect();
     let mut out = Vec::new();
     for spec in specs {
         if let Some(info) = lookup.get(&spec.number) {
@@ -598,6 +765,46 @@ pub(crate) fn build_conflicts(specs: &[PortSpec], listening: &[PortInfo]) -> Vec
     out
 }
 
+pub(crate) fn build_conflicts_with_ownership(
+    script_id: &str,
+    specs: &[PortSpec],
+    listening: &[PortInfo],
+    ownership: &PortOwnershipCache,
+) -> Vec<PortConflict> {
+    let lookup: HashMap<u16, &PortInfo> = listening.iter().map(|p| (p.port, p)).collect();
+    let mut out = Vec::new();
+    for spec in specs {
+        if let Some(info) = lookup.get(&spec.number) {
+            if ownership.owned_by_script(info.pid, script_id) {
+                continue;
+            }
+            out.push(PortConflict {
+                spec: spec.clone(),
+                holder_pid: info.pid,
+                holder_command: info.command.clone(),
+                severity: if spec.optional {
+                    ConflictSeverity::Warning
+                } else {
+                    ConflictSeverity::Blocking
+                },
+            });
+        }
+    }
+    out
+}
+
+pub(crate) fn managed_pids_for_script(
+    script_id: &str,
+    listening: &[PortInfo],
+    ownership: &PortOwnershipCache,
+) -> HashSet<u32> {
+    listening
+        .iter()
+        .filter(|info| ownership.owned_by_script(info.pid, script_id))
+        .map(|info| info.pid)
+        .collect()
+}
+
 /// S1: Pure helper for `port_status_for_script`. `managed_pids` is the
 /// set of pids that the caller considers "ours" (derived from the
 /// descendant scanner when the script is running, empty otherwise).
@@ -606,8 +813,7 @@ pub(crate) fn build_declared_status(
     listening: &[PortInfo],
     managed_pids: &std::collections::HashSet<u32>,
 ) -> Vec<DeclaredPortStatus> {
-    let lookup: HashMap<u16, &PortInfo> =
-        listening.iter().map(|p| (p.port, p)).collect();
+    let lookup: HashMap<u16, &PortInfo> = listening.iter().map(|p| (p.port, p)).collect();
     specs
         .iter()
         .map(|spec| {
@@ -697,6 +903,39 @@ mod tests {
     }
 
     #[test]
+    fn build_conflicts_with_ownership_skips_same_script_owner() {
+        let specs = vec![spec("http", 8080, false)];
+        let listing = vec![info(8080, 42, "node server.js")];
+        let mut ownership = PortOwnershipCache::default();
+        ownership.pid_owner.insert(42, ("p1".into(), "s1".into()));
+
+        assert!(build_conflicts_with_ownership("s1", &specs, &listing, &ownership).is_empty());
+
+        let conflicts = build_conflicts_with_ownership("s2", &specs, &listing, &ownership);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].severity, ConflictSeverity::Blocking);
+    }
+
+    #[test]
+    fn list_ports_for_script_includes_owned_undeclared_ports_after_declared() {
+        let specs = vec![spec("http", 8080, false)];
+        let listing = vec![
+            info(9000, 42, "node sidecar"),
+            info(8080, 42, "node main"),
+            info(7000, 99, "other"),
+        ];
+        let mut ownership = PortOwnershipCache::default();
+        ownership.pid_owner.insert(42, ("p1".into(), "s1".into()));
+        ownership.pid_owner.insert(99, ("p1".into(), "s2".into()));
+
+        let out = list_ports_for_script_from_snapshot("s1", &specs, &listing, &ownership);
+        assert_eq!(
+            out.iter().map(|info| info.port).collect::<Vec<_>>(),
+            vec![8080, 9000]
+        );
+    }
+
+    #[test]
     fn build_status_free_when_not_listening() {
         let specs = vec![spec("http", 8080, false)];
         let listing: Vec<PortInfo> = Vec::new();
@@ -730,8 +969,27 @@ mod tests {
     }
 
     #[test]
+    fn ownership_maps_collect_ppid_descendants_and_pgid_members() {
+        let ps = "\
+100   1   100
+101 100   100
+102 101   102
+200   1   100
+300   1   300
+";
+        let (pid_pgid, children) = process_ownership_maps(ps);
+        let owned = collect_owned_pids(100, &pid_pgid, &children);
+        assert!(owned.contains(&100));
+        assert!(owned.contains(&101));
+        assert!(owned.contains(&102));
+        assert!(owned.contains(&200));
+        assert!(!owned.contains(&300));
+    }
+
+    #[test]
     fn parses_lsof_output() {
-        let sample = "p1234\ncnode\nn*:3000\nTST=LISTEN\np5678\ncpython\nn127.0.0.1:8000\nTST=LISTEN\n";
+        let sample =
+            "p1234\ncnode\nn*:3000\nTST=LISTEN\np5678\ncpython\nn127.0.0.1:8000\nTST=LISTEN\n";
         let parsed = parse_lsof(sample);
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].port, 3000);
@@ -770,7 +1028,11 @@ mod tests {
             let _ = listener.accept().await;
         });
         let ok = tcp_probe("127.0.0.1", port, 500).await;
-        assert!(ok, "probe should succeed against a live listener on :{}", port);
+        assert!(
+            ok,
+            "probe should succeed against a live listener on :{}",
+            port
+        );
     }
 
     #[test]
@@ -798,7 +1060,10 @@ mod tests {
             let g = cache_cell().lock().unwrap();
             g.clone()
         };
-        assert!(cached_first.is_some(), "cache should be populated after first call");
+        assert!(
+            cached_first.is_some(),
+            "cache should be populated after first call"
+        );
         let (ts_first, _) = cached_first.unwrap();
         // Second call immediately — cache must be reused, so the
         // timestamp doesn't advance.

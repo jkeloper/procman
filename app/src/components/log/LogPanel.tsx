@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
 import AnsiToHtml from 'ansi-to-html';
 import { useLogStream } from '@/hooks/useLogStream';
 import { api, type LogLine } from '@/api/tauri';
+
+const TerminalPanel = lazy(() =>
+  import('./TerminalPanel').then((mod) => ({ default: mod.TerminalPanel })),
+);
 
 const ansi = new AnsiToHtml({
   fg: '#c8ccc9',
@@ -14,6 +18,7 @@ const ansi = new AnsiToHtml({
 interface Props {
   scriptId: string | null;
   scriptName?: string;
+  projectId?: string | null;
 }
 
 const ROW_HEIGHT = 20;
@@ -72,16 +77,18 @@ function highlight(text: string, query: string): string {
   return applyLevelHighlight(out);
 }
 
-type RowPropsWithCache = RowProps & { cache: Map<number, string> };
+type HtmlCacheEntry = { query: string; html: string };
+type RowPropsWithCache = RowProps & { cache: WeakMap<LogLine, HtmlCacheEntry> };
 
 function Row({ index, style, lines, query, cache }: RowComponentProps<RowPropsWithCache>) {
   const line = lines[index];
   if (!line) return null;
   const isErr = line.stream === 'stderr';
-  let html = cache.get(line.seq);
+  const cached = cache.get(line);
+  let html = cached?.query === query ? cached.html : undefined;
   if (html === undefined) {
     html = highlight(line.text, query);
-    cache.set(line.seq, html);
+    cache.set(line, { query, html });
   }
   return (
     <div
@@ -102,10 +109,11 @@ function Row({ index, style, lines, query, cache }: RowComponentProps<RowPropsWi
   );
 }
 
-export function LogPanel({ scriptId, scriptName }: Props) {
+export function LogPanel({ scriptId, scriptName, projectId }: Props) {
   const { lines, clear } = useLogStream(scriptId);
   const listRef = useRef<ListImperativeAPI>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<'logs' | 'terminal'>('logs');
   const [autoScroll, setAutoScroll] = useState(true);
   const [query, setQuery] = useState('');
   const [showStdout, setShowStdout] = useState(true);
@@ -145,14 +153,10 @@ export function LogPanel({ scriptId, scriptName }: Props) {
       setHistoryLoading(false);
     }
   }
-  // Per-instance HTML cache — scoped to this LogPanel so lines from
-  // different scripts never share cached HTML by seq collision.
-  // Cleared whenever the filter query changes (because highlight depends
-  // on query).
-  const htmlCacheRef = useRef<Map<number, string>>(new Map());
-  useEffect(() => {
-    htmlCacheRef.current.clear();
-  }, [query]);
+  // HTML cache scoped by LogLine object identity. WeakMap lets evicted
+  // live-tail lines disappear with the line objects instead of retaining
+  // every historical seq for the life of the panel.
+  const htmlCacheRef = useRef<WeakMap<LogLine, HtmlCacheEntry>>(new WeakMap());
 
   const filtered = useMemo(() => {
     // History-mode: show the sqlite FTS result set verbatim (stream
@@ -214,6 +218,13 @@ export function LogPanel({ scriptId, scriptName }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const lowerQuery = useMemo(() => query.toLowerCase(), [query]);
+  const rowPropsMemo = useMemo(
+    () => ({ lines: filtered, query: lowerQuery, cache: htmlCacheRef.current }),
+    [filtered, lowerQuery],
+  );
+  const hiddenCount = lines.length - filtered.length;
+
   if (!scriptId) {
     return (
       <div className="flex h-full items-center justify-center text-[12px] text-log-muted">
@@ -221,13 +232,6 @@ export function LogPanel({ scriptId, scriptName }: Props) {
       </div>
     );
   }
-
-  const lowerQuery = useMemo(() => query.toLowerCase(), [query]);
-  const rowPropsMemo = useMemo(
-    () => ({ lines: filtered, query: lowerQuery, cache: htmlCacheRef.current }),
-    [filtered, lowerQuery],
-  );
-  const hiddenCount = lines.length - filtered.length;
 
   return (
     <div className="flex h-full flex-col bg-log-bg">
@@ -238,8 +242,34 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           {filtered.length}
           {hiddenCount > 0 && <span className="text-log-muted/60"> / {lines.length}</span>}
         </span>
+        <div className="flex items-center rounded border border-log-border bg-foreground/5 p-0.5">
+          <button
+            onClick={() => setMode('logs')}
+            className={`rounded px-2 py-0.5 transition-colors ${
+              mode === 'logs' ? 'bg-foreground/10 text-log-fg' : 'text-log-muted hover:text-log-fg'
+            }`}
+            aria-pressed={mode === 'logs'}
+          >
+            logs
+          </button>
+          {projectId && (
+            <button
+              onClick={() => setMode('terminal')}
+              className={`rounded px-2 py-0.5 transition-colors ${
+                mode === 'terminal'
+                  ? 'bg-foreground/10 text-log-fg'
+                  : 'text-log-muted hover:text-log-fg'
+              }`}
+              aria-pressed={mode === 'terminal'}
+            >
+              terminal
+            </button>
+          )}
+        </div>
         <div className="flex-1" />
 
+        {mode === 'logs' && (
+          <>
         {/* Stream toggles */}
         <button
           onClick={() => setShowStdout(!showStdout)}
@@ -361,8 +391,22 @@ export function LogPanel({ scriptId, scriptName }: Props) {
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6 2v6M3 5l3 3 3-3M2 10h8"/></svg>
         </button>
+          </>
+        )}
       </div>
 
+      {mode === 'terminal' ? (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center bg-log-bg text-[12px] text-log-muted/60">
+              loading terminal…
+            </div>
+          }
+        >
+          <TerminalPanel projectId={projectId} scriptId={scriptId} scriptName={scriptName} />
+        </Suspense>
+      ) : (
+        <>
       {/* History-mode banner — makes it obvious the viewport is NOT the
           live tail. Doubles as the "back to live" affordance. */}
       {historyMode && (
@@ -418,6 +462,8 @@ export function LogPanel({ scriptId, scriptName }: Props) {
           />
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

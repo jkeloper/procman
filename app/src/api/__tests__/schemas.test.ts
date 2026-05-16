@@ -14,15 +14,19 @@ import {
   PortSpecSchema,
   DeclaredPortStatusSchema,
   ProcessSnapshotSchema,
+  RuntimeDeltaSchema,
+  RuntimePortsSnapshotSchema,
+  PtySessionSchema,
 } from '../schemas';
 
 describe('AppSettingsSchema', () => {
   it('applies defaults when given an empty object', () => {
     const parsed = AppSettingsSchema.parse({});
     expect(parsed.log_buffer_size).toBe(5000);
-    expect(parsed.port_poll_interval_ms).toBe(1000);
+    expect(parsed.port_poll_interval_ms).toBe(5000);
     expect(parsed.theme).toBe('system');
     expect(parsed.port_aliases).toEqual({});
+    expect(parsed.shutdown_timeout_ms).toBe(1500);
   });
 
   it('preserves port_aliases values through round-trip', () => {
@@ -31,10 +35,12 @@ describe('AppSettingsSchema', () => {
       port_poll_interval_ms: 1000,
       theme: 'dark',
       port_aliases: { '3000': 'Frontend', '5432': 'Postgres' },
+      shutdown_timeout_ms: 3000,
     };
     const parsed = AppSettingsSchema.parse(input);
     const back = AppSettingsSchema.parse(JSON.parse(JSON.stringify(parsed)));
     expect(back.port_aliases).toEqual(input.port_aliases);
+    expect(back.shutdown_timeout_ms).toBe(3000);
   });
 });
 
@@ -50,6 +56,7 @@ describe('ScriptSchema', () => {
     expect(parsed.auto_restart).toBe(false);
     expect(parsed.env_file).toBeNull();
     expect(parsed.expected_port).toBeNull();
+    expect(parsed.schedule).toBeNull();
   });
 
   it('preserves depends_on list verbatim', () => {
@@ -60,6 +67,16 @@ describe('ScriptSchema', () => {
       depends_on: ['db', 'redis'],
     });
     expect(parsed.depends_on).toEqual(['db', 'redis']);
+  });
+
+  it('preserves schedule spec verbatim', () => {
+    const parsed = ScriptSchema.parse({
+      id: 'nightly',
+      name: 'nightly',
+      command: 'pnpm test',
+      schedule: { enabled: true, cron: '0 2 * * *' },
+    });
+    expect(parsed.schedule).toEqual({ enabled: true, cron: '0 2 * * *' });
   });
 });
 
@@ -153,6 +170,18 @@ describe('AppConfigSchema round-trip', () => {
 });
 
 describe('Runtime-only schemas', () => {
+  it('PtySessionSchema validates PTY session metadata', () => {
+    const parsed = PtySessionSchema.parse({
+      id: 'pty1',
+      project_id: 'p1',
+      script_id: 's1',
+      pid: 1234,
+      command: 'python -i',
+      started_at_ms: 1_700_000_000_000,
+    });
+    expect(parsed.pid).toBe(1234);
+  });
+
   it('DeclaredPortStatusSchema defaults reachable to null', () => {
     const s = DeclaredPortStatusSchema.parse({
       spec: { name: 'http', number: 8080 },
@@ -173,5 +202,33 @@ describe('Runtime-only schemas', () => {
     });
     expect(snap.cpu_pct).toBeNull();
     expect(snap.rss_kb).toBeNull();
+  });
+
+  it('RuntimeDeltaSchema accepts ports deltas', () => {
+    const parsed = RuntimeDeltaSchema.parse({
+      kind: 'ports',
+      generated_at_ms: 1_700_000_000_000,
+      ports: [
+        {
+          port: 3000,
+          pid: 1234,
+          process_name: 'node',
+          command: 'node server.js',
+          managed: true,
+          owner_project_id: 'p1',
+          owner_script_id: 's1',
+        },
+      ],
+    });
+    expect(parsed.kind).toBe('ports');
+    if (parsed.kind !== 'ports') throw new Error('expected ports delta');
+    expect(parsed.ports[0].owner_script_id).toBe('s1');
+  });
+
+  it('RuntimePortsSnapshotSchema defaults missing ports to empty', () => {
+    const parsed = RuntimePortsSnapshotSchema.parse({
+      generated_at_ms: 1_700_000_000_000,
+    });
+    expect(parsed.ports).toEqual([]);
   });
 });

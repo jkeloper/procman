@@ -14,9 +14,7 @@ pub async fn get_last_running(
 }
 
 #[tauri::command]
-pub async fn clear_last_running(
-    store: tauri::State<'_, Arc<RuntimeStore>>,
-) -> Result<(), String> {
+pub async fn clear_last_running(store: tauri::State<'_, Arc<RuntimeStore>>) -> Result<(), String> {
     store.clear_last_running().await.map_err(|e| e.to_string())
 }
 
@@ -72,6 +70,7 @@ mod restore_order_tests {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -79,8 +78,7 @@ mod restore_order_tests {
     /// Returns IDs in a valid start order (deps before dependents) or
     /// Err on cycle. Stable w.r.t. input order (BFS on ready set).
     fn local_topo_sort(scripts: &[Script]) -> Result<Vec<String>, String> {
-        let by_id: HashMap<String, &Script> =
-            scripts.iter().map(|s| (s.id.clone(), s)).collect();
+        let by_id: HashMap<String, &Script> = scripts.iter().map(|s| (s.id.clone(), s)).collect();
         // Dep graph: node → set of deps that must come first.
         let mut pending: HashMap<String, HashSet<String>> = scripts
             .iter()
@@ -125,11 +123,7 @@ mod restore_order_tests {
         let order = local_topo_sort(&scripts).unwrap();
         let pos_a = order.iter().position(|x| x == "A").unwrap();
         let pos_b = order.iter().position(|x| x == "B").unwrap();
-        assert!(
-            pos_b < pos_a,
-            "B must start before A, got {:?}",
-            order
-        );
+        assert!(pos_b < pos_a, "B must start before A, got {:?}", order);
     }
 
     #[test]
@@ -164,7 +158,11 @@ mod restore_order_tests {
         let res = local_topo_sort(&scripts);
         assert!(res.is_err(), "cycle must be rejected, got {:?}", res);
         let err = res.err().unwrap();
-        assert!(err.contains("cycle"), "err message should mention cycle: {}", err);
+        assert!(
+            err.contains("cycle"),
+            "err message should mention cycle: {}",
+            err
+        );
     }
 
     #[test]

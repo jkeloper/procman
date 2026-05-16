@@ -13,19 +13,15 @@ use crate::config_store::ConfigStore;
 use crate::state::AppState;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc::channel;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 const DEBOUNCE_MS: u64 = 200;
 
-pub fn spawn_config_watcher(
-    app: AppHandle,
-    state: Arc<AppState>,
-    config_path: PathBuf,
-) {
+pub fn spawn_config_watcher(app: AppHandle, state: Arc<AppState>, config_path: PathBuf) {
     thread::spawn(move || {
         let (tx, rx) = channel::<notify::Result<Event>>();
         let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {

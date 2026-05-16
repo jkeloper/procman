@@ -4,16 +4,28 @@ import { api } from '@/api/tauri';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useSettings } from '@/hooks/useSettings';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
 // QR code that encodes the procman pairing payload as a URL with the
-// token in the fragment (so it never gets logged or sent server-side).
-// Mobile picks the URL up, parses #token=, and auto-pairs.
-function PairingQR({ url, token }: { url: string; token: string }) {
+// token and optional TLS pin in the fragment (so neither is sent server-side).
+// Mobile picks the URL up, parses the fragment, and auto-pairs.
+function PairingQR({
+  url,
+  token,
+  certFingerprint,
+}: {
+  url: string;
+  token: string;
+  certFingerprint: string | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!canvasRef.current) return;
-    const payload = `${url}#token=${encodeURIComponent(token)}`;
-    QRCode.toCanvas(canvasRef.current, payload, {
+    const payload = new URL(url);
+    const params = new URLSearchParams({ token });
+    if (certFingerprint) params.set('fp', certFingerprint);
+    payload.hash = params.toString();
+    QRCode.toCanvas(canvasRef.current, payload.toString(), {
       width: 180,
       margin: 1,
       color: {
@@ -22,7 +34,7 @@ function PairingQR({ url, token }: { url: string; token: string }) {
       },
       errorCorrectionLevel: 'M',
     }).catch(() => {});
-  }, [url, token]);
+  }, [url, token, certFingerprint]);
   return (
     <div className="flex flex-col items-center gap-2">
       <canvas
@@ -60,11 +72,7 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
     } catch {}
   }, []);
 
-  useEffect(() => {
-    reload();
-    const id = setInterval(reload, 3000);
-    return () => clearInterval(id);
-  }, [reload]);
+  useVisibleInterval(reload, 3000);
 
   async function start() {
     setBusy(true);
@@ -151,6 +159,8 @@ interface Status {
   running: boolean;
   port: number | null;
   mode: Mode | null;
+  tls: boolean;
+  cert_fingerprint_sha256: string | null;
   token: string;
 }
 
@@ -184,11 +194,7 @@ export function RemoteAccessCard() {
     }
   }, []);
 
-  useEffect(() => {
-    reload();
-    const id = setInterval(reload, 3000);
-    return () => clearInterval(id);
-  }, [reload]);
+  useVisibleInterval(reload, 3000);
 
   async function toggle(enable: boolean, mode: Mode = 'lan') {
     setBusy(true);
@@ -217,13 +223,18 @@ export function RemoteAccessCard() {
 
   const toast2 = useToast();
   function copy(text: string, label: string) {
-    toast2.copy(text, `${label === 'url' ? 'URL' : 'Token'} copied`);
+    const name = label === 'url' ? 'URL' : label === 'cert' ? 'Certificate fingerprint' : 'Token';
+    toast2.copy(text, `${name} copied`);
     setCopied(label);
     setTimeout(() => setCopied(null), 1500);
   }
 
+  const scheme = status?.tls ? 'https' : 'http';
   const url = status?.running
-    ? `http://${status.mode === 'lan' ? ip : '127.0.0.1'}:${status.port}`
+    ? `${scheme}://${status.mode === 'lan' ? ip : '127.0.0.1'}:${status.port}`
+    : null;
+  const fingerprintShort = status?.cert_fingerprint_sha256
+    ? `${status.cert_fingerprint_sha256.slice(0, 23)}...${status.cert_fingerprint_sha256.slice(-11)}`
     : null;
 
   return (
@@ -273,8 +284,8 @@ export function RemoteAccessCard() {
       )}
       {!status?.running && lanOptIn && (
         <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
-          Warning: certificate pinning is not yet implemented. Keep LAN sessions on
-          your own Wi-Fi only.
+          LAN mode uses a self-signed TLS certificate. The pairing QR includes
+          its SHA-256 fingerprint for client pinning.
         </div>
       )}
 
@@ -320,12 +331,37 @@ export function RemoteAccessCard() {
             <div className="flex items-center gap-2">
               <span className="w-12 text-muted-foreground">Mode</span>
               <span className="font-mono">{status.mode}</span>
+              {status.mode === 'lan' && (
+                <span className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {status.tls ? 'TLS' : 'HTTP fallback'}
+                </span>
+              )}
             </div>
+            {status.tls && status.cert_fingerprint_sha256 && (
+              <div className="flex items-center gap-2">
+                <span className="w-12 text-muted-foreground">Cert</span>
+                <span
+                  className="min-w-0 flex-1 truncate font-mono"
+                  title={status.cert_fingerprint_sha256}
+                >
+                  {fingerprintShort}
+                </span>
+                <Button variant="ghost" size="sm" className="h-6 px-2"
+                  onClick={() => copy(status.cert_fingerprint_sha256!, 'cert')}
+                >
+                  {copied === 'cert' ? '✓' : 'Copy'}
+                </Button>
+              </div>
+            )}
           </div>
 
           {url && status.token && (
             <div className="border-t border-border/40 pt-3">
-              <PairingQR url={url} token={status.token} />
+              <PairingQR
+                url={url}
+                token={status.token}
+                certFingerprint={status.cert_fingerprint_sha256}
+              />
             </div>
           )}
 

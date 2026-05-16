@@ -74,6 +74,27 @@ export function SettingsDialog({ open, onOpenChange, onShowOnboarding }: Props) 
                 </p>
               </div>
 
+              <div className="space-y-1">
+                <Label htmlFor="shutdown-timeout">
+                  Stop timeout: {(settings.shutdown_timeout_ms / 1000).toFixed(2)}s
+                </Label>
+                <input
+                  id="shutdown-timeout"
+                  type="range"
+                  min={250}
+                  max={30000}
+                  step={250}
+                  value={settings.shutdown_timeout_ms}
+                  onChange={(e) =>
+                    save({ shutdown_timeout_ms: parseInt(e.target.value, 10) }, 250)
+                  }
+                  className="w-full accent-primary"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Time to wait after SIGTERM before procman uses SIGKILL.
+                </p>
+              </div>
+
               {/* Start at login */}
               <StartAtLoginRow
                 enabled={settings.start_at_login}

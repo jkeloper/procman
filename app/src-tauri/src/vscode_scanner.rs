@@ -81,9 +81,9 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
             let mut member_cmds: Vec<String> = Vec::new();
             let mut missing: Vec<String> = Vec::new();
             for m in &member_names {
-                let member_cfg = configs.iter().find(|c| {
-                    c.get("name").and_then(|v| v.as_str()) == Some(m.as_str())
-                });
+                let member_cfg = configs
+                    .iter()
+                    .find(|c| c.get("name").and_then(|v| v.as_str()) == Some(m.as_str()));
                 if let Some(mc) = member_cfg {
                     let translated = translate_config_with_tasks(mc, &workspace, &tasks);
                     if let Some(script) = &translated.script {
@@ -108,7 +108,10 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
                 out.push(skip(
                     c_name.clone(),
                     "compound".to_string(),
-                    &format!("compound members missing/unsupported: {}", missing.join(", ")),
+                    &format!(
+                        "compound members missing/unsupported: {}",
+                        missing.join(", ")
+                    ),
                     raw,
                 ));
                 continue;
@@ -137,6 +140,7 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
                 auto_restart: false,
                 auto_restart_policy: None,
                 env_file: None,
+                schedule: None,
                 depends_on: Vec::new(),
             };
             out.push(LaunchConfigCandidate {
@@ -177,7 +181,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
 
     // Reject attach / remote / compound modes early.
     if req == "attach" {
-        return skip(name, kind, "'attach' request not supported (launch only)", raw_json);
+        return skip(
+            name,
+            kind,
+            "'attach' request not supported (launch only)",
+            raw_json,
+        );
     }
     // pwa-* are the modern JS debug types. Treat them as their base type
     // (pwa-node = node, pwa-chrome = chrome-skip, etc.).
@@ -187,7 +196,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         kind.clone()
     };
     // Reject browser-only debuggers — procman runs server processes.
-    if matches!(base_kind.as_str(), "chrome" | "msedge" | "firefox" | "safari" | "webkit") {
+    if matches!(
+        base_kind.as_str(),
+        "chrome" | "msedge" | "firefox" | "safari" | "webkit"
+    ) {
         return skip(name, kind, "browser debuggers unsupported", raw_json);
     }
 
@@ -220,7 +232,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
 
     let substitute = |s: &str| -> String { subst_vars(s, workspace, &env_map) };
 
-    let program_raw = cfg.get("program").and_then(|v| v.as_str()).map(String::from);
+    let program_raw = cfg
+        .get("program")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let program = program_raw.as_deref().map(substitute);
 
     let args_vec: Vec<String> = cfg
@@ -234,7 +249,10 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         .unwrap_or_default();
 
     let cwd_raw = cfg.get("cwd").and_then(|v| v.as_str()).map(String::from);
-    let cwd = cwd_raw.as_deref().map(substitute).or_else(|| Some(workspace.to_string()));
+    let cwd = cwd_raw
+        .as_deref()
+        .map(substitute)
+        .or_else(|| Some(workspace.to_string()));
 
     // env prefix for shell command
     // SEC-06: validate env keys to prevent injection via env key names
@@ -279,7 +297,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 .map(&substitute)
                 .unwrap_or_default();
             if raw_cmd.is_empty() {
-                return skip(name, kind, "node-terminal needs a `command` field", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "node-terminal needs a `command` field",
+                    raw_json,
+                );
             }
             prefix_envfile(&env_file, &prefix_env(&env_prefix, &raw_cmd))
         }
@@ -310,10 +333,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             // Heuristic: if the runtime is a package manager (npm/pnpm/
             // yarn/bun) and runtimeArgs are present, treat runtimeArgs
             // as the actual command and do not append `program`.
-            let is_pm = matches!(
-                interp.as_str(),
-                "npm" | "pnpm" | "yarn" | "bun" | "deno",
-            );
+            let is_pm = matches!(interp.as_str(), "npm" | "pnpm" | "yarn" | "bun" | "deno",);
             let base = if is_pm && !runtime_args.is_empty() {
                 // `npm run dev`, `pnpm dev`, `yarn start`, etc.
                 let extra_args = if quoted_args.is_empty() {
@@ -353,32 +373,22 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         "python" | "debugpy" => {
             // VSCode Python uses "python" field for the interpreter path,
             // not runtimeExecutable.
-            let python_path = cfg
-                .get("python")
-                .and_then(|v| v.as_str())
-                .map(&substitute);
+            let python_path = cfg.get("python").and_then(|v| v.as_str()).map(&substitute);
             let interp = runtime_exec
                 .or(python_path)
                 .unwrap_or_else(|| "python3".to_string());
-            let module = cfg
-                .get("module")
-                .and_then(|v| v.as_str())
-                .map(&substitute);
+            let module = cfg.get("module").and_then(|v| v.as_str()).map(&substitute);
             let target = if let Some(m) = module {
                 format!("-m {}", shell_quote(&m))
             } else {
-                let prog = program
-                    .clone()
-                    .unwrap_or_else(|| "main.py".to_string());
+                let prog = program.clone().unwrap_or_else(|| "main.py".to_string());
                 shell_quote(&prog)
             };
             let base = format!("{} {} {}", interp, target, quoted_args);
             prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "shell" | "bashdb" => {
-            let prog = program
-                .clone()
-                .unwrap_or_else(|| "./run.sh".to_string());
+            let prog = program.clone().unwrap_or_else(|| "./run.sh".to_string());
             let base = format!("{} {}", shell_quote(&prog), quoted_args);
             prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
@@ -396,7 +406,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let base = format!("{} {}", shell_quote(&prog), quoted_args);
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
             } else {
-                return skip(name, kind, "binary debugger needs program or Cargo.toml", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "binary debugger needs program or Cargo.toml",
+                    raw_json,
+                );
             }
         }
         "java" | "kotlin" => {
@@ -449,11 +464,26 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 }
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
             } else if let Some(mc) = main_class {
-                let interp = if base_kind == "kotlin" { "kotlin" } else { "java" };
-                let base = format!("{} {} -cp . {} {}", interp, vm_args, shell_quote(&mc), quoted_args);
+                let interp = if base_kind == "kotlin" {
+                    "kotlin"
+                } else {
+                    "java"
+                };
+                let base = format!(
+                    "{} {} -cp . {} {}",
+                    interp,
+                    vm_args,
+                    shell_quote(&mc),
+                    quoted_args
+                );
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
             } else {
-                return skip(name, kind, "java/kotlin launch needs mainClass or Maven/Gradle project", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "java/kotlin launch needs mainClass or Maven/Gradle project",
+                    raw_json,
+                );
             }
         }
         "coreclr" | "clr" | "dotnet" => {
@@ -463,7 +493,9 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 .map(|rd| {
                     rd.flatten().any(|e| {
                         let name = e.file_name().into_string().unwrap_or_default();
-                        name.ends_with(".csproj") || name.ends_with(".fsproj") || name.ends_with(".sln")
+                        name.ends_with(".csproj")
+                            || name.ends_with(".fsproj")
+                            || name.ends_with(".sln")
                     })
                 })
                 .unwrap_or(false);
@@ -479,7 +511,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let base = format!("dotnet {} {}", shell_quote(&prog), quoted_args);
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
             } else {
-                return skip(name, kind, "dotnet launch needs program or *.csproj", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "dotnet launch needs program or *.csproj",
+                    raw_json,
+                );
             }
         }
         "php" => {
@@ -512,7 +549,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             } else if let Some(prog) = program.clone() {
                 format!("dart {} {}", shell_quote(&prog), quoted_args)
             } else {
-                return skip(name, kind, "dart launch needs program or pubspec.yaml", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "dart launch needs program or pubspec.yaml",
+                    raw_json,
+                );
             };
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
@@ -523,7 +565,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             } else if let Some(prog) = program.clone() {
                 format!("swift {} {}", shell_quote(&prog), quoted_args)
             } else {
-                return skip(name, kind, "swift launch needs program or Package.swift", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "swift launch needs program or Package.swift",
+                    raw_json,
+                );
             };
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
@@ -545,7 +592,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         }
         "deno" => {
             let prog = program.clone().unwrap_or_else(|| "main.ts".to_string());
-            let base = format!("deno run --allow-all {} {}", shell_quote(&prog), quoted_args);
+            let base = format!(
+                "deno run --allow-all {} {}",
+                shell_quote(&prog),
+                quoted_args
+            );
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
         "bun" => {
@@ -567,7 +618,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             } else if let Some(prog) = program.clone() {
                 format!("elixir {} {}", shell_quote(&prog), quoted_args)
             } else {
-                return skip(name, kind, "elixir launch needs program or mix.exs", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "elixir launch needs program or mix.exs",
+                    raw_json,
+                );
             };
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
@@ -586,7 +642,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             } else if let Some(prog) = program.clone() {
                 format!("clojure {} {}", shell_quote(&prog), quoted_args)
             } else {
-                return skip(name, kind, "clojure launch needs program or project.clj/deps.edn", raw_json);
+                return skip(
+                    name,
+                    kind,
+                    "clojure launch needs program or project.clj/deps.edn",
+                    raw_json,
+                );
             };
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
@@ -629,6 +690,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         auto_restart: false,
         auto_restart_policy: None,
         env_file: None,
+        schedule: None,
         depends_on: Vec::new(),
     };
 
@@ -766,8 +828,7 @@ fn parse_tasks(project_dir: &Path) -> HashMap<String, String> {
     // hand control back to the caller while the dev server keeps running.
     let mut resolved: HashMap<String, String> = HashMap::new();
     for label in raw.keys().cloned().collect::<Vec<_>>() {
-        let mut visiting: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut visiting: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Some(cmd) = resolve_task(&label, &raw, &mut visiting, 0) {
             resolved.insert(label, cmd);
         }
@@ -1042,7 +1103,9 @@ fn is_safe_env_key(key: &str) -> bool {
 
 fn shell_quote(s: &str) -> String {
     // Single-quote the string, escaping inner single quotes as '\''
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || "_-./=:".contains(c)) {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_-./=:".contains(c))
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -1393,7 +1456,11 @@ mod tests {
             "vmArgs": "-Dspring.profiles.active=default -Dserver.port=4242"
         });
         let c = translate_config(&cfg, "/tmp/no-maven-or-gradle");
-        assert!(c.skipped_reason.is_none(), "should translate: {:?}", c.skipped_reason);
+        assert!(
+            c.skipped_reason.is_none(),
+            "should translate: {:?}",
+            c.skipped_reason
+        );
         let cmd = c.script.unwrap().command;
         assert!(cmd.contains("java"));
         assert!(cmd.contains("com.archplanner.ArchPlannerApplication"));
@@ -1461,7 +1528,11 @@ mod tests {
         assert_eq!(result.len(), 3, "expected 2 configs + 1 compound");
         let compound = &result[2];
         assert_eq!(compound.name, "All");
-        assert!(compound.skipped_reason.is_none(), "{:?}", compound.skipped_reason);
+        assert!(
+            compound.skipped_reason.is_none(),
+            "{:?}",
+            compound.skipped_reason
+        );
         let cmd = &compound.script.as_ref().unwrap().command;
         assert!(cmd.contains("gradlew bootRun"));
         assert!(cmd.contains("npm run dev"));
@@ -1650,9 +1721,7 @@ mod tests {
 
     #[test]
     fn extract_inspect_flag_with_host_port() {
-        let cfg = parse_json(
-            r#"{"type":"node","runtimeArgs":["--inspect=127.0.0.1:9229"]}"#,
-        );
+        let cfg = parse_json(r#"{"type":"node","runtimeArgs":["--inspect=127.0.0.1:9229"]}"#);
         let ports = extract_ports_from_launch(&cfg);
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0].number, 9229);

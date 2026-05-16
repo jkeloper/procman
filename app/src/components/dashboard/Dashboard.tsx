@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { api, type PortInfo, type Project } from '@/api/tauri';
+import { api, type Project, type RuntimePortInfo } from '@/api/tauri';
 import { GroupsPanel } from '@/components/group/GroupsPanel';
 import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
 import { DockerComposeCard } from './DockerComposeCard';
 import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { useProcessStatus } from '@/hooks/useProcessStatus';
 import { LayoutDashboard, Network, Play, Globe } from 'lucide-react';
 
 interface Props {
@@ -24,46 +25,21 @@ const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
 
 export function Dashboard({ projects, onSelectProject }: Props) {
   const [tab, setTab] = useState<Tab>('dashboard');
-  const [ports, setPorts] = useState<PortInfo[]>([]);
-  const [managedPids, setManagedPids] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
   const [killing, setKilling] = useState<number | null>(null);
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const confirm = useConfirm();
+  const { ports, runtimeLoading, refreshRuntime } = useProcessStatus();
 
-  const [pidScriptMap, setPidScriptMap] = useState<Map<number, string>>(new Map());
-
-  const reload = useCallback(async () => {
+  const reloadAliases = useCallback(async () => {
     try {
-      const [list, procs, als] = await Promise.all([
-        api.listPorts(),
-        api.listProcesses().catch(() => []),
-        api.getPortAliases().catch(() => ({})),
-      ]);
-      setPorts(list);
-      const rootPids = procs.map((p) => p.pid);
-      const descendants = rootPids.length > 0
-        ? await api.listDescendantPids(rootPids).catch(() => rootPids)
-        : [];
-      setManagedPids(new Set([...rootPids, ...descendants]));
-      // Build pid → scriptId map so port-to-project matching is exact.
-      const psMap = new Map<number, string>();
-      for (const p of procs) {
-        psMap.set(p.pid, p.id);
-      }
-      setPidScriptMap(psMap);
+      const als = await api.getPortAliases().catch(() => ({}));
       setAliases(als ?? {});
-    } catch {
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
-    reload();
-    const id = setInterval(reload, 2000);
-    return () => clearInterval(id);
-  }, [reload]);
+    reloadAliases();
+  }, [reloadAliases]);
 
   async function handleKill(port: number) {
     const ok = await confirm({ title: `Kill process on port :${port}?`, description: 'This will forcefully terminate the process.\nThis action cannot be undone.', confirmLabel: 'Kill', destructive: true });
@@ -71,7 +47,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     setKilling(port);
     try {
       await api.killPort(port);
-      await reload();
+      await refreshRuntime();
     } catch (e: any) {
       alert(`Kill failed: ${e?.message ?? e}`);
     } finally {
@@ -79,9 +55,9 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     }
   }
 
-  async function handlePortClick(p: PortInfo) {
+  async function handlePortClick(p: RuntimePortInfo) {
     try {
-      const scriptId = await api.resolvePidToScript(p.pid);
+      const scriptId = p.owner_script_id ?? await api.resolvePidToScript(p.pid);
       if (!scriptId) return;
       const proj = projects.find((pr) =>
         pr.scripts.some((s) => s.id === scriptId),
@@ -97,38 +73,32 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     }
   }
 
-  // Build match map: expected_port OR managed pid
+  // Build match map: declared/legacy ports, then authoritative runtime owner.
   const expectedPortMap = new Map<number, { project: string; script: string }>();
   for (const p of projects) {
     for (const sc of p.scripts) {
+      for (const spec of sc.ports ?? []) {
+        expectedPortMap.set(spec.number, { project: p.name, script: sc.name });
+      }
       if (sc.expected_port != null) {
         expectedPortMap.set(sc.expected_port, { project: p.name, script: sc.name });
       }
     }
   }
-  // Also match by managed pid — trace pid → wrapper → scriptId → project
   for (const port of ports) {
-    if (!expectedPortMap.has(port.port) && managedPids.has(port.pid)) {
-      // Walk from the port's pid back to a root wrapper pid that
-      // we track, then look up which script and project it belongs to.
-      const scriptId = pidScriptMap.get(port.pid);
-      if (scriptId) {
-        for (const p of projects) {
-          const sc = p.scripts.find((s) => s.id === scriptId);
-          if (sc) {
-            expectedPortMap.set(port.port, { project: p.name, script: sc.name });
-            break;
-          }
+    if (!expectedPortMap.has(port.port) && port.owner_script_id) {
+      for (const p of projects) {
+        const sc = p.scripts.find((s) => s.id === port.owner_script_id);
+        if (sc) {
+          expectedPortMap.set(port.port, { project: p.name, script: sc.name });
+          break;
         }
       }
-      // If the pid isn't a root wrapper (it's a descendant), we can't
-      // precisely map it without a full pid→scriptId reverse index.
-      // Leave it as unmatched rather than wrongly assigning it.
     }
   }
 
-  const matched = ports.filter((p) => expectedPortMap.has(p.port) || managedPids.has(p.pid));
-  const others = ports.filter((p) => !expectedPortMap.has(p.port) && !managedPids.has(p.pid));
+  const matched = ports.filter((p) => expectedPortMap.has(p.port) || p.managed);
+  const others = ports.filter((p) => !expectedPortMap.has(p.port) && !p.managed);
   const totalScripts = projects.reduce((n, p) => n + p.scripts.length, 0);
 
   return (
@@ -173,7 +143,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
               <div>
                 <p className="text-[13px] text-muted-foreground">
                   {projects.length} projects · {totalScripts} scripts · {ports.length} listening ports
-                  {loading && ' · loading...'}
+                  {runtimeLoading && ' · loading...'}
                 </p>
               </div>
 
@@ -190,13 +160,12 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                   <PortTable
                     rows={matched}
                     expectedMap={expectedPortMap}
-                    managedPids={managedPids}
                     killing={killing}
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="matched"
                     aliases={aliases}
-                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reloadAliases(); }}
                   />
                 </section>
               )}
@@ -219,13 +188,12 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                   <PortTable
                     rows={matched}
                     expectedMap={expectedPortMap}
-                    managedPids={managedPids}
                     killing={killing}
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="matched"
                     aliases={aliases}
-                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reloadAliases(); }}
                   />
                 )}
               </section>
@@ -238,13 +206,12 @@ export function Dashboard({ projects, onSelectProject }: Props) {
                   <PortTable
                     rows={others}
                     expectedMap={expectedPortMap}
-                    managedPids={managedPids}
                     killing={killing}
                     onKill={handleKill}
                     onClickRow={handlePortClick}
                     variant="other"
                     aliases={aliases}
-                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reload(); }}
+                    onSetAlias={async (port, alias) => { await api.setPortAlias(port, alias); reloadAliases(); }}
                   />
                 )}
               </section>
@@ -261,7 +228,7 @@ export function Dashboard({ projects, onSelectProject }: Props) {
           {tab === 'network' && (
             <div className="space-y-5">
 
-              <CloudflareTunnelsCard projects={projects} onProjectsChanged={reload} />
+              <CloudflareTunnelsCard projects={projects} onProjectsChanged={refreshRuntime} />
               <DockerComposeCard />
               <RemoteAccessCard />
             </div>
@@ -331,7 +298,6 @@ function StatPill({
 function PortTable({
   rows,
   expectedMap,
-  managedPids,
   killing,
   onKill,
   onClickRow,
@@ -339,12 +305,11 @@ function PortTable({
   aliases,
   onSetAlias,
 }: {
-  rows: PortInfo[];
+  rows: RuntimePortInfo[];
   expectedMap: Map<number, { project: string; script: string }>;
-  managedPids: Set<number>;
   killing: number | null;
   onKill: (port: number) => void;
-  onClickRow: (p: PortInfo) => void;
+  onClickRow: (p: RuntimePortInfo) => void;
   variant: 'matched' | 'other';
   aliases: Record<string, string>;
   onSetAlias: (port: number, alias: string) => void;
@@ -367,7 +332,7 @@ function PortTable({
         <tbody>
           {rows.map((p) => {
             const match = expectedMap.get(p.port);
-            const managed = managedPids.has(p.pid);
+            const managed = p.managed;
             const alias = aliases[String(p.port)] ?? '';
             const isEditing = editing === p.port;
             return (

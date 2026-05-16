@@ -41,10 +41,12 @@ const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 /// Flush early when the queue exceeds this many rows — prevents unbounded
 /// memory growth under heavy log bursts (webpack compile errors, etc.).
 const FLUSH_BATCH_THRESHOLD: usize = 1000;
-/// mpsc channel capacity. Much larger than FLUSH_BATCH_THRESHOLD so that a
-/// flush running during a burst still has room to receive. If the channel
-/// ever saturates we drop lines rather than blocking the log reader.
-const CHANNEL_CAPACITY: usize = 16_384;
+/// mpsc channel capacity. Larger than FLUSH_BATCH_THRESHOLD so that a flush
+/// running during a burst still has room to receive, but low enough that
+/// worst-case 8KB log lines cannot reserve hundreds of MB while sqlite is
+/// stalled. If the channel saturates we drop persistent-history rows rather
+/// than blocking the live log reader.
+const CHANNEL_CAPACITY: usize = 4_096;
 
 /// One log row exactly as we shuttle it between the process tasks and the
 /// sqlite writer thread. Mirrors `LogLine` but carries `script_id` because
@@ -338,17 +340,19 @@ fn writer_loop(mut conn: Connection, rx: std::sync::mpsc::Receiver<LogLineRecord
 
         let should_flush =
             buf.len() >= FLUSH_BATCH_THRESHOLD || last_flush.elapsed() >= FLUSH_INTERVAL;
-        if should_flush && !buf.is_empty() {
-            if let Err(e) = flush(&mut conn, &buf) {
-                // Don't kill the thread — log and keep trying. A transient
-                // FS error (disk full, permissions) should self-heal.
-                log::warn!("log_storage: flush failed: {}", e);
+        if should_flush {
+            if !buf.is_empty() {
+                if let Err(e) = flush(&mut conn, &buf) {
+                    // Don't kill the thread — log and keep trying. A transient
+                    // FS error (disk full, permissions) should self-heal.
+                    log::warn!("log_storage: flush failed: {}", e);
+                }
+                buf.clear();
+                if let Err(e) = enforce_retention(&mut conn) {
+                    log::warn!("log_storage: retention failed: {}", e);
+                }
             }
-            buf.clear();
             last_flush = Instant::now();
-            if let Err(e) = enforce_retention(&mut conn) {
-                log::warn!("log_storage: retention failed: {}", e);
-            }
         }
     }
 }
@@ -362,8 +366,14 @@ fn flush(conn: &mut Connection, batch: &[LogLineRecord]) -> Result<(), String> {
             )
             .map_err(|e| format!("prepare: {}", e))?;
         for r in batch {
-            stmt.execute(params![r.ts_ms, r.script_id, r.seq as i64, r.stream, r.line])
-                .map_err(|e| format!("insert: {}", e))?;
+            stmt.execute(params![
+                r.ts_ms,
+                r.script_id,
+                r.seq as i64,
+                r.stream,
+                r.line
+            ])
+            .map_err(|e| format!("insert: {}", e))?;
         }
     }
     tx.commit().map_err(|e| format!("commit: {}", e))?;
@@ -441,7 +451,10 @@ mod tests {
         let (mut conn, _tmp) = fresh_conn();
         flush(
             &mut conn,
-            &[rec(1000, "s1", 1, "hello world"), rec(1001, "s1", 2, "second line")],
+            &[
+                rec(1000, "s1", 1, "hello world"),
+                rec(1001, "s1", 2, "second line"),
+            ],
         )
         .unwrap();
         let count: i64 = conn

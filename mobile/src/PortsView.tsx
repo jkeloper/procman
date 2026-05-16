@@ -28,7 +28,9 @@ export function PortsView({ onBack }: Props) {
       ]);
       setPorts(p);
       setAliases(a ?? {});
-    } catch {} finally {
+    } catch {
+      // Leave the previous snapshot visible when a poll fails.
+    } finally {
       setLoading(false);
     }
   }, []);
@@ -48,7 +50,9 @@ export function PortsView({ onBack }: Props) {
         else delete next[String(port)];
         return next;
       });
-    } catch {}
+    } catch {
+      // Inline alias edits are optimistic; keep the current value on failure.
+    }
     setEditing(null);
   }
 

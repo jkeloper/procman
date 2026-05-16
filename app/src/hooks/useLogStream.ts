@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { api, type LogLine } from '@/api/tauri';
 
-const MAX_LINES = 5000;
+export const MAX_LINES = 5000;
+const FLUSH_FALLBACK_MS = 250;
 
 /**
  * Subscribes to `log://{scriptId}` events for a given script and maintains
@@ -81,6 +82,18 @@ export function useLogStream(scriptId: string | null) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const pendingRef = useRef<LogLine[]>([]);
   const rafRef = useRef<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelScheduledFlush = () => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (timeoutRef.current != null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
 
   /**
    * Clear only the currently visible lines in this panel. The Rust
@@ -93,10 +106,7 @@ export function useLogStream(scriptId: string | null) {
    */
   const clear = () => {
     pendingRef.current = [];
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
+    cancelScheduledFlush();
     setLines([]);
   };
 
@@ -107,37 +117,46 @@ export function useLogStream(scriptId: string | null) {
     // replace it, and mergeLines would naively blend both streams.
     setLines([]);
     pendingRef.current = [];
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
+    cancelScheduledFlush();
     if (!scriptId) {
       return;
     }
     let cancelled = false;
     // Prime snapshot
     api
-      .logSnapshot(scriptId)
+      .logSnapshot(scriptId, MAX_LINES)
       .then((snap) => {
         if (!cancelled) setLines((prev) => mergeLines(prev, snap));
       })
       .catch(() => {});
 
-    // Batch line emits via rAF to avoid render thrash
+    // Batch line emits via rAF to avoid render thrash. A timeout fallback
+    // keeps the queue draining when rAF is throttled, and the queue itself is
+    // capped so hidden/minimized windows cannot retain unbounded log events.
     const flush = () => {
+      cancelScheduledFlush();
       if (pendingRef.current.length > 0) {
         const batch = pendingRef.current;
         pendingRef.current = [];
         setLines((prev) => mergeLines(prev, batch));
       }
-      rafRef.current = null;
+    };
+
+    const scheduleFlush = () => {
+      if (rafRef.current == null) {
+        rafRef.current = requestAnimationFrame(flush);
+      }
+      if (timeoutRef.current == null) {
+        timeoutRef.current = setTimeout(flush, FLUSH_FALLBACK_MS);
+      }
     };
 
     const un = listen<LogLine>(`log://${scriptId}`, (ev) => {
       pendingRef.current.push(ev.payload);
-      if (rafRef.current == null) {
-        rafRef.current = requestAnimationFrame(flush);
+      if (pendingRef.current.length > MAX_LINES) {
+        pendingRef.current = pendingRef.current.slice(-MAX_LINES);
       }
+      scheduleFlush();
     });
 
     // When this script restarts (status → running), clear stale lines
@@ -147,13 +166,10 @@ export function useLogStream(scriptId: string | null) {
       (ev) => {
         if (ev.payload.id === scriptId && ev.payload.status === 'running') {
           pendingRef.current = [];
-          if (rafRef.current != null) {
-            cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-          }
+          cancelScheduledFlush();
           setLines([]);
           api
-            .logSnapshot(scriptId)
+            .logSnapshot(scriptId, MAX_LINES)
             .then((snap) => {
               if (!cancelled) setLines((prev) => mergeLines(prev, snap));
             })
@@ -166,7 +182,7 @@ export function useLogStream(scriptId: string | null) {
       cancelled = true;
       un.then((fn) => fn());
       unStatus.then((fn) => fn());
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      cancelScheduledFlush();
       pendingRef.current = [];
     };
   }, [scriptId]);

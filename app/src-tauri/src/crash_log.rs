@@ -99,10 +99,7 @@ fn write_to(path: &Path, body: &str) -> std::io::Result<()> {
             let _ = fs::rename(path, &rotated);
         }
     }
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut f = OpenOptions::new().create(true).append(true).open(path)?;
     f.write_all(body.as_bytes())?;
     f.write_all(b"\n")?;
     Ok(())
@@ -188,10 +185,7 @@ mod tests {
         // 2024-02-29T00:00:00 = 1709164800 (leap day smoke test)
         assert_eq!(epoch_to_ymdhms(1_709_164_800), (2024, 2, 29, 0, 0, 0));
         // 2026-04-18T12:34:56Z = 1776515696
-        assert_eq!(
-            epoch_to_ymdhms(1_776_515_696),
-            (2026, 4, 18, 12, 34, 56)
-        );
+        assert_eq!(epoch_to_ymdhms(1_776_515_696), (2026, 4, 18, 12, 34, 56));
     }
 
     #[test]

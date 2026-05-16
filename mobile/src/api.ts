@@ -50,6 +50,11 @@ export interface PortConflict {
   holder_command: string;
 }
 
+export interface ScheduleSpec {
+  enabled: boolean;
+  cron: string;
+}
+
 export interface LogLine {
   seq: number;
   ts_ms: number;
@@ -73,6 +78,7 @@ export interface ProjectsPayload {
       expected_port: number | null;
       ports: PortSpec[];
       auto_restart: boolean;
+      schedule: ScheduleSpec | null;
       depends_on: string[];
     }>;
   }>;
@@ -130,13 +136,12 @@ export function openStream(
   const connect = () => {
     const pair = loadPair();
     if (!pair) return;
-    // Token delivered via WebSocket subprotocol (RFC 6455 Sec-WebSocket-Protocol)
-    // rather than `?token=` query string. Query strings land in HTTP access
-    // logs and proxies, whereas subprotocols do not. The server accepts both
-    // transitionally (Worker A).
+    // Token delivered via WebSocket subprotocol, not `?token=`. We also
+    // offer a stable `procman` protocol so the server can select that and
+    // avoid echoing the token-bearing protocol in response headers.
     const url = `${baseUrl().replace(/^http/, 'ws')}/api/stream`;
     try {
-      ws = new WebSocket(url, [`procman-token.${pair.token}`]);
+      ws = new WebSocket(url, ['procman', `procman-token.${pair.token}`]);
     } catch {
       scheduleReconnect();
       return;
@@ -154,7 +159,9 @@ export function openStream(
           Object.assign(data, data.data ?? {});
         }
         onEvent(data);
-      } catch {}
+      } catch {
+        // Ignore malformed stream frames and keep the socket alive.
+      }
     };
     ws.onclose = () => {
       onStatus(false);

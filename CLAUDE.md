@@ -5,12 +5,12 @@
 
 VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리하는 1인 개발자 페인을 해결하는 Mac 전용 GUI. 데스크톱 Tauri 앱 + 모바일 PWA/iOS 동반 앱으로 구성.
 
-## 현재 상태 (2026-04-18)
+## 현재 상태 (2026-05-15)
 🟢 **Post-MVP S1~S5 완료** + 모바일/원격 통합 완료
 
 - Week 0 스파이크(4/5) → MVP Sprint 1-3(4/5 단일 세션) → v0.2 Feature Pack(4/6) → Post-MVP S1-S5(4/15~16) → 모바일 PWA + iOS Capacitor(4/17) 순으로 진행됨
-- 현재 릴리즈 준비 구간. 다음 로드맵은 TODO.md 🔮 병렬 선택지 참고.
-- Rust 테스트 86개 전부 통과.
+- 현재 v0.2.0 이후 안정화 구간. 다음 로드맵은 TODO.md 참고.
+- Rust 테스트 167개, frontend vitest 29개 통과 기준.
 
 ## 구현된 기능
 
@@ -18,9 +18,9 @@ VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리�
 - **프로젝트/스크립트 CRUD** — 폴더 선택 → 직접 하위 스캔(`package.json`/`Cargo.toml`/`go.mod`/`pyproject.toml`/`docker-compose.yml`) + 멀티스택 자동 감지
 - **프로세스 실행** — `zsh -l -c` 로그인 쉘 래핑, killpg SIGTERM→SIGKILL, 좀비/고아 제로, 크래시 감지
 - **로그 뷰어** — 프로세스당 5000줄 ring buffer + `react-window` 가상 스크롤 + `ansi-to-html` 컬러 + substring 검색
-- **포트 관리 v2** — 선언형 `PortSpec` 멀티 포트 + 2s `lsof` 폴링 + TCP liveness probe + 원클릭 kill
+- **포트 관리 v2** — 선언형 `PortSpec` 멀티 포트 + visibility-aware `lsof` 폴링 + TCP liveness probe + 원클릭 kill
 - **depends_on** — 의존 스크립트 포트 reachable 될 때까지 30s 대기
-- **관측성** — CPU%/RSS 2s 수집, 실시간 표시
+- **관측성** — CPU%/RSS 5s 수집, 창 비활성 상태에서 pause
 - **그룹 ("Morning Stack")** — 400ms 딜레이 순차 실행
 - **⌘K 커맨드 팔레트** + 단축키 (⌘L 로그, ⌘, 대시보드)
 - **세션 복원** — 앱 재시작 시 running 스크립트 일괄 재실행
@@ -34,7 +34,7 @@ VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리�
 - **iOS Capacitor 앱** — 네이티브 셸 + PWA (Xcode 프로젝트 커밋됨)
 
 ## 기술 스택
-- **데스크톱**: Tauri v2.10 + Rust 1.85+ + tokio + DashMap + notify + React 18/TS + Vite + shadcn/ui + Tailwind v4
+- **데스크톱**: Tauri v2.10 + Rust 1.85+ + tokio + DashMap + notify + React 19/TS + Vite + shadcn/ui + Tailwind v4
 - **로그**: `react-window` + `ansi-to-html`
 - **모바일**: Capacitor + React/TS (동일 shadcn 스택)
 - **원격**: REST + WebSocket + Cloudflare Tunnel

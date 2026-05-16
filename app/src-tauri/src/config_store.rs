@@ -169,8 +169,7 @@ impl ConfigStore {
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         tmp.write_all(yaml.as_bytes())?;
         tmp.as_file().sync_all()?;
-        tmp.persist(path)
-            .map_err(|e| ConfigError::Io(e.error))?;
+        tmp.persist(path).map_err(|e| ConfigError::Io(e.error))?;
         // H3: lock down to 0600 (user-only rw). config.yaml can contain
         // env-file paths / local URLs — not secrets per se, but the
         // runtime.json next door is already 0600 so align.
@@ -201,6 +200,7 @@ mod tests {
             auto_restart: false,
             auto_restart_policy: None,
             env_file: None,
+            schedule: None,
             depends_on: Vec::new(),
         }
     }
@@ -239,6 +239,7 @@ mod tests {
                     auto_restart: false,
                     auto_restart_policy: None,
                     env_file: None,
+                    schedule: None,
                     depends_on: Vec::new(),
                 }],
             }],
@@ -320,6 +321,7 @@ mod tests {
                     auto_restart: false,
                     auto_restart_policy: None,
                     env_file: None,
+                    schedule: None,
                     depends_on: Vec::new(),
                 }],
             }],
@@ -327,7 +329,10 @@ mod tests {
         };
         let out = ConfigStore::migrate(cfg.clone());
         assert_eq!(out.version, "3");
-        assert_eq!(out.projects[0].scripts[0].ports, cfg.projects[0].scripts[0].ports);
+        assert_eq!(
+            out.projects[0].scripts[0].ports,
+            cfg.projects[0].scripts[0].ports
+        );
         assert_eq!(out.projects[0].scripts[0].expected_port, Some(9999));
     }
 
@@ -351,6 +356,7 @@ mod tests {
                     auto_restart: false,
                     auto_restart_policy: None,
                     env_file: None,
+                    schedule: None,
                     depends_on: vec!["dep1".into(), "dep2".into()],
                 }],
             }],
@@ -404,6 +410,7 @@ mod tests {
                     auto_restart: true,
                     auto_restart_policy: None,
                     env_file: None,
+                    schedule: None,
                     depends_on: Vec::new(),
                 }],
             }],
@@ -411,7 +418,10 @@ mod tests {
         };
         let out = ConfigStore::migrate(cfg);
         assert_eq!(out.version, "3");
-        let pol = out.projects[0].scripts[0].auto_restart_policy.as_ref().unwrap();
+        let pol = out.projects[0].scripts[0]
+            .auto_restart_policy
+            .as_ref()
+            .unwrap();
         assert!(pol.enabled);
         assert_eq!(pol.max_retries, 5);
         assert_eq!(pol.backoff_ms, 1000);
@@ -461,6 +471,7 @@ mod tests {
                     auto_restart: false,
                     auto_restart_policy: None,
                     env_file: None,
+                    schedule: None,
                     depends_on: Vec::new(),
                 }],
             }],
