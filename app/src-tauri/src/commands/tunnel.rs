@@ -252,14 +252,21 @@ pub async fn stop_tunnel(
     script_id: String,
     state: tauri::State<'_, Arc<TunnelState>>,
 ) -> Result<(), String> {
-    let mut guard = state.inner.lock().await;
-    if let Some(inner) = guard.remove(&script_id) {
-        unsafe {
-            libc::kill(inner.pid as i32, libc::SIGTERM);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        unsafe {
-            libc::kill(inner.pid as i32, libc::SIGKILL);
+    let entry = {
+        let mut guard = state.inner.lock().await;
+        guard.remove(&script_id)
+    };
+    if let Some(inner) = entry {
+        // SEC-12 reuse: verify the pid is STILL a cloudflared process before
+        // killing. A recovered tunnel (recover_from_running) has no exit
+        // watcher, so its tracked pid may already be dead and reused by an
+        // unrelated process — blind SIGTERM/SIGKILL would then hit a bystander.
+        // `kill_cloudflared_pid` does the `ps`-identity check + SIGTERM→SIGKILL;
+        // a non-cloudflared pid is logged and skipped (the entry is already
+        // removed above, so the UI clears either way). The state lock is
+        // released before the (up to ~1s) kill so it can't block start/status.
+        if let Err(e) = crate::cloudflared::kill_cloudflared_pid(inner.pid).await {
+            log::warn!("stop_tunnel skipped killing pid {}: {}", inner.pid, e);
         }
     }
     Ok(())

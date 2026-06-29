@@ -22,7 +22,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config_path: PathBuf) -> Result<Self, ConfigError> {
-        let config = ConfigStore::load(&config_path)?;
+        // Startup uses the recovering loader so a corrupt config.yaml is
+        // quarantined and the app still launches with defaults rather than
+        // panicking at `AppState::new(...).expect(...)`. The FS watcher keeps
+        // using the plain `load` (whose Err contract it relies on).
+        let config = ConfigStore::load_or_recover(&config_path)?;
         Ok(Self {
             config_path,
             config: Mutex::new(config),

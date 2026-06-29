@@ -377,6 +377,20 @@ pub fn run() {
             // approved) so the quit guard still has a chance to
             // interrupt via prevent_exit.
             if let tauri::RunEvent::Exit = event {
+                // Flush runtime state synchronously before quit so a last-moment
+                // `mark_running` (a script started/stopped within the 500ms
+                // debounce window) is captured in the next-launch restore set —
+                // `mark_running` only schedules a debounced write, which would
+                // otherwise be dropped on exit. Run it unconditionally (even
+                // with nothing currently running, a just-landed mark-false must
+                // persist). NOTE: only covers a graceful Tauri exit; a
+                // SIGKILL/crash/power-loss skips this (the H6 startup
+                // orphan-cleanup is the partial safety net there).
+                if let Some(rs) = app_handle.try_state::<Arc<RuntimeStore>>() {
+                    if let Err(e) = tauri::async_runtime::block_on(rs.flush()) {
+                        log::warn!("runtime state final flush on exit failed: {}", e);
+                    }
+                }
                 if let Some(pm) = app_handle.try_state::<ProcessManager>() {
                     // WS2: `list()` returns retained `Crashed` entries whose
                     // `pid` is already dead and may have been reused by the OS.

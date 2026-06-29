@@ -45,7 +45,30 @@ impl RuntimeStore {
     pub fn load(path: PathBuf) -> Result<Arc<Self>, ConfigError> {
         let state = if path.exists() {
             let bytes = fs::read(&path)?;
-            serde_json::from_slice(&bytes).unwrap_or_default()
+            match serde_json::from_slice::<RuntimeState>(&bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    // A corrupt runtime.json silently reset the restore set AND
+                    // the remote token (forcing every paired client to re-pair)
+                    // with no diagnostic. Log it and quarantine the bad file so
+                    // the loss is visible and the file is recoverable, then fall
+                    // back to default (never block startup).
+                    log::warn!(
+                        "runtime.json is corrupt ({}); quarantining and starting fresh",
+                        e
+                    );
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let mut quarantine = path.clone().into_os_string();
+                    quarantine.push(format!(".corrupt-{}", ts));
+                    if let Err(re) = fs::rename(&path, PathBuf::from(&quarantine)) {
+                        log::warn!("could not quarantine corrupt runtime.json: {}", re);
+                    }
+                    RuntimeState::default()
+                }
+            }
         } else {
             RuntimeState::default()
         };
@@ -96,6 +119,14 @@ impl RuntimeStore {
         self.flush_now().await
     }
 
+    /// Force a synchronous flush of the current state to disk, bypassing the
+    /// 500ms debounce. Called at app exit so a `mark_running` that landed in
+    /// the last debounce window (a just-started/stopped script) is not lost
+    /// from the next-launch restore set.
+    pub async fn flush(&self) -> Result<(), ConfigError> {
+        self.flush_now().await
+    }
+
     fn schedule_flush(self: &Arc<Self>) {
         if self.pending.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return; // Already scheduled.
@@ -123,6 +154,14 @@ impl RuntimeStore {
         tmp.as_file().sync_all()?;
         tmp.persist(&self.path)
             .map_err(|e| ConfigError::Io(e.error))?;
+        // Durability: sync_all() above makes the temp file's data durable, but
+        // the directory entry created by the rename is parent-dir metadata that
+        // only survives power loss / OS crash after the parent dir is fsync'd
+        // (macOS honors fsync on a directory fd). Best-effort — the data write
+        // + rename already succeeded, so a failed dir fsync must not fail here.
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
         // SEC-13: restrict file permissions to owner-only (0600)
         #[cfg(unix)]
         {
@@ -154,6 +193,43 @@ mod tests {
         assert_eq!(
             reloaded.snapshot().await.last_running,
             vec!["s2".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn flush_persists_within_debounce_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runtime.json");
+        let store = RuntimeStore::load(path.clone()).unwrap();
+        // mark_running only schedules a 500ms debounced flush…
+        store.mark_running("s1", true).await;
+        // …but an explicit flush() must persist immediately, no sleep needed.
+        store.flush().await.unwrap();
+        let reloaded = RuntimeStore::load(path).unwrap();
+        assert_eq!(
+            reloaded.snapshot().await.last_running,
+            vec!["s1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn corrupt_runtime_json_is_quarantined_and_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runtime.json");
+        fs::write(&path, b"{ this is not valid json").unwrap();
+        // Load must NOT error and must fall back to default (empty set).
+        let store = RuntimeStore::load(path.clone()).unwrap();
+        assert!(store.snapshot().await.last_running.is_empty());
+        assert!(store.get_remote_token().await.is_empty());
+        // The corrupt file is moved aside (a `.corrupt-*` sibling exists) so the
+        // loss is visible/recoverable rather than silently overwritten.
+        let quarantined = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
+        assert!(
+            quarantined,
+            "corrupt runtime.json should be quarantined aside"
         );
     }
 

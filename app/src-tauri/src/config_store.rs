@@ -91,6 +91,36 @@ impl ConfigStore {
         Ok(cfg)
     }
 
+    /// Startup-only loader. Unlike `load` (whose `Err` contract the FS watcher
+    /// relies on to keep the good in-memory config on a transient bad edit), a
+    /// corrupt config must NOT brick the app at launch. On a YAML parse error,
+    /// quarantine the bad file aside (`config.yaml.corrupt-<ts>`) and start
+    /// from defaults so procman still opens and the user can recover. Genuinely
+    /// environmental errors (no config dir, IO failure) still propagate — those
+    /// are not a corrupt-file condition and should fail loudly.
+    pub fn load_or_recover(path: &Path) -> Result<AppConfig, ConfigError> {
+        match Self::load(path) {
+            Ok(cfg) => Ok(cfg),
+            Err(e @ ConfigError::Yaml(_)) => {
+                log::error!(
+                    "config.yaml is corrupt ({}); quarantining and starting with defaults",
+                    e
+                );
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let mut quarantine = path.as_os_str().to_os_string();
+                quarantine.push(format!(".corrupt-{}", ts));
+                if let Err(re) = fs::rename(path, std::path::PathBuf::from(&quarantine)) {
+                    log::error!("could not quarantine corrupt config.yaml: {}", re);
+                }
+                Ok(AppConfig::default())
+            }
+            Err(other) => Err(other),
+        }
+    }
+
     /// WS7-2 (v3 → v4 port migration, applied at the raw-YAML level in
     /// `load()` BEFORE struct deserialization). The legacy
     /// `Script.expected_port` scalar was removed from the struct, so we must
@@ -247,6 +277,13 @@ impl ConfigStore {
         tmp.write_all(yaml.as_bytes())?;
         tmp.as_file().sync_all()?;
         tmp.persist(path).map_err(|e| ConfigError::Io(e.error))?;
+        // Durability: the temp file's data is fsync'd above, but the directory
+        // entry created by the rename only survives power loss / OS crash after
+        // the parent dir is fsync'd (macOS honors fsync on a directory fd).
+        // Best-effort — the data write + rename already succeeded.
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
         // H3: lock down to 0600 (user-only rw). config.yaml can contain
         // env-file paths / local URLs — not secrets per se, but the
         // runtime.json next door is already 0600 so align.
@@ -266,6 +303,29 @@ impl ConfigStore {
 mod tests {
     use super::*;
     use crate::types::{PortSpec, Project, Script};
+
+    #[test]
+    fn load_or_recover_quarantines_corrupt_config_and_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        // Unterminated flow sequence → a hard YAML parse error.
+        fs::write(&path, b"projects: [oops, 2").unwrap();
+        // Plain load propagates the parse error (the watcher relies on this).
+        assert!(matches!(
+            ConfigStore::load(&path),
+            Err(ConfigError::Yaml(_))
+        ));
+        // The recovering loader must NOT error: it quarantines + defaults.
+        let cfg = ConfigStore::load_or_recover(&path).unwrap();
+        assert!(cfg.projects.is_empty());
+        // Bad file moved aside; original path no longer present.
+        assert!(!path.exists(), "corrupt config should be moved aside");
+        let quarantined = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
+        assert!(quarantined, "a .corrupt-* quarantine file should exist");
+    }
 
     /// Build a script whose declared port is already promoted (post-v4 shape).
     /// `port = Some(n)` puts a single PortSpec in `ports`; `None` = portless.
