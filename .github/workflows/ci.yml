@@ -16,7 +16,14 @@ jobs:
         with:
           node-version-file: .tool-versions
       - name: Install pnpm
-        run: npm install -g pnpm
+        # Pin to the version in .tool-versions. A bare `npm install -g pnpm`
+        # pulls the latest pnpm, which (10.16+) turns the "ignored build
+        # scripts" notice into a hard `ERR_PNPM_IGNORED_BUILDS` failure on a
+        # fresh `--frozen-lockfile` install. The pinned 10.33.0 (matching local
+        # dev) treats it as a warning; the ignored scripts (esbuild's binary
+        # ships in its platform optional-dep, msw's SW copy isn't needed for
+        # node tests) are not required for the build/test/lint to pass.
+        run: npm install -g pnpm@10.33.0
       # Build the mobile PWA so rust-embed (app/src-tauri/src/server/spa.rs
       # embeds mobile/dist) compiles against the real SPA. Without this the
       # CI binary embeds an empty dist — diverging from the shipped binary
@@ -42,7 +49,14 @@ jobs:
         with:
           node-version-file: .tool-versions
       - name: Install pnpm
-        run: npm install -g pnpm
+        # Pin to the version in .tool-versions. A bare `npm install -g pnpm`
+        # pulls the latest pnpm, which (10.16+) turns the "ignored build
+        # scripts" notice into a hard `ERR_PNPM_IGNORED_BUILDS` failure on a
+        # fresh `--frozen-lockfile` install. The pinned 10.33.0 (matching local
+        # dev) treats it as a warning; the ignored scripts (esbuild's binary
+        # ships in its platform optional-dep, msw's SW copy isn't needed for
+        # node tests) are not required for the build/test/lint to pass.
+        run: npm install -g pnpm@10.33.0
       - name: Install & type-check (desktop)
         working-directory: app
         run: |

@@ -1050,10 +1050,11 @@ pub fn extract_ports_from_launch(cfg: &Value) -> Vec<PortSpec> {
 fn parse_inspect_flag(s: &str) -> Option<u16> {
     let prefix = if let Some(rest) = s.strip_prefix("--inspect-brk") {
         rest
-    } else if let Some(rest) = s.strip_prefix("--inspect") {
-        rest
     } else {
-        return None;
+        // `--inspect-brk` is checked first (it is also a `--inspect` prefix);
+        // anything else must start with `--inspect` or this isn't an inspect
+        // flag at all (`?` returns None to the caller).
+        s.strip_prefix("--inspect")?
     };
     // Accept "=9229", "=127.0.0.1:9229"
     let body = prefix.strip_prefix('=')?;
