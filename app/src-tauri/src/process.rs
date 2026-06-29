@@ -513,6 +513,12 @@ impl ProcessManager {
                     if let Some(mut m) = procs.get_mut(&id) {
                         if m.generation == generation {
                             m.status = RuntimeStatus::Crashed;
+                            // Reclaim the buffer's slack: a retained crash gets
+                            // no further output, so its pre-allocated/grown ring
+                            // is pure waste until dismiss. Keeps every line.
+                            if let Ok(mut b) = m.log_buffer.lock() {
+                                b.shrink_to_fit();
+                            }
                             still_ours = true;
                         }
                     }
@@ -971,6 +977,10 @@ impl ProcessManager {
                 if let Some(mut m) = self.procs.get_mut(script_id) {
                     if m.generation == generation {
                         m.status = RuntimeStatus::Crashed;
+                        // Reclaim the buffer's slack (see the piped watcher).
+                        if let Ok(mut b) = m.log_buffer.lock() {
+                            b.shrink_to_fit();
+                        }
                         still_ours = true;
                     }
                 }

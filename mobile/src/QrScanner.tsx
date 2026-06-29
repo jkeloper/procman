@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+// Type-only import keeps `html5-qrcode` (≈3.3MB unpacked, ~370KB in the bundle)
+// OUT of the eager dependency graph; the runtime lib is fetched on demand in
+// the effect below, and this component itself is a `lazy()` boundary
+// (see PairView). The common already-paired launch never downloads it.
+import type { Html5Qrcode } from 'html5-qrcode';
 
 interface Props {
   onScan: (text: string) => void;
   onClose: () => void;
 }
 
-export function QrScanner({ onScan, onClose }: Props) {
+export default function QrScanner({ onScan, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -14,29 +18,39 @@ export function QrScanner({ onScan, onClose }: Props) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const scanner = new Html5Qrcode(el.id);
-    scannerRef.current = scanner;
-
-    scanner
-      .start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (text) => {
-          scanner.stop().catch(() => {});
-          onScan(text);
-        },
-        () => {},
-      )
-      .catch((e) => {
-        setErr(
-          String(e).includes('NotAllowedError')
-            ? 'Camera permission denied. Allow camera access in Settings.'
-            : `Camera error: ${e}`,
-        );
-      });
+    // Scanner creation is async now (dynamic import). Guard against the user
+    // closing / unmounting before the import resolves, or the camera stream
+    // would be started on a dead component and never stopped.
+    let cancelled = false;
+    let scanner: Html5Qrcode | null = null;
+    void (async () => {
+      const { Html5Qrcode } = await import('html5-qrcode');
+      if (cancelled) return;
+      scanner = new Html5Qrcode(el.id);
+      scannerRef.current = scanner;
+      scanner
+        .start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (text) => {
+            scanner?.stop().catch(() => {});
+            onScan(text);
+          },
+          () => {},
+        )
+        .catch((e) => {
+          if (cancelled) return;
+          setErr(
+            String(e).includes('NotAllowedError')
+              ? 'Camera permission denied. Allow camera access in Settings.'
+              : `Camera error: ${e}`,
+          );
+        });
+    })();
 
     return () => {
-      scanner.stop().catch(() => {});
+      cancelled = true;
+      scanner?.stop().catch(() => {});
     };
   }, [onScan]);
 

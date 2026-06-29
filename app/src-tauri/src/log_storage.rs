@@ -25,6 +25,7 @@
 use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,12 @@ const MAX_DB_BYTES: u64 = 100 * 1024 * 1024;
 /// retention cheap while giving enough headroom that we're not deleting
 /// on every single batch.
 const RETENTION_TRIM_FRACTION: f64 = 0.10;
+/// Run the (cheap, bounded) post-trim reclaim — WAL truncate + FTS merge — at
+/// most once per this many retention trims. When the DB sits persistently over
+/// `MAX_DB_BYTES`, `enforce_retention` fires on nearly every flush cycle;
+/// without this gate the reclaim would run every cycle instead of amortized.
+const RECLAIM_EVERY_N_TRIMS: u64 = 8;
+static RETENTION_TRIM_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Force a flush at least this often even if the queue is small.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 /// Flush early when the queue exceeds this many rows — prevents unbounded
@@ -412,6 +419,23 @@ fn enforce_retention(conn: &mut Connection) -> Result<(), String> {
     if let Some(cutoff) = cutoff {
         conn.execute("DELETE FROM logs WHERE id <= ?1", params![cutoff])
             .map_err(|e| format!("delete: {}", e))?;
+        // After an actual trim, opportunistically reclaim footprint without the
+        // multi-second exclusive-lock stall a full VACUUM/optimize would cause:
+        //   1) checkpoint + truncate the WAL so the -wal file doesn't drift up
+        //      (SQLite auto-checkpoints PASSIVE, but never truncates the file);
+        //   2) BOUNDED FTS5 segment merge ('merge', 16) — incremental, page-
+        //      bounded — to retire the delete-trigger tombstones. (Plain
+        //      'optimize' is a full, write-locking merge — deliberately avoided.)
+        // Amortized: a persistently-over-cap DB trims on nearly every flush, so
+        // run the reclaim only every Nth trim. Both best-effort — a failure here
+        // must never fail the write path.
+        if RETENTION_TRIM_COUNT.fetch_add(1, Ordering::Relaxed) % RECLAIM_EVERY_N_TRIMS == 0 {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+            let _ = conn.execute(
+                "INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', 16)",
+                [],
+            );
+        }
     }
     // VACUUM is intentionally skipped — it requires an exclusive lock and
     // freed pages are reused by subsequent inserts. A small long-tail of

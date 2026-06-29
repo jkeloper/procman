@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { savePair } from './pair';
-import { QrScanner } from './QrScanner';
 import './mobile.css';
+
+// Lazy boundary: the QR scanner (and its heavy html5-qrcode dependency) is a
+// one-time pairing affordance, so it's code-split out of the initial bundle and
+// fetched only when the user opens the scanner.
+const QrScanner = lazy(() => import('./QrScanner'));
 
 interface Props {
   onPaired: () => void;
@@ -381,10 +385,12 @@ export function PairView({ onPaired }: Props) {
         </form>
       </div>
       {scanning && (
-        <QrScanner
-          onScan={handleQrScan}
-          onClose={() => setScanning(false)}
-        />
+        <Suspense fallback={null}>
+          <QrScanner
+            onScan={handleQrScan}
+            onClose={() => setScanning(false)}
+          />
+        </Suspense>
       )}
     </div>
   );

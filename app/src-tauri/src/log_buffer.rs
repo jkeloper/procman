@@ -36,7 +36,13 @@ pub struct LogBuffer {
 impl LogBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buf: VecDeque::with_capacity(capacity),
+            // Cap the eager reservation: a quiet process should not pin the
+            // full ring (5000 LogLine slots ≈ ~195KB) the instant it spawns.
+            // Eviction keys off the `capacity` FIELD below, not the VecDeque's
+            // allocated capacity, so a noisy process still tops out at
+            // `capacity` lines — the deque just grows geometrically to get
+            // there instead of pre-allocating.
+            buf: VecDeque::with_capacity(capacity.min(256)),
             capacity,
             next_seq: 1,
         }
@@ -79,6 +85,16 @@ impl LogBuffer {
 
     pub fn clear(&mut self) {
         self.buf.clear();
+    }
+
+    /// Reclaim the backing allocation down to the lines actually held. Called
+    /// when an entry becomes a retained `Crashed` post-mortem: its pid is dead
+    /// so the buffer gets no further pushes, yet it would otherwise pin its
+    /// full pre-allocated/grown capacity until the user dismisses the card.
+    /// Keeps every retained line (the crash tail is the post-mortem value) —
+    /// only frees the unused slack.
+    pub fn shrink_to_fit(&mut self) {
+        self.buf.shrink_to_fit();
     }
 
     /// S3: Case-sensitive or case-insensitive substring search over the
