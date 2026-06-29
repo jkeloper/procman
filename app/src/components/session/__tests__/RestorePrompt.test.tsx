@@ -35,28 +35,29 @@ describe('RestorePrompt', () => {
     spawnProcessMock.mockReset();
   });
 
-  it('does not invoke get_last_running when projects list is empty', async () => {
+  it('does not invoke the restore query when projects list is empty', async () => {
     render(<RestorePrompt projects={[]} />);
     // Give the effect a tick.
     await new Promise((r) => setTimeout(r, 0));
+    expect(invokeMock).not.toHaveBeenCalledWith('last_running_ordered');
     expect(invokeMock).not.toHaveBeenCalledWith('get_last_running');
   });
 
-  it('invokes get_last_running exactly once when projects become non-empty', async () => {
+  it('invokes last_running_ordered exactly once when projects become non-empty', async () => {
     invokeMock.mockResolvedValue([]); // no last_running
     const projects: Project[] = [
       { id: 'p1', name: 'web', path: '/tmp/web', scripts: [] },
     ];
     const { rerender } = render(<RestorePrompt projects={projects} />);
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith('get_last_running'),
+      expect(invokeMock).toHaveBeenCalledWith('last_running_ordered'),
     );
     // Rerender with the same projects (reference-identical or not) — the
     // checkedRef guard must prevent re-calling.
     rerender(<RestorePrompt projects={[...projects]} />);
     await new Promise((r) => setTimeout(r, 10));
     const calls = invokeMock.mock.calls.filter(
-      (c) => c[0] === 'get_last_running',
+      (c) => c[0] === 'last_running_ordered',
     );
     expect(calls).toHaveLength(1);
   });
@@ -64,7 +65,7 @@ describe('RestorePrompt', () => {
   it('clears last_running when no ids match current config', async () => {
     // Backend says ["ghost"] was running, but no project/script matches.
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'get_last_running') return Promise.resolve(['ghost']);
+      if (cmd === 'last_running_ordered') return Promise.resolve(['ghost']);
       if (cmd === 'clear_last_running') return Promise.resolve(null);
       return Promise.resolve(null);
     });

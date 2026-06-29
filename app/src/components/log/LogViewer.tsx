@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { ExternalLink } from 'lucide-react';
 import { LogPanel } from './LogPanel';
 import { api, type StatusEvent } from '@/api/tauri';
+import { useToast } from '@/components/Toast';
 import { openDetachedLogWindow } from './logWindow';
 
 interface Tab {
@@ -18,14 +19,36 @@ interface Props {
   currentProjectId: string | null;
 }
 
+// WS6 §4: cap the global log-tab pool. Keeps the strip readable when many
+// projects are running at once; the oldest tab is evicted past this.
+const MAX_LOG_TABS = 8;
+
 export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
-  // Global pool of ALL open log tabs (across every project). We filter
-  // to the current project when rendering so each project gets its own
-  // isolated console strip.
+  // Global pool of ALL open log tabs (across every project). Inside a
+  // project we filter to that project (isolated console strip); on the
+  // global Dashboard view (currentProjectId == null) we show the whole
+  // pool so logs don't vanish when you leave a project (WS6 §4).
   const [tabs, setTabs] = useState<Tab[]>([]);
   // Active script id PER project, so switching away and back keeps the
   // previously-focused tab selected.
   const [activeByProject, setActiveByProject] = useState<Record<string, string>>({});
+  // Active script id for the global (no-project) view — tracked separately
+  // so navigating in/out of projects doesn't clobber per-project focus.
+  const [globalActive, setGlobalActive] = useState<string | null>(null);
+  const toast = useToast();
+
+  // WS7 §4: tell the user when the pool cap silently dropped the oldest tab.
+  useEffect(() => {
+    const onEvict = (e: Event) => {
+      const name = (e as CustomEvent).detail?.name;
+      toast.show(
+        name ? `Closed oldest log tab: ${name}` : 'Closed oldest log tab',
+        'info',
+      );
+    };
+    window.addEventListener('procman:log-tab-evicted', onEvict);
+    return () => window.removeEventListener('procman:log-tab-evicted', onEvict);
+  }, [toast]);
 
   useEffect(() => {
     (async () => {
@@ -48,9 +71,10 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
             initial.push({ projectId: r.projectId, scriptId: proc.id, name: r.name });
           }
         }
-        setTabs(initial);
+        const capped = initial.slice(-MAX_LOG_TABS);
+        setTabs(capped);
         const firstByProject: Record<string, string> = {};
-        for (const t of initial) {
+        for (const t of capped) {
           if (!firstByProject[t.projectId]) firstByProject[t.projectId] = t.scriptId;
         }
         setActiveByProject(firstByProject);
@@ -59,16 +83,53 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
 
     const onFocus = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail?.scriptId) {
-        // Set active for whichever project this script belongs to
-        setTabs((prev) => {
-          const tab = prev.find((t) => t.scriptId === detail.scriptId);
-          if (tab) {
-            setActiveByProject((a) => ({ ...a, [tab.projectId]: tab.scriptId }));
-          }
+      const scriptId: string | undefined = detail?.scriptId;
+      if (!scriptId) return;
+      // Set active for whichever project this script belongs to, AND for
+      // the global view (so focusing from the All-running list selects it).
+      setGlobalActive(scriptId);
+      setTabs((prev) => {
+        const tab = prev.find((t) => t.scriptId === scriptId);
+        if (tab) {
+          setActiveByProject((a) => ({ ...a, [tab.projectId]: tab.scriptId }));
           return prev;
-        });
-      }
+        }
+        // WS7 §3: no tab yet (e.g. crashed after the tab was closed, or
+        // focusing a process whose tab never opened). Lazily create it so
+        // the Logs affordance is never a no-op. Resolve the owning project
+        // asynchronously, then append + focus.
+        void (async () => {
+          const projects = await api.listProjects().catch(() => []);
+          let projectId: string | null = null;
+          let name = scriptId.slice(0, 8);
+          for (const p of projects) {
+            const s = p.scripts.find((s) => s.id === scriptId);
+            if (s) {
+              projectId = p.id;
+              name = `${p.name}/${s.name}`;
+              break;
+            }
+          }
+          if (!projectId) return;
+          setTabs((cur) => {
+            if (cur.some((t) => t.scriptId === scriptId)) return cur;
+            const next = [...cur, { projectId: projectId!, scriptId, name }];
+            // Honour the pool cap; warn the user if it evicts (WS7 §4).
+            if (next.length > MAX_LOG_TABS) {
+              const evicted = next[0];
+              window.dispatchEvent(
+                new CustomEvent('procman:log-tab-evicted', {
+                  detail: { name: evicted.name },
+                }),
+              );
+              return next.slice(-MAX_LOG_TABS);
+            }
+            return next;
+          });
+          setActiveByProject((a) => ({ ...a, [projectId!]: scriptId }));
+        })();
+        return prev;
+      });
     };
     window.addEventListener('procman:focus-log', onFocus);
 
@@ -87,11 +148,22 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
           }
         }
         if (!projectId) return;
-        setTabs((prev) =>
-          prev.some((t) => t.scriptId === id)
-            ? prev
-            : [...prev, { projectId: projectId!, scriptId: id, name }],
-        );
+        setTabs((prev) => {
+          if (prev.some((t) => t.scriptId === id)) return prev;
+          const next = [...prev, { projectId: projectId!, scriptId: id, name }];
+          // WS6 §4: cap the global pool — evict the oldest tab past the
+          // limit. WS7 §4: surface the eviction so it's not silent.
+          if (next.length > MAX_LOG_TABS) {
+            const evicted = next[0];
+            window.dispatchEvent(
+              new CustomEvent('procman:log-tab-evicted', {
+                detail: { name: evicted.name },
+              }),
+            );
+            return next.slice(-MAX_LOG_TABS);
+          }
+          return next;
+        });
         setActiveByProject((a) => ({ ...a, [projectId!]: id }));
       }
       // NOTE: we intentionally do NOT close tabs on `stopped` or
@@ -109,6 +181,7 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
     e.stopPropagation();
     setTabs((prev) => {
       const tab = prev.find((t) => t.scriptId === id);
+      const remaining = prev.filter((t) => t.scriptId !== id);
       if (tab) {
         setActiveByProject((a) => {
           if (a[tab.projectId] !== id) return a;
@@ -123,17 +196,22 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
           return next;
         });
       }
-      return prev.filter((t) => t.scriptId !== id);
+      // Keep the global-view selection coherent: if we just closed the
+      // globally-active tab, fall back to any remaining tab.
+      setGlobalActive((g) => (g === id ? (remaining[0]?.scriptId ?? null) : g));
+      return remaining;
     });
   }
 
-  // Filter tabs to the current project. If we're on the Dashboard
-  // (currentProjectId == null) show nothing — the console bar is
-  // a per-project affordance.
+  // Inside a project we show only that project's tabs (isolated console
+  // strip). On the global Dashboard view (currentProjectId == null) we show
+  // the entire pool so logs stay visible across projects (WS6 §4).
   const visibleTabs = currentProjectId
     ? tabs.filter((t) => t.projectId === currentProjectId)
-    : [];
-  const activeScriptId = currentProjectId ? activeByProject[currentProjectId] ?? null : null;
+    : tabs;
+  const activeScriptId = currentProjectId
+    ? activeByProject[currentProjectId] ?? null
+    : globalActive;
   const activeTab =
     visibleTabs.find((t) => t.scriptId === activeScriptId) ?? visibleTabs[0];
 
@@ -142,7 +220,7 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
       <div className="flex items-center justify-center bg-log-bg/80 text-[12px] text-log-muted/60" style={{ height: 32, minHeight: 32 }}>
         {currentProjectId
           ? 'No running scripts in this project. Start one to see its logs.'
-          : 'Open a project to see its console.'}
+          : 'No running scripts. Start one to see its logs here.'}
       </div>
     );
   }
@@ -183,6 +261,7 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
                 }`}
                 onClick={() => {
                   setActiveByProject((a) => ({ ...a, [t.projectId]: t.scriptId }));
+                  setGlobalActive(t.scriptId);
                   // If minimized, re-open the drawer
                   window.dispatchEvent(new CustomEvent('procman:open-logs'));
                 }}

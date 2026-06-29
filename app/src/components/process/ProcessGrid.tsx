@@ -2,72 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { api, type Script } from '@/api/tauri';
 import { ScriptEditor } from './ScriptEditor';
-import { StatusBadge } from './StatusBadge';
+import { ScriptRow } from './ScriptRow';
 import { VSCodeImportDialog } from './VSCodeImportDialog';
 import { PortConflictDialog } from './PortConflictDialog';
 import { PortPickerDialog } from './PortPickerDialog';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
-import { UptimeLabel } from '@/hooks/useUptime';
+import { useScriptActions } from '@/hooks/useScriptActions';
+import { useTunnelLauncher } from '@/hooks/useTunnelLauncher';
 import { useConfirm } from '@/components/ConfirmDialog';
-import { useToast } from '@/components/Toast';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
-import { Cable, Equal } from 'lucide-react';
-import type { PortInfo, DeclaredPortStatus, ShutdownEvent } from '@/api/tauri';
+import { isShutdownActive } from '@/lib/shutdown';
+import type { DeclaredPortStatus } from '@/api/tauri';
 
 interface Props {
   projectId: string;
   projectPath: string;
   onScriptsChanged: () => void;
-}
-
-/**
- * Best-effort port extraction from a shell command string. Catches:
- *   --port 3000          --port=3000
- *   -p 3000              -p=3000
- *   --server.port=4242   --server.port 4242
- *   PORT=8080            -Dserver.port=4242
- *   --host 0.0.0.0 --port 8000
- */
-function inferPortFromCommand(cmd: string): number | null {
-  const patterns: RegExp[] = [
-    /(?:^|\s)(?:--port|--server\.port|-p|-Dserver\.port)[=\s]+(\d{2,5})\b/,
-    /\bPORT=(\d{2,5})\b/,
-    /\b--server\.port=(\d{2,5})\b/,
-  ];
-  for (const re of patterns) {
-    const m = cmd.match(re);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (n > 0 && n <= 65535) return n;
-    }
-  }
-  return null;
-}
-
-function isShutdownActive(evt: ShutdownEvent | undefined): boolean {
-  return Boolean(evt && evt.phase !== 'stopped' && evt.phase !== 'not_running');
-}
-
-function shutdownProgress(evt: ShutdownEvent): number {
-  if (evt.phase === 'stopped' || evt.phase === 'not_running') return 100;
-  if (evt.timeout_ms <= 0) return 0;
-  return Math.min(100, Math.max(3, (evt.elapsed_ms / evt.timeout_ms) * 100));
-}
-
-function shutdownLabel(evt: ShutdownEvent): string {
-  switch (evt.phase) {
-    case 'terminating':
-    case 'waiting':
-      return `Stopping (${Math.ceil(Math.max(0, evt.timeout_ms - evt.elapsed_ms) / 1000)}s)`;
-    case 'killing':
-      return 'Force stopping';
-    case 'cleanup':
-      return 'Cleaning up ports';
-    case 'stopped':
-      return 'Stopped';
-    case 'not_running':
-      return 'Already stopped';
-  }
 }
 
 export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props) {
@@ -77,24 +27,31 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
   const [editorOpen, setEditorOpen] = useState(false);
   const [vscodeOpen, setVscodeOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
-  const { statuses, pids, startTimes, restartCounts, metrics, shutdowns } = useProcessStatus();
-  const [busy, setBusy] = useState<Set<string>>(new Set());
-  const [tunnels, setTunnels] = useState<Record<string, { url: string; port: number }>>({});
+  const { statuses, pids, startTimes, restartCounts, metrics, kinds, shutdowns, refreshRuntime } = useProcessStatus();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const confirm = useConfirm();
-  const toast = useToast();
-  const [conflict, setConflict] = useState<{
-    script: Script;
-    port: number;
-    info: PortInfo | null;
-  } | null>(null);
-  const [portPicker, setPortPicker] = useState<{
-    script: Script;
-    ports: PortInfo[];
-    fallback?: boolean;
-    rootPid?: number;
-  } | null>(null);
+
+  const {
+    busy,
+    conflict,
+    setConflict,
+    portPicker,
+    setPortPicker,
+    withBusy,
+    handleStart,
+    resolveConflictKillAndStart,
+    resolveConflictStartAnyway,
+    restart,
+  } = useScriptActions(projectId);
+
+  const { tunnels, startTunnelFor, handleTunnelClick, killTunnel } = useTunnelLauncher({
+    withBusy,
+    pids,
+    openPortPicker: setPortPicker,
+    projectId,
+  });
+
   // S2: scriptId -> declared port statuses (includes TCP liveness probe).
   // Polled every 3s for running scripts with declared ports.
   const [portStatuses, setPortStatuses] = useState<Record<string, DeclaredPortStatus[]>>({});
@@ -127,135 +84,20 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
       setPortStatuses({});
       return;
     }
+    // WS3: one batch call instead of N per-script calls — the backend builds
+    // the ps/lsof ownership snapshot a single time for the whole poll.
     const next: Record<string, DeclaredPortStatus[]> = {};
-    await Promise.all(
-      targets.map(async (s) => {
-        try {
-          next[s.id] = await api.portStatusForScript(s.id);
-        } catch {}
-      }),
-    );
+    try {
+      const rows = await api.portStatusAll(targets.map((s) => s.id));
+      for (const [id, st] of rows) next[id] = st;
+    } catch {}
     setPortStatuses(next);
   }, [scripts, statuses]);
   useVisibleInterval(reloadPortStatuses, 3000);
 
-  // Restore tunnel state from the backend on mount / project change.
-  // Without this, the tunnel URL badge under each script disappears
-  // when the user navigates away and comes back, even though the
-  // cloudflared process is still running.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .tunnelStatus()
-      .then((list) => {
-        if (cancelled) return;
-        const next: Record<string, { url: string; port: number }> = {};
-        for (const t of list) {
-          next[t.script_id] = { url: t.url, port: t.port };
-        }
-        setTunnels(next);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
   function openEditor(script: Script | null) {
     setEditingScript(script);
     setEditorOpen(true);
-  }
-
-  async function startTunnelFor(script: Script, port: number) {
-    setBusy((prev) => new Set(prev).add(script.id));
-    try {
-      const result = await api.startTunnel(port, script.id);
-      if (result.url) {
-        setTunnels((prev) => ({ ...prev, [script.id]: { url: result.url!, port } }));
-      } else {
-        await confirm({
-          title: 'Tunnel started',
-          description: `Tunnel running on port :${port} but no URL was returned by cloudflared.`,
-          confirmLabel: 'OK',
-        });
-      }
-    } catch (e: any) {
-      await confirm({
-        title: 'Tunnel failed',
-        description: e?.message ?? String(e),
-        confirmLabel: 'OK',
-        destructive: true,
-      });
-    } finally {
-      setBusy((prev) => { const n = new Set(prev); n.delete(script.id); return n; });
-    }
-  }
-
-  async function handleTunnelClick(script: Script) {
-    // S1: Declared ports are authoritative when present. Single declared
-    // port tunnels immediately; multiple declared ports → picker.
-    if (script.ports && script.ports.length > 0) {
-      if (script.ports.length === 1) {
-        await startTunnelFor(script, script.ports[0].number);
-        return;
-      }
-      const declared: PortInfo[] = script.ports.map((p) => ({
-        port: p.number,
-        pid: pids[script.id] ?? 0,
-        process_name: p.name,
-        command: p.note ?? '',
-      }));
-      setPortPicker({ script, ports: declared });
-      return;
-    }
-
-    // Legacy fallback: expected_port
-    if (script.expected_port) {
-      await startTunnelFor(script, script.expected_port);
-      return;
-    }
-
-    // 2. Look up ports owned by this script's process tree.
-    const rootPid = pids[script.id];
-    let candidates: PortInfo[] = [];
-    if (rootPid) {
-      try {
-        candidates = await api.listPortsForScriptPid(rootPid);
-      } catch (e) {
-        console.warn('[tunnel] listPortsForScriptPid failed', e);
-      }
-    }
-    console.log('[tunnel]', script.name, 'rootPid', rootPid, 'tree-ports', candidates);
-
-    if (candidates.length === 1) {
-      await startTunnelFor(script, candidates[0].port);
-      return;
-    }
-    if (candidates.length > 1) {
-      setPortPicker({ script, ports: candidates });
-      return;
-    }
-
-    // 3. Tree match returned nothing. Open the picker in fallback mode
-    //    showing all listening ports — keep an info banner in the dialog
-    //    so the user knows the tree match failed.
-    let allPorts: PortInfo[] = [];
-    try {
-      allPorts = await api.listPorts();
-    } catch (e) {
-      console.warn('[tunnel] listPorts failed', e);
-    }
-    if (allPorts.length === 0) {
-      await confirm({
-        title: 'No listening ports',
-        description:
-          'No listening TCP ports were found on this machine. Wait for ' +
-          'the server to bind, or set `expected_port` in Edit.',
-        confirmLabel: 'OK',
-      });
-      return;
-    }
-    setPortPicker({ script, ports: allPorts, fallback: true, rootPid });
   }
 
   async function handleDelete(scriptId: string) {
@@ -339,97 +181,47 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     };
   }, [draggingId, scripts, projectId, reload, onScriptsChanged]);
 
-  async function withBusy(id: string, fn: () => Promise<unknown>) {
-    setBusy((s) => new Set(s).add(id));
-    try {
-      await fn();
-    } catch (e: any) {
-      alert(`${e?.message ?? e}`);
-    } finally {
-      setBusy((s) => {
-        const n = new Set(s);
-        n.delete(id);
-        return n;
-      });
-    }
-  }
-
-  /**
-   * Pre-flight port check before spawning. If script declares an
-   * expected_port that's already bound by something other than an
-   * already-running procman managed instance (which `spawn_process`
-   * handles internally via single-instance guard), show a dialog.
-   */
-  async function handleStart(script: Script) {
-    // S1: When declared ports exist, use the backend conflict checker
-    // which handles multi-port scripts and owned_by_script semantics.
-    if (script.ports && script.ports.length > 0) {
-      try {
-        const conflicts = await api.checkPortConflicts(script.id);
-        const blocking = conflicts.filter((c) => c.severity === 'blocking');
-        if (blocking.length > 0) {
-          // Reuse single-port dialog for the first blocking conflict.
-          const first = blocking[0];
-          setConflict({
-            script,
-            port: first.spec.number,
-            info: {
-              port: first.spec.number,
-              pid: first.holder_pid,
-              process_name: first.holder_command,
-              command: first.holder_command,
-            },
-          });
-          return;
-        }
-      } catch (e) {
-        console.warn('[start] checkPortConflicts failed', e);
-      }
-      return withBusy(script.id, () => api.spawnProcess(projectId, script.id));
-    }
-
-    // Legacy path:
-    //   1. Explicit expected_port wins
-    //   2. Otherwise infer from the command string (--port N, -p N,
-    //      --server.port=N, PORT=N, --port=N, etc.)
-    const port = script.expected_port ?? inferPortFromCommand(script.command);
-    if (port == null) {
-      return withBusy(script.id, () => api.spawnProcess(projectId, script.id));
-    }
-    try {
-      const ports = await api.listPorts();
-      const hit = ports.find((p) => p.port === port);
-      if (hit) {
-        setConflict({ script, port, info: hit });
-        return;
-      }
-    } catch {}
-    return withBusy(script.id, () => api.spawnProcess(projectId, script.id));
-  }
-
-  async function resolveConflictKillAndStart() {
-    if (!conflict) return;
-    const { script, port } = conflict;
-    setConflict(null);
-    await withBusy(script.id, async () => {
-      await api.killPort(port).catch(() => {});
-      // Small delay so the port is released before we re-bind.
-      await new Promise((r) => setTimeout(r, 600));
-      return api.spawnProcess(projectId, script.id);
-    });
-  }
-
-  async function resolveConflictStartAnyway() {
-    if (!conflict) return;
-    const { script } = conflict;
-    setConflict(null);
-    await withBusy(script.id, () => api.spawnProcess(projectId, script.id, true));
-  }
-
   const onSaved = () => {
     reload();
     onScriptsChanged();
   };
+
+  // WS6: dismiss a crashed script's retained post-mortem entry/log buffer.
+  // Distinct from delete (which removes the script config itself).
+  async function handleDismiss(s: Script) {
+    await withBusy(s.id, async () => {
+      await api.dismissProcess(s.id);
+      await refreshRuntime();
+    });
+  }
+
+  // Stop from the row's Stop button: confirm, then clear log + kill.
+  async function handleStopClick(s: Script) {
+    const ok = await confirm({
+      title: `Stop "${s.name}"?`,
+      description: 'The process will be terminated. This cannot be undone.',
+      confirmLabel: 'Stop',
+      destructive: true,
+    });
+    if (ok) withBusy(s.id, async () => {
+      await api.clearLog(s.id);
+      await api.killProcess(s.id);
+    });
+  }
+
+  // Double-click toggles start/stop, guarded against drags + busy rows.
+  async function handleRowDoubleClick(s: Script) {
+    if (draggingId) return;
+    const stopping = isShutdownActive(shutdowns[s.id]);
+    const actionBusy = busy.has(s.id) || stopping;
+    if (actionBusy) return;
+    if (statuses[s.id] === 'running') {
+      const ok = await confirm({ title: `Stop "${s.name}"?`, description: 'Double-click detected. Stop this process?', confirmLabel: 'Stop', destructive: true });
+      if (ok) withBusy(s.id, () => api.killProcess(s.id));
+    } else {
+      handleStart(s);
+    }
+  }
 
   // P3: Bulk actions
   const runningScripts = scripts.filter((s) => statuses[s.id] === 'running');
@@ -445,6 +237,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
             if (first) {
               setConflict({
                 script: s,
+                projectId,
                 port: first.spec.number,
                 info: {
                   port: first.spec.number,
@@ -456,7 +249,7 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
               return;
             }
           } catch (e) {
-            console.warn('[start-all] checkPortConflicts failed', e);
+            if (import.meta.env.DEV) console.warn('[start-all] checkPortConflicts failed', e);
           }
         }
         await withBusy(s.id, () => api.spawnProcess(projectId, s.id));
@@ -527,248 +320,35 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
           </div>
         ) : (
           <ul ref={listRef} className="divide-y divide-border/40">
-            {scripts.map((s) => {
-              const status = statuses[s.id];
-              const pid = pids[s.id];
-              const isRunning = status === 'running';
-              const b = busy.has(s.id);
-              const tunnel = tunnels[s.id];
-              const restarts = restartCounts[s.id] ?? 0;
-              const isDragging = draggingId === s.id;
-              const shutdown = shutdowns[s.id];
-              const stopping = isShutdownActive(shutdown);
-              const progress = shutdown ? shutdownProgress(shutdown) : 0;
-              const actionBusy = b || stopping;
-              return (
-                <li
-                  key={s.id}
-                  data-script-id={s.id}
-                  className={`group transition-colors hover:bg-accent/40 ${
-                    isDragging ? 'bg-accent/60 opacity-80 shadow-lg' : ''
-                  }`}
-                  onDoubleClick={async () => {
-                    if (draggingId) return;
-                    if (actionBusy) return;
-                    if (isRunning) {
-                      const ok = await confirm({ title: `Stop "${s.name}"?`, description: 'Double-click detected. Stop this process?', confirmLabel: 'Stop', destructive: true });
-                      if (ok) withBusy(s.id, () => api.killProcess(s.id));
-                    } else {
-                      handleStart(s);
-                    }
-                  }}
-                >
-                <div className="flex items-center gap-2 px-2 py-2.5">
-                  {/* Drag handle — two-line hamburger, always cursor-grab */}
-                  <button
-                    className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-opacity hover:text-foreground active:cursor-grabbing group-hover:opacity-100"
-                    onPointerDown={(e) => handleDragStart(e, s.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label="Drag to reorder"
-                    title="Drag to reorder"
-                  >
-                    <Equal size={14} />
-                  </button>
-                  {/* Status dot */}
-                  <div className="shrink-0 w-[70px]">
-                    <StatusBadge status={status} />
-                  </div>
-
-                  {/* Name + command */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-[14px] font-medium text-foreground">
-                        {s.name}
-                      </span>
-                      {s.ports && s.ports.length > 0 ? (
-                        s.ports.map((p) => {
-                          const st = portStatuses[s.id]?.find(
-                            (x) => x.spec.number === p.number,
-                          );
-                          // S2: liveness dot — green=reachable, red=declared but unreachable,
-                          // gray=unknown (not yet probed / script not running)
-                          const dotClass = !isRunning
-                            ? 'bg-muted-foreground/30'
-                            : st?.reachable === true
-                              ? 'bg-emerald-500'
-                              : st?.reachable === false
-                                ? 'bg-red-500/70'
-                                : 'bg-muted-foreground/30';
-                          const title =
-                            `${p.name}${p.note ? ` — ${p.note}` : ''}${p.optional ? ' (optional)' : ''}` +
-                            (isRunning
-                              ? st?.reachable === true
-                                ? ' · reachable'
-                                : st?.reachable === false
-                                  ? ' · not reachable'
-                                  : ' · probing…'
-                              : '');
-                          return (
-                            <span
-                              key={p.name}
-                              className="inline-flex items-center gap-1 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
-                              title={title}
-                            >
-                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
-                              {p.name}:{p.number}
-                            </span>
-                          );
-                        })
-                      ) : s.expected_port != null ? (
-                        <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground">
-                          :{s.expected_port}
-                        </span>
-                      ) : null}
-                      {s.auto_restart && (
-                        <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[12px] text-muted-foreground">
-                          auto-restart{restarts > 0 ? ` #${restarts}` : ''}
-                        </span>
-                      )}
-                      {s.schedule?.enabled && (
-                        <span
-                          className="max-w-[150px] truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground"
-                          title={`Scheduled: ${s.schedule.cron}`}
-                        >
-                          cron {s.schedule.cron}
-                        </span>
-                      )}
-                      {shutdown && (
-                        <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[12px] text-amber-700 dark:text-amber-300">
-                          {shutdownLabel(shutdown)}
-                        </span>
-                      )}
-                      {s.env_file && (
-                        <span className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground" title={s.env_file}>
-                          .env
-                        </span>
-                      )}
-                      {pid != null && (
-                        <span className="font-mono text-[12px] text-muted-foreground/70">
-                          pid {pid} · {startTimes[s.id] && statuses[s.id] === "running" ? <UptimeLabel ms={startTimes[s.id]} /> : null}
-                          {metrics[s.id]?.cpu != null && (
-                            <> · {metrics[s.id].cpu!.toFixed(1)}% cpu</>
-                          )}
-                          {metrics[s.id]?.rss != null && (
-                            <> · {(metrics[s.id].rss! / 1024).toFixed(0)} MB</>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    <div className="truncate font-mono text-[12px] text-muted-foreground">
-                      $ {s.command}
-                    </div>
-                    {shutdown && (
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            shutdown.phase === 'killing'
-                              ? 'bg-destructive'
-                              : shutdown.phase === 'stopped' || shutdown.phase === 'not_running'
-                                ? 'bg-emerald-500'
-                                : 'bg-primary'
-                          }`}
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex shrink-0 items-center gap-1">
-                    {isRunning ? (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 opacity-0 group-hover:opacity-100"
-                          disabled={actionBusy}
-                          title={s.expected_port ? `Tunnel :${s.expected_port}` : 'Tunnel via Cloudflare'}
-                          onClick={() => handleTunnelClick(s)}
-                        >
-                          Tunnel
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7"
-                          disabled={actionBusy}
-                          onClick={() =>
-                            withBusy(s.id, () => api.restartProcess(projectId, s.id))
-                          }
-                        >
-                          Restart
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="h-7"
-                          disabled={actionBusy}
-                          onClick={async () => {
-                            const ok = await confirm({
-                              title: `Stop "${s.name}"?`,
-                              description: 'The process will be terminated. This cannot be undone.',
-                              confirmLabel: 'Stop',
-                              destructive: true,
-                            });
-                            if (ok) withBusy(s.id, async () => {
-                              await api.clearLog(s.id);
-                              await api.killProcess(s.id);
-                            });
-                          }}
-                        >
-                          Stop
-                        </Button>
-                      </>
-                    ) : (
-                      <Button size="sm" className="h-7" disabled={actionBusy} onClick={() => handleStart(s)}>
-                        {actionBusy ? '…' : 'Start'}
-                      </Button>
-                    )}
-                    <span className="w-1" />
-                    <Button variant="ghost" size="sm" className="h-7 opacity-0 group-hover:opacity-100" onClick={() => openEditor(s)}>
-                      Edit
-                    </Button>
-                    <button
-                      className="close-circle opacity-0 group-hover:opacity-100"
-                      onClick={() => handleDelete(s.id)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                {/* Inline tunnel bar */}
-                {tunnel && (
-                  <div className="flex items-center gap-2 border-t border-border/20 bg-primary/5 px-4 py-1.5 text-[12px] transition-all duration-200">
-                    <Cable size={16} />
-                    <span className="min-w-0 flex-1 truncate font-mono text-primary">
-                      {tunnel.url}
-                    </span>
-                    <span className="shrink-0 font-mono text-muted-foreground/60">
-                      :{tunnel.port}
-                    </span>
-                    <Button variant="ghost" size="sm" className="h-6 px-2"
-                      onClick={() => toast.copy(tunnel.url, 'Tunnel URL copied')}
-                    >
-                      Copy
-                    </Button>
-                    <Button variant="destructive" size="sm" className="h-6"
-                      onClick={async () => {
-                        try {
-                          await api.stopTunnel(s.id);
-                          setTunnels((prev) => {
-                            const n = { ...prev };
-                            delete n[s.id];
-                            return n;
-                          });
-                        } catch {}
-                      }}
-                    >
-                      Stop tunnel
-                    </Button>
-                  </div>
-                )}
-                </li>
-              );
-            })}
+            {scripts.map((s) => (
+              <ScriptRow
+                key={s.id}
+                script={s}
+                status={statuses[s.id]}
+                kind={kinds[s.id]}
+                pid={pids[s.id]}
+                startTimeMs={startTimes[s.id]}
+                restarts={restartCounts[s.id] ?? 0}
+                metric={metrics[s.id]}
+                portStatuses={portStatuses[s.id]}
+                tunnel={tunnels[s.id]}
+                busy={busy.has(s.id)}
+                shutdownEvent={shutdowns[s.id]}
+                onStart={handleStart}
+                onStop={handleStopClick}
+                onRestart={(sc) => restart(sc.id)}
+                onEdit={openEditor}
+                onDelete={(sc) => handleDelete(sc.id)}
+                onLaunchTunnel={handleTunnelClick}
+                onKillTunnel={(sc) => killTunnel(sc.id)}
+                onDismiss={handleDismiss}
+                onRowDoubleClick={handleRowDoubleClick}
+                dragHandleProps={{
+                  onPointerDown: (e) => handleDragStart(e, s.id),
+                  isDragging: draggingId === s.id,
+                }}
+              />
+            ))}
           </ul>
         )}
       </div>

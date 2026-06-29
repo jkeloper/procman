@@ -166,4 +166,82 @@ mod tests {
         store.clear_last_running().await.unwrap();
         assert_eq!(store.snapshot().await.last_running.len(), 0);
     }
+
+    // WS5: concurrent flush-race regression. The backend now owns
+    // `last_running` and `mark_running(true)` fires from `spawn_inner` on every
+    // spawn path (manual / group / remote / auto-restart / restore). A group
+    // start can mark many scripts near-simultaneously from independent tasks,
+    // each of which schedules a debounced flush. This test hammers
+    // `mark_running` from many concurrent tasks (with both true and a few
+    // false transitions) and asserts the persisted result is exactly the set
+    // we expect — no duplicates (push is dedup'd) and no lost ids (retain only
+    // drops the explicit-false ones).
+    #[tokio::test]
+    async fn concurrent_marks_flush_without_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runtime.json");
+        let store = RuntimeStore::load(path.clone()).unwrap();
+
+        // 50 scripts, marked running from 50 concurrent tasks. A handful are
+        // also marked running a second time (idempotency) and a couple flip to
+        // false to exercise the retain path under contention.
+        let n = 50usize;
+        let mut handles = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = Arc::clone(&store);
+            handles.push(tokio::spawn(async move {
+                let id = format!("s{}", i);
+                s.mark_running(&id, true).await;
+                // Idempotent double-mark for even ids (must not duplicate).
+                if i % 2 == 0 {
+                    s.mark_running(&id, true).await;
+                }
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Now concurrently flip two ids to false from separate tasks while a
+        // few more true-marks land — interleaving the retain + push paths.
+        let f1 = {
+            let s = Arc::clone(&store);
+            tokio::spawn(async move { s.mark_running("s0", false).await })
+        };
+        let f2 = {
+            let s = Arc::clone(&store);
+            tokio::spawn(async move { s.mark_running("s1", false).await })
+        };
+        let f3 = {
+            let s = Arc::clone(&store);
+            tokio::spawn(async move { s.mark_running("s99", true).await })
+        };
+        f1.await.unwrap();
+        f2.await.unwrap();
+        f3.await.unwrap();
+
+        // Wait past the debounce window so the scheduled flush has fired.
+        tokio::time::sleep(Duration::from_millis(700)).await;
+
+        // In-memory snapshot integrity.
+        let snap = store.snapshot().await;
+        let mut got = snap.last_running.clone();
+        got.sort();
+        // No duplicates.
+        let mut deduped = got.clone();
+        deduped.dedup();
+        assert_eq!(got, deduped, "last_running must not contain duplicates");
+        // Expected set: s2..s49 (s0, s1 flipped off) plus the late s99.
+        let mut expected: Vec<String> = (2..n).map(|i| format!("s{}", i)).collect();
+        expected.push("s99".to_string());
+        expected.sort();
+        assert_eq!(got, expected, "in-memory set diverged under contention");
+
+        // On-disk integrity: reload from the flushed file and re-check.
+        assert!(path.exists(), "flush must have written runtime.json");
+        let reloaded = RuntimeStore::load(path).unwrap();
+        let mut disk = reloaded.snapshot().await.last_running;
+        disk.sort();
+        assert_eq!(disk, expected, "persisted set diverged from memory");
+    }
 }

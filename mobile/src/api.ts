@@ -29,7 +29,6 @@ export interface PortSpec {
   name: string;
   number: number;
   bind: string;
-  proto: 'tcp';
   optional: boolean;
   note: string | null;
 }
@@ -62,6 +61,27 @@ export interface LogLine {
   text: string;
 }
 
+export interface GroupMember {
+  project_id: string;
+  script_id: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  members: GroupMember[];
+}
+
+// WS8: mirrors the desktop `GroupRunResult` so partial-success can be
+// surfaced (each member reports its own ok/error/pid).
+export interface GroupRunResult {
+  project_id: string;
+  script_id: string;
+  ok: boolean;
+  error: string | null;
+  pid: number | null;
+}
+
 export interface ProjectsPayload {
   version: string;
   projects: Array<{
@@ -75,20 +95,17 @@ export interface ProjectsPayload {
       id: string;
       name: string;
       command: string;
-      expected_port: number | null;
       ports: PortSpec[];
       auto_restart: boolean;
       schedule: ScheduleSpec | null;
       depends_on: string[];
     }>;
   }>;
-  groups: unknown[];
+  groups: Group[];
   settings: unknown;
 }
 
 export const api = {
-  health: () => fetch(`${baseUrl()}/api/health`).then((r) => r.json()),
-  ping: () => req<{ pong: boolean; ts_ms: number }>('/api/ping'),
   processes: () => req<ProcessSnapshot[]>('/api/processes'),
   projects: () => req<ProjectsPayload>('/api/projects'),
   logs: (scriptId: string) => req<LogLine[]>(`/api/logs/${scriptId}`),
@@ -98,16 +115,22 @@ export const api = {
     req<void>(`/api/processes/${scriptId}/stop`, { method: 'POST' }),
   restart: (scriptId: string) =>
     req<{ pid: number }>(`/api/processes/${scriptId}/restart`, { method: 'POST' }),
+  // WS8: batch-run a group. Server delegates to the same desktop run_group_core,
+  // so ordering / depends_on gating / partial-success match the desktop.
+  runGroup: (groupId: string) =>
+    req<GroupRunResult[]>(`/api/groups/${groupId}/run`, { method: 'POST' }),
   ports: () =>
     req<Array<{ port: number; pid: number; process_name: string }>>('/api/ports'),
-  portStatus: (scriptId: string) =>
-    req<DeclaredPortStatus[]>(`/api/ports/${scriptId}/status`),
+  // WS3: batch status — one round trip + one server-side ps/lsof build for
+  // the whole dashboard poll. Returns [scriptId, statuses] tuples.
+  portStatusBatch: (scriptIds: string[]) =>
+    req<Array<[string, DeclaredPortStatus[]]>>('/api/ports/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script_ids: scriptIds }),
+    }),
   portConflicts: (scriptId: string) =>
     req<PortConflict[]>(`/api/ports/${scriptId}/conflicts`),
-  portsForScript: (scriptId: string) =>
-    req<Array<{ port: number; pid: number; process_name: string }>>(`/api/ports/${scriptId}/list`),
-  searchLog: (scriptId: string, query: string) =>
-    req<LogLine[]>(`/api/logs/${scriptId}/search?q=${encodeURIComponent(query)}`),
   portAliases: () =>
     req<Record<string, string>>('/api/port-aliases'),
   setPortAlias: (port: number, alias: string) =>

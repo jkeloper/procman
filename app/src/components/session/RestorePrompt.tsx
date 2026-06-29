@@ -34,9 +34,14 @@ export function RestorePrompt({ projects }: Props) {
     checkedRef.current = true;
     (async () => {
       try {
-        const ids = await invoke<string[]>('get_last_running');
+        // WS6 §5: ask the backend for the dependency-ordered restore set so
+        // dependees come before dependents. Falls back to the raw set if the
+        // ordered command is unavailable (older backend).
+        const ids = await invoke<string[]>('last_running_ordered').catch(() =>
+          invoke<string[]>('get_last_running'),
+        );
         if (!ids || ids.length === 0) return;
-        // Resolve ids → project/script names
+        // Resolve ids → project/script names, preserving the backend order.
         const resolved: typeof items = [];
         for (const id of ids) {
           for (const p of projects) {
@@ -68,13 +73,19 @@ export function RestorePrompt({ projects }: Props) {
     // Clear before spawning so transient status events don't re-add the
     // same set. Each successful spawn will re-mark itself via useProcessStatus.
     await invoke('clear_last_running').catch(() => {});
-    for (const it of items) {
-      try {
-        await api.spawnProcess(it.projectId, it.scriptId);
-      } catch (e) {
-        console.error('restore failed for', it.label, e);
+    // WS6 §5: fire all spawns concurrently instead of awaiting each in turn.
+    // `items` is already dependency-ordered (dependees first), and the
+    // backend gates each spawn on its deps' readiness independently — so a
+    // dependent that needs a 30s readiness wait no longer stalls every other
+    // independent script behind it.
+    const results = await Promise.allSettled(
+      items.map((it) => api.spawnProcess(it.projectId, it.scriptId)),
+    );
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error('restore failed for', items[i].label, r.reason);
       }
-    }
+    });
     setOpen(false);
   }
 

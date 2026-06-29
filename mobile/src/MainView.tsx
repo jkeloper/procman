@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, openStream, type ProcessSnapshot, type ProjectsPayload, type DeclaredPortStatus } from './api';
+import { api, openStream, type ProcessSnapshot, type ProjectsPayload, type DeclaredPortStatus, type Group } from './api';
 import { clearPair, loadPair } from './pair';
 import { LogView } from './LogView';
 import { PortsView } from './PortsView';
@@ -23,11 +23,14 @@ type Screen =
   | { name: 'list' }
   | { name: 'logs'; scriptId: string; scriptName: string }
   | { name: 'settings' }
+  | { name: 'groups' }
   | { name: 'ports' };
 
 export function MainView({ onUnpair }: Props) {
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
   const [projects, setProjects] = useState<ProjectsPayload['projects']>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [runningGroup, setRunningGroup] = useState<string | null>(null);
   const [processes, setProcesses] = useState<ProcessSnapshot[]>([]);
   const [connected, setConnected] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -44,6 +47,7 @@ export function MainView({ onUnpair }: Props) {
     try {
       const [cfg, procs] = await Promise.all([api.projects(), api.processes()]);
       setProjects(cfg.projects);
+      setGroups(cfg.groups);
       setProcesses(procs);
       setLoadError(null);
       if (!initialLoadDone.current) {
@@ -104,6 +108,24 @@ export function MainView({ onUnpair }: Props) {
     finally { setBusy(null); }
   }
 
+  async function runGroup(group: Group) {
+    if (!window.confirm(`Run "${group.name}" (${group.members.length} scripts)?`)) return;
+    setRunningGroup(group.id);
+    try {
+      const results = await api.runGroup(group.id);
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        const detail = failed.map((r) => r.error ?? r.script_id).join('\n');
+        alert(`${results.length - failed.length}/${results.length} started\n\nFailed:\n${detail}`);
+      }
+      setTimeout(refresh, 300);
+    } catch (e: unknown) {
+      alert(`run group: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRunningGroup(null);
+    }
+  }
+
   function updateNotificationSettings(patch: Partial<MobileNotificationSettings>) {
     setNotificationSettings((prev) => {
       const next = { ...prev, ...patch };
@@ -134,12 +156,15 @@ export function MainView({ onUnpair }: Props) {
     if (targets.length === 0) { setPortStatuses({}); return; }
     let cancelled = false;
     async function tick() {
+      // WS3: one batch request instead of N per-script requests.
       const next: Record<string, DeclaredPortStatus[]> = {};
-      await Promise.all(targets.map(async (s) => {
-        try { next[s.id] = await api.portStatus(s.id); } catch {
-          // A single failed probe should not clear the rest of the status panel.
-        }
-      }));
+      try {
+        const rows = await api.portStatusBatch(targets.map((s) => s.id));
+        for (const [id, st] of rows) next[id] = st;
+      } catch {
+        // A failed batch poll should not clear the existing status panel;
+        // leave `next` empty and let the next tick repopulate.
+      }
       if (!cancelled) setPortStatuses(next);
     }
     tick();
@@ -153,7 +178,40 @@ export function MainView({ onUnpair }: Props) {
   const selectedName = selectedProject ? (projects.find((p) => p.id === selectedProject)?.name ?? 'Project') : 'All projects';
 
   if (screen.name === 'logs') return <LogView scriptId={screen.scriptId} scriptName={screen.scriptName} onBack={() => setScreen({ name: 'list' })} />;
-  if (screen.name === 'ports') return <PortsView onBack={() => setScreen({ name: 'list' })} />;
+  if (screen.name === 'ports') return <PortsView projects={projects} processes={processes} onBack={() => setScreen({ name: 'list' })} />;
+
+  if (screen.name === 'groups') return (
+    <div className="page">
+      <div className="topbar">
+        <button className="btn-ghost" onClick={() => setScreen({ name: 'list' })}><ArrowLeft size={18} /></button>
+        <span className="topbar-title">Groups</span>
+        <span className="topbar-sub">{groups.length}</span>
+        <button className="btn-ghost" onClick={refresh}><RefreshCw size={18} /></button>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {groups.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg3)', fontSize: 15 }}>No groups defined.</div>
+        ) : groups.map((g) => {
+          const runningCount = g.members.filter((m) => processes.some((x) => x.id === m.script_id)).length;
+          const isBusy = runningGroup === g.id;
+          return (
+            <div key={g.id} className="script-row" style={{ minHeight: 56 }}>
+              <div className="script-info">
+                <div className="script-name">{g.name}</div>
+                <div className="script-meta">
+                  {g.members.length} scripts
+                  {runningCount > 0 && <span style={{ marginLeft: 8, color: 'var(--green)' }}>· {runningCount} running</span>}
+                </div>
+              </div>
+              <div className="script-actions">
+                <button className="btn-start" disabled={isBusy || g.members.length === 0} onClick={() => runGroup(g)}>{isBusy ? '…' : 'Run'}</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   if (screen.name === 'settings') return (
     <div className="page">
@@ -334,6 +392,7 @@ export function MainView({ onUnpair }: Props) {
           })}
           <div style={{ flex: 1 }} />
           <div className="drawer-section">Tools</div>
+          <div className="drawer-item" onClick={() => { setDrawerOpen(false); setScreen({ name: 'groups' }); }}>Groups<span className="count">{groups.length}</span></div>
           <div className="drawer-item" onClick={() => { setDrawerOpen(false); setScreen({ name: 'ports' }); }}>Ports</div>
           <div className="drawer-item" onClick={() => { setDrawerOpen(false); setScreen({ name: 'settings' }); }}><Settings size={18} /> Settings</div>
         </div>

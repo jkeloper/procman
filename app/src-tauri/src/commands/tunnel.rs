@@ -48,7 +48,7 @@ impl TunnelState {
 
     /// Recover tunnels from running cloudflared processes found via `ps`.
     /// Matches each cloudflared's `--url http://localhost:<port>` to a
-    /// script by declared ports or expected_port. The trycloudflare.com
+    /// script by its declared ports. The trycloudflare.com
     /// URL is lost (was printed to stderr at startup), so we show a
     /// placeholder. User can stop+restart to get a fresh URL.
     pub async fn recover_from_running(

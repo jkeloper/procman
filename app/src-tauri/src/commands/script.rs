@@ -57,7 +57,6 @@ pub(crate) fn validate_ports(input: &[PortSpec]) -> Result<Vec<PortSpec>, String
             name,
             number: p.number,
             bind,
-            proto: p.proto,
             optional: p.optional,
             note: p.note.clone().filter(|s| !s.trim().is_empty()),
         });
@@ -100,7 +99,6 @@ pub async fn create_script(
     project_id: String,
     name: String,
     command: String,
-    expected_port: Option<u16>,
     ports: Option<Vec<PortSpec>>,
     auto_restart: bool,
     env_file: Option<String>,
@@ -136,18 +134,14 @@ pub async fn create_script(
         }
     }
 
-    // S1: If declared ports provided, they become authoritative and
-    // expected_port is synced from ports[0] at save time. Falling back to
-    // legacy expected_port is still allowed when ports is None/empty.
+    // `ports` is the single authoritative declared-port source.
     let validated_ports = validate_ports(&ports.unwrap_or_default())?;
-    let effective_expected = validated_ports.first().map(|p| p.number).or(expected_port);
     let schedule = normalize_schedule(schedule)?;
 
     let script = Script {
         id: Uuid::new_v4().to_string(),
         name: trimmed_name,
         command: trimmed_cmd,
-        expected_port: effective_expected,
         ports: validated_ports,
         auto_restart,
         auto_restart_policy: None,
@@ -179,7 +173,6 @@ pub async fn update_script(
     id: String,
     name: Option<String>,
     command: Option<String>,
-    expected_port: Option<Option<u16>>, // Some(None) = clear, None = don't change
     ports: Option<Vec<PortSpec>>, // S1: None = don't change, Some(vec) = replace (empty clears)
     auto_restart: Option<bool>,
     env_file: Option<Option<String>>, // Some(None) = clear, None = don't change
@@ -207,15 +200,8 @@ pub async fn update_script(
             if let Some(c) = command {
                 script.command = c.trim().to_string();
             }
-            if let Some(p) = expected_port {
-                script.expected_port = p;
-            }
             if let Some(pts) = validated_ports {
-                // Replace declared ports, then sync expected_port from ports[0]
-                // so downstream orphan cleanup stays consistent.
-                if let Some(first) = pts.first() {
-                    script.expected_port = Some(first.number);
-                }
+                // Replace declared ports — ports[] is authoritative.
                 script.ports = pts;
             }
             if let Some(a) = auto_restart {
@@ -271,6 +257,9 @@ pub async fn delete_script(
 ) -> Result<(), String> {
     // Kill any running process for this script first (B4 orphan cleanup).
     let _ = pm.kill(&id).await;
+    // WS5: the script is being deleted — drop it from the session-restore set
+    // so a removed script is never proposed for restore next launch.
+    pm.runtime_store().mark_running(&id, false).await;
     // Idempotent delete: if the script (or its parent project) is
     // already gone, treat as success.
     state

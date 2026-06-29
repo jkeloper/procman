@@ -30,7 +30,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "3".to_string(),
+            version: "4".to_string(),
             projects: Vec::new(),
             groups: Vec::new(),
             settings: AppSettings::default(),
@@ -58,14 +58,10 @@ pub struct Script {
     pub name: String,
     /// Shell command string — wrapped with `zsh -l -c` at spawn time (T12).
     pub command: String,
-    /// DEPRECATED — S1 (port management v2): kept for v1 backward compatibility.
-    /// Migration populates `ports[0]` from this field; save-time hook syncs
-    /// `ports[0]` back into this field (double-write). Will be removed in v3.
-    #[serde(default)]
-    pub expected_port: Option<u16>,
-    /// S1: Declared TCP ports. May be empty. Treated as the authoritative
-    /// source for port conflict detection / tunnel target picking once any
-    /// entry is present.
+    /// Declared TCP ports — the single authoritative source for port conflict
+    /// detection / tunnel target picking. May be empty (port-free script).
+    /// The legacy `expected_port` scalar was promoted into `ports[]` by the
+    /// v3→v4 config migration and removed (WS7-2).
     #[serde(default)]
     pub ports: Vec<PortSpec>,
     #[serde(default)]
@@ -113,10 +109,6 @@ pub struct PortSpec {
     /// actually bind. Used as a hint for conflict messaging.
     #[serde(default = "default_bind")]
     pub bind: String,
-    /// Protocol. v2 only accepts "tcp". Enum exists so YAML files don't
-    /// need rewriting when UDP support lands.
-    #[serde(default = "default_proto")]
-    pub proto: PortProto,
     /// If true, start proceeds even if this port is in conflict (UI still
     /// surfaces a warning and requires an explicit skip). Default false.
     #[serde(default)]
@@ -128,9 +120,6 @@ pub struct PortSpec {
 
 fn default_bind() -> String {
     "127.0.0.1".to_string()
-}
-fn default_proto() -> PortProto {
-    PortProto::Tcp
 }
 
 /// v3: Auto-restart policy. When `enabled`, the watcher restarts a crashed
@@ -167,13 +156,6 @@ impl Default for AutoRestartPolicy {
             jitter_ms: default_jitter_ms(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PortProto {
-    Tcp,
-    // Udp — v3
 }
 
 /// A named collection of scripts that can be launched together ("Morning Stack").
@@ -319,7 +301,6 @@ mod tests {
                         id: "s1".into(),
                         name: "dev".into(),
                         command: "pnpm dev".into(),
-                        expected_port: Some(5173),
                         ports: Vec::new(),
                         auto_restart: false,
                         auto_restart_policy: None,
@@ -331,7 +312,6 @@ mod tests {
                         id: "s2".into(),
                         name: "db".into(),
                         command: "docker compose up".into(),
-                        expected_port: None,
                         ports: Vec::new(),
                         auto_restart: true,
                         auto_restart_policy: None,
@@ -398,15 +378,27 @@ mod tests {
 
     #[test]
     fn port_spec_roundtrip_with_defaults() {
-        // Minimal YAML should fill defaults: bind=127.0.0.1, proto=tcp, optional=false
+        // Minimal YAML should fill defaults: bind=127.0.0.1, optional=false
         let yaml = "name: http\nnumber: 8080\n";
         let spec: PortSpec = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(spec.name, "http");
         assert_eq!(spec.number, 8080);
         assert_eq!(spec.bind, "127.0.0.1");
-        assert_eq!(spec.proto, PortProto::Tcp);
         assert!(!spec.optional);
         assert!(spec.note.is_none());
+    }
+
+    #[test]
+    fn port_spec_ignores_legacy_proto_field() {
+        // WS7-2: pre-removal config.yaml files carry `proto: tcp`. With the
+        // field gone, serde must silently ignore the unknown key (no
+        // deny_unknown_fields) so existing configs keep loading.
+        let yaml = "name: http\nnumber: 8080\nbind: 0.0.0.0\nproto: tcp\noptional: true\n";
+        let spec: PortSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.name, "http");
+        assert_eq!(spec.number, 8080);
+        assert_eq!(spec.bind, "0.0.0.0");
+        assert!(spec.optional);
     }
 
     #[test]
@@ -415,13 +407,11 @@ mod tests {
             id: "s".into(),
             name: "api".into(),
             command: "./gradlew bootRun".into(),
-            expected_port: Some(8080),
             ports: vec![
                 PortSpec {
                     name: "http".into(),
                     number: 8080,
                     bind: "0.0.0.0".into(),
-                    proto: PortProto::Tcp,
                     optional: false,
                     note: None,
                 },
@@ -429,7 +419,6 @@ mod tests {
                     name: "debug".into(),
                     number: 5005,
                     bind: "127.0.0.1".into(),
-                    proto: PortProto::Tcp,
                     optional: false,
                     note: Some("JDWP".into()),
                 },
@@ -437,7 +426,6 @@ mod tests {
                     name: "metrics".into(),
                     number: 9010,
                     bind: "127.0.0.1".into(),
-                    proto: PortProto::Tcp,
                     optional: true,
                     note: None,
                 },
@@ -486,7 +474,6 @@ mod tests {
             id: "abc".into(),
             name: "Backend (Spring Boot local)".into(),
             command: "./gradlew bootRun --args='--spring.profiles.active=local'".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,

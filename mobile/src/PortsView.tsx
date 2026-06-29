@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, type ProcessSnapshot, type ProjectsPayload } from './api';
 import { ArrowLeft, RefreshCw } from './icons';
 import './mobile.css';
 
@@ -11,14 +11,40 @@ interface PortEntry {
 
 interface Props {
   onBack: () => void;
+  // WS8: registered scripts + live processes, used to resolve which listening
+  // ports are owned by a registered (and currently running) script. The Stop
+  // button only ever targets such scripts — never an arbitrary lsof PID — so
+  // the remote security boundary (actions limited to registered scripts) holds.
+  projects: ProjectsPayload['projects'];
+  processes: ProcessSnapshot[];
 }
 
-export function PortsView({ onBack }: Props) {
+export function PortsView({ onBack, projects, processes }: Props) {
   const [ports, setPorts] = useState<PortEntry[]>([]);
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
+  const [stopping, setStopping] = useState<string | null>(null);
+
+  // Map a listening port number → the registered, *running* script that
+  // declares it. Only running scripts are stoppable, and the lookup is keyed
+  // on declared PortSpecs so we can't act on unregistered processes.
+  const ownerByPort = useMemo(() => {
+    const running = new Set(processes.filter((p) => p.status === 'running').map((p) => p.id));
+    const map = new Map<number, { scriptId: string; label: string }>();
+    for (const proj of projects) {
+      for (const s of proj.scripts) {
+        if (!running.has(s.id)) continue;
+        for (const spec of s.ports ?? []) {
+          if (!map.has(spec.number)) {
+            map.set(spec.number, { scriptId: s.id, label: `${proj.name}/${s.name}` });
+          }
+        }
+      }
+    }
+    return map;
+  }, [projects, processes]);
 
   const reload = useCallback(async () => {
     try {
@@ -56,6 +82,21 @@ export function PortsView({ onBack }: Props) {
     setEditing(null);
   }
 
+  async function stopOwner(scriptId: string, label: string) {
+    if (!window.confirm(`Stop "${label}"?`)) return;
+    setStopping(scriptId);
+    try {
+      await api.stop(scriptId);
+      // The status poll in MainView will refresh ownership; reload the lsof
+      // snapshot so the port disappears once the process releases it.
+      setTimeout(reload, 400);
+    } catch (e: unknown) {
+      alert(`stop: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setStopping(null);
+    }
+  }
+
   return (
     <div className="page">
       <div className="topbar">
@@ -74,6 +115,7 @@ export function PortsView({ onBack }: Props) {
           ports.map((p) => {
             const alias = aliases[String(p.port)] ?? '';
             const isEditing = editing === p.port;
+            const owner = ownerByPort.get(p.port);
             return (
               <div key={`${p.pid}-${p.port}`} className="script-row" style={{ minHeight: 56 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
@@ -116,8 +158,20 @@ export function PortsView({ onBack }: Props) {
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--fg3)', fontFamily: 'var(--mono)' }}>
                     pid {p.pid} · {p.process_name}
+                    {owner && <span style={{ marginLeft: 6, color: 'var(--green)' }}>· {owner.label}</span>}
                   </div>
                 </div>
+                {owner && (
+                  <div className="script-actions">
+                    <button
+                      className="btn-stop"
+                      disabled={stopping === owner.scriptId}
+                      onClick={() => stopOwner(owner.scriptId, owner.label)}
+                    >
+                      {stopping === owner.scriptId ? '…' : 'Stop'}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })

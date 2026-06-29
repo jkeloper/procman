@@ -14,6 +14,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_DIR="$REPO_ROOT/app"
+
+# shellcheck source=scripts/lib-build.sh
+source "$SCRIPT_DIR/lib-build.sh"
 INSTALL_DIR="/Applications"
 APP_NAME="procman.app"
 INSTALLED_PATH="$INSTALL_DIR/$APP_NAME"
@@ -49,9 +52,16 @@ if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -f "$HOME/.tauri/procman.key" ]]; t
 fi
 
 if [[ "$MODE" == "debug" ]]; then
+  # mobile/dist is rust-embedded into the binary; without it LAN/mobile/QR
+  # pairing 404s. Skip the rebuild on --debug if a build already exists to
+  # keep the fast iteration loop fast.
+  build_mobile_pwa_if_missing
   pnpm tauri build --debug --bundles app
   BUILT="$APP_DIR/src-tauri/target/debug/bundle/macos/$APP_NAME"
 else
+  # Always rebuild the embedded mobile PWA for release installs so the
+  # shipped binary never embeds a stale/empty SPA.
+  build_mobile_pwa
   pnpm tauri build --bundles app
   BUILT="$APP_DIR/src-tauri/target/release/bundle/macos/$APP_NAME"
 fi

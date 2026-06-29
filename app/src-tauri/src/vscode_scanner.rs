@@ -9,7 +9,7 @@
 // Unsupported (compound, preLaunchTask, pwa-*, attach, remote) are skipped
 // with a warning String per candidate.
 
-use crate::types::{PortProto, PortSpec, Script};
+use crate::types::{PortSpec, Script};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -135,7 +135,6 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
                 id: Uuid::new_v4().to_string(),
                 name: c_name.clone(),
                 command: command_line.clone(),
-                expected_port: None,
                 ports: Vec::new(),
                 auto_restart: false,
                 auto_restart_policy: None,
@@ -679,13 +678,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
 
     // S1: best-effort port extraction from launch.json args / env / runtimeArgs.
     let extracted_ports = extract_ports_from_launch(cfg);
-    let expected_from_ports = extracted_ports.first().map(|p| p.number);
 
     let script = Script {
         id: Uuid::new_v4().to_string(),
         name: name.clone(),
         command: command.clone(),
-        expected_port: expected_from_ports,
         ports: extracted_ports,
         auto_restart: false,
         auto_restart_policy: None,
@@ -972,7 +969,6 @@ pub fn extract_ports_from_launch(cfg: &Value) -> Vec<PortSpec> {
             name,
             number,
             bind: "127.0.0.1".to_string(),
-            proto: PortProto::Tcp,
             optional: false,
             note,
         });

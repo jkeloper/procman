@@ -54,9 +54,9 @@ export function PortPickerDialog({
         </DialogHeader>
         {ports.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
-            No listening ports were found for this script. Set an
+            No listening ports were found for this script. Declare a
             <code className="mx-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[12px]">
-              expected_port
+              port
             </code>
             in Edit, or run the process first.
           </p>

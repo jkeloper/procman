@@ -3,6 +3,8 @@ import { api, type Project } from '@/api/tauri';
 import { NewGroupDialog } from './NewGroupDialog';
 import { Button } from '@/components/ui/button';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { useToast } from '@/components/Toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import type { ShutdownEvent } from '@/api/tauri';
 
 interface Group {
@@ -21,6 +23,8 @@ export function GroupsPanel({ projects }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
   const { statuses, shutdowns } = useProcessStatus();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const reload = useCallback(async () => {
     try {
@@ -45,7 +49,10 @@ export function GroupsPanel({ projects }: Props) {
     try {
       await api.runGroup(id);
     } catch (e: any) {
-      alert(`Run failed: ${e?.message ?? e}`);
+      toast.error(`Run failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void handleRun(id),
+      });
     } finally {
       setBusy(null);
     }
@@ -57,22 +64,28 @@ export function GroupsPanel({ projects }: Props) {
       const result = (await api.stopGroup(id)) as Array<{ ok: boolean; error?: string | null }>;
       const failed = result.find((row) => !row.ok);
       if (failed) {
-        alert(`Stop failed: ${failed.error ?? 'unknown error'}`);
+        toast.error(`Stop failed: ${failed.error ?? 'unknown error'}`);
       }
     } catch (e: any) {
-      alert(`Stop failed: ${e?.message ?? e}`);
+      toast.error(`Stop failed: ${e?.message ?? e}`);
     } finally {
       setStopping(null);
     }
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm('Delete this group?')) return;
+    const ok = await confirm({
+      title: 'Delete this group?',
+      description: 'The group is removed. The member scripts are not deleted.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteGroup(id);
       reload();
     } catch (e: any) {
-      alert(`Delete failed: ${e?.message ?? e}`);
+      toast.error(`Delete failed: ${e?.message ?? e}`);
     }
   }
 

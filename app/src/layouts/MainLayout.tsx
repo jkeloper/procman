@@ -77,6 +77,10 @@ export function MainLayout() {
   const showingProject = selectedProjectId != null;
   const currentProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const runningCount = Object.values(statuses).filter((s) => s === 'running').length;
+  // WS7 §5: global crashed count — surfaced in the project top bar so a death
+  // in another project isn't hidden while you're focused on one. Clicking
+  // jumps to the global "All running" view.
+  const crashedCount = Object.values(statuses).filter((s) => s === 'crashed').length;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden text-foreground">
@@ -128,6 +132,15 @@ export function MainLayout() {
                 className="flex items-center gap-2"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               >
+                {crashedCount > 0 && (
+                  <button
+                    className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-500 transition-colors hover:bg-red-500/25"
+                    title="View all running — including crashed processes in other projects"
+                    onClick={() => setSelectedProjectId(null)}
+                  >
+                    {crashedCount} crashed
+                  </button>
+                )}
                 {runningCount > 0 && (
                   <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
                     {runningCount} running

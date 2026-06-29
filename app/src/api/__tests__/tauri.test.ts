@@ -48,14 +48,13 @@ describe('api wrapper (mocked invoke)', () => {
       name: 'dev',
       command: 'pnpm dev',
     });
-    const out = await api.createScript('p1', 'dev', 'pnpm dev', null, false);
+    const out = await api.createScript('p1', 'dev', 'pnpm dev', false);
     expect(invokeMock).toHaveBeenCalledWith(
       'create_script',
       expect.objectContaining({
         projectId: 'p1',
         name: 'dev',
         command: 'pnpm dev',
-        expectedPort: null,
         autoRestart: false,
         envFile: null,
         ports: [],

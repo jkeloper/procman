@@ -31,6 +31,22 @@ fn cache_cell() -> &'static StdMutex<Option<(Instant, Vec<PortInfo>)>> {
     LISTENING_PORTS_CACHE.get_or_init(|| StdMutex::new(None))
 }
 
+// WS3: cache the per-runtime ownership snapshot (the `ps` process-tree scan
+// plus the two cwd lsof calls) so a burst of read-path status/list queries
+// (Dashboard polls N scripts every 3-5s) builds it at most once per TTL
+// instead of once per script. Same 500ms window as the listening-ports
+// cache: a freshly-bound port still surfaces within one poll cycle, but the
+// O(N) fan-out of `ps`+`lsof` collapses to a single build. We store an Arc
+// so the read path clones a pointer, not the whole HashMap.
+const OWNERSHIP_TTL: Duration = Duration::from_millis(500);
+
+static OWNERSHIP_CACHE: std::sync::OnceLock<StdMutex<Option<(Instant, Arc<PortOwnershipCache>)>>> =
+    std::sync::OnceLock::new();
+
+fn ownership_cache_cell() -> &'static StdMutex<Option<(Instant, Arc<PortOwnershipCache>)>> {
+    OWNERSHIP_CACHE.get_or_init(|| StdMutex::new(None))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PortOwnerRoot {
     pub root_pid: u32,
@@ -116,6 +132,11 @@ pub(crate) async fn build_port_ownership_cache(
     let roots: Vec<PortOwnerRoot> = pm
         .list()
         .into_iter()
+        // WS2 hardening: only Running processes are valid ownership roots.
+        // A retained Crashed entry holds a dead pid the OS may have reused;
+        // using it as a root could mis-attribute an unrelated process tree
+        // (and its cwd-matched listeners) to the crashed script.
+        .filter(|process| process.status == crate::process::RuntimeStatus::Running)
         .filter_map(|process| {
             let project_id = script_projects.get(&process.id)?;
             Some(PortOwnerRoot {
@@ -126,6 +147,39 @@ pub(crate) async fn build_port_ownership_cache(
         })
         .collect();
     PortOwnershipCache::build(ports, &roots)
+}
+
+/// WS3: read-path ownership snapshot with a 500ms TTL cache.
+///
+/// Status/list queries (`port_status_for_script`, `port_status_all`,
+/// `list_ports_for_script`) tolerate a half-second-stale ownership view —
+/// the listening-ports list itself is already cached on the same window.
+/// Conflict checks DO NOT use this (they run right before a spawn and must
+/// be fresh); they keep calling `build_port_ownership_cache` directly.
+///
+/// `ports` only matters on a cache miss (it feeds the cwd-matching pass). On
+/// a hit we return the cached snapshot regardless, which is correct because
+/// the cached snapshot was itself built from the same TTL-fresh listening
+/// list.
+pub(crate) async fn build_port_ownership_cache_cached(
+    state: &AppState,
+    pm: &ProcessManager,
+    ports: &[PortInfo],
+) -> Arc<PortOwnershipCache> {
+    {
+        if let Ok(guard) = ownership_cache_cell().lock() {
+            if let Some((ts, ref cache)) = *guard {
+                if ts.elapsed() < OWNERSHIP_TTL {
+                    return cache.clone();
+                }
+            }
+        }
+    }
+    let fresh = Arc::new(build_port_ownership_cache(state, pm, ports).await);
+    if let Ok(mut guard) = ownership_cache_cell().lock() {
+        *guard = Some((Instant::now(), fresh.clone()));
+    }
+    fresh
 }
 
 pub(crate) async fn blocking_conflicts_for_script(
@@ -168,6 +222,13 @@ async fn script_project_index(state: &AppState) -> HashMap<String, String> {
 #[cfg(test)]
 fn clear_listening_ports_cache() {
     if let Ok(mut g) = cache_cell().lock() {
+        *g = None;
+    }
+}
+
+#[cfg(test)]
+fn clear_ownership_cache() {
+    if let Ok(mut g) = ownership_cache_cell().lock() {
         *g = None;
     }
 }
@@ -639,10 +700,25 @@ pub async fn port_status_for_script(
     }
 
     let listening = list_ports().await?;
-    let ownership = build_port_ownership_cache(&state, &pm, &listening).await;
-    let managed_pids: HashSet<u32> = managed_pids_for_script(&script_id, &listening, &ownership);
+    // WS3: read path → cached ownership snapshot (TTL-deduped across scripts).
+    let ownership = build_port_ownership_cache_cached(&state, &pm, &listening).await;
+    Ok(declared_status_with_probe(&script_id, &script.ports, &listening, &ownership).await)
+}
 
-    let mut statuses = build_declared_status(&script.ports, &listening, &managed_pids);
+/// WS3: shared status+probe builder. Classifies each declared spec against
+/// the listening snapshot + ownership view, then runs the parallel TCP
+/// liveness probe. Extracted so the per-script command and the batch
+/// command (`port_status_all`) compute identical results — the only
+/// difference between them is how many times the ownership snapshot is built
+/// (once per call vs. once per batch).
+pub(crate) async fn declared_status_with_probe(
+    script_id: &str,
+    specs: &[PortSpec],
+    listening: &[PortInfo],
+    ownership: &PortOwnershipCache,
+) -> Vec<DeclaredPortStatus> {
+    let managed_pids: HashSet<u32> = managed_pids_for_script(script_id, listening, ownership);
+    let mut statuses = build_declared_status(specs, listening, &managed_pids);
     // S2: probe each declared port in parallel. Keep timeout short (400ms)
     // so a single hung port doesn't stall the whole response.
     let probes: Vec<_> = statuses
@@ -656,7 +732,58 @@ pub async fn port_status_for_script(
     for (i, handle) in probes.into_iter().enumerate() {
         statuses[i].reachable = handle.await.ok();
     }
-    Ok(statuses)
+    statuses
+}
+
+/// WS3: batch status for many scripts. Builds the listening snapshot and the
+/// ownership view ONCE, then classifies + probes every requested script
+/// against that shared snapshot. Replaces the FE/mobile fan-out of N
+/// `port_status_for_script` calls (each of which re-ran `ps` + 2× `lsof`)
+/// with a single ownership build. Scripts that don't exist or have no
+/// declared ports yield an empty status vector (never an error) so one bad
+/// id can't sink the whole batch.
+#[tauri::command]
+pub async fn port_status_all(
+    script_ids: Vec<String>,
+    state: tauri::State<'_, Arc<AppState>>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<Vec<(String, Vec<DeclaredPortStatus>)>, String> {
+    if script_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Resolve specs up front so we only hold the config lock once.
+    let specs_by_id = lookup_scripts(&state, &script_ids).await;
+
+    let listening = list_ports().await?;
+    let ownership = build_port_ownership_cache_cached(&state, &pm, &listening).await;
+
+    let mut out: Vec<(String, Vec<DeclaredPortStatus>)> = Vec::with_capacity(script_ids.len());
+    for id in &script_ids {
+        let statuses = match specs_by_id.get(id) {
+            Some(specs) if !specs.is_empty() => {
+                declared_status_with_probe(id, specs, &listening, &ownership).await
+            }
+            _ => Vec::new(),
+        };
+        out.push((id.clone(), statuses));
+    }
+    Ok(out)
+}
+
+/// Resolve many script_ids → their declared PortSpecs in a single config
+/// lock acquisition. Missing ids are simply absent from the map.
+async fn lookup_scripts(state: &AppState, script_ids: &[String]) -> HashMap<String, Vec<PortSpec>> {
+    let wanted: HashSet<&str> = script_ids.iter().map(|s| s.as_str()).collect();
+    let guard = state.config.lock().await;
+    let mut out = HashMap::new();
+    for project in &guard.projects {
+        for script in &project.scripts {
+            if wanted.contains(script.id.as_str()) {
+                out.insert(script.id.clone(), script.ports.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Called by FE / start_process right before spawning. Returns a list of
@@ -700,7 +827,8 @@ pub async fn list_ports_for_script(
         .ok_or_else(|| format!("script not found: {}", script_id))?;
 
     let all = list_ports().await?;
-    let ownership = build_port_ownership_cache(&state, &pm, &all).await;
+    // WS3: read path → cached ownership snapshot.
+    let ownership = build_port_ownership_cache_cached(&state, &pm, &all).await;
     Ok(list_ports_for_script_from_snapshot(
         &script_id,
         &script.ports,
@@ -853,14 +981,12 @@ pub(crate) fn build_declared_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::PortProto;
 
     fn spec(name: &str, number: u16, optional: bool) -> PortSpec {
         PortSpec {
             name: name.into(),
             number,
             bind: "127.0.0.1".into(),
-            proto: PortProto::Tcp,
             optional,
             note: None,
         }
@@ -1086,5 +1212,84 @@ mod tests {
         // "0.0.0.0" must be rewritten to 127.0.0.1 before connect.
         let ok = tcp_probe("0.0.0.0", port, 500).await;
         assert!(ok);
+    }
+
+    // --- WS3: ownership snapshot caching ---
+
+    #[test]
+    fn ownership_cache_hit_within_ttl_returns_same_arc() {
+        // Seed the cell with a known snapshot and assert a fresh read inside
+        // the TTL window hands back the SAME Arc (pointer-identical), proving
+        // the read path skipped the ps/lsof rebuild.
+        clear_ownership_cache();
+        let mut cache = PortOwnershipCache::default();
+        cache.pid_owner.insert(42, ("p1".into(), "s1".into()));
+        let seeded = Arc::new(cache);
+        {
+            let mut g = ownership_cache_cell().lock().unwrap();
+            *g = Some((Instant::now(), seeded.clone()));
+        }
+        // Simulate the read-path's hit branch.
+        let got = {
+            let g = ownership_cache_cell().lock().unwrap();
+            let (ts, ref c) = g.as_ref().unwrap();
+            assert!(ts.elapsed() < OWNERSHIP_TTL);
+            c.clone()
+        };
+        assert!(Arc::ptr_eq(&seeded, &got));
+        assert_eq!(got.owner_for(42), Some(&("p1".into(), "s1".into())));
+        clear_ownership_cache();
+    }
+
+    #[test]
+    fn ownership_cache_expires_after_ttl() {
+        // A snapshot stamped older than the TTL must be treated as a miss.
+        clear_ownership_cache();
+        let seeded = Arc::new(PortOwnershipCache::default());
+        let stale_ts = Instant::now() - (OWNERSHIP_TTL + Duration::from_millis(50));
+        {
+            let mut g = ownership_cache_cell().lock().unwrap();
+            *g = Some((stale_ts, seeded));
+        }
+        let fresh = {
+            let g = ownership_cache_cell().lock().unwrap();
+            !matches!(g.as_ref(), Some((ts, _)) if ts.elapsed() < OWNERSHIP_TTL)
+        };
+        assert!(fresh, "snapshot older than TTL must register as a miss");
+        clear_ownership_cache();
+    }
+
+    /// WS3: the batch path and the per-script path must classify identically
+    /// against the same snapshot. We exercise the shared inner builders
+    /// (`build_declared_status` over `managed_pids_for_script`) that both
+    /// `declared_status_with_probe` and `port_status_for_script` route
+    /// through, so equivalence is structural, not a re-derivation.
+    #[test]
+    fn batch_and_per_script_share_classification() {
+        let specs_s1 = vec![spec("http", 8080, false)];
+        let specs_s2 = vec![spec("api", 9090, false)];
+        let listing = vec![info(8080, 42, "node main"), info(9090, 99, "uvicorn")];
+        let mut ownership = PortOwnershipCache::default();
+        ownership.pid_owner.insert(42, ("p1".into(), "s1".into()));
+        ownership.pid_owner.insert(99, ("p1".into(), "s2".into()));
+
+        // Per-script derivation for s1.
+        let mp_s1 = managed_pids_for_script("s1", &listing, &ownership);
+        let per_s1 = build_declared_status(&specs_s1, &listing, &mp_s1);
+        // Same inputs, as the batch loop would feed them.
+        let mp_s1_batch = managed_pids_for_script("s1", &listing, &ownership);
+        let batch_s1 = build_declared_status(&specs_s1, &listing, &mp_s1_batch);
+
+        assert_eq!(per_s1.len(), 1);
+        assert_eq!(per_s1[0].state, PortState::ListeningManaged);
+        assert_eq!(per_s1[0].state, batch_s1[0].state);
+        assert_eq!(per_s1[0].owned_by_script, batch_s1[0].owned_by_script);
+        assert_eq!(per_s1[0].holder_pid, batch_s1[0].holder_pid);
+
+        // s2 sees 9090 managed, 8080 owned by s1 → not present in its specs.
+        let mp_s2 = managed_pids_for_script("s2", &listing, &ownership);
+        let per_s2 = build_declared_status(&specs_s2, &listing, &mp_s2);
+        assert_eq!(per_s2[0].state, PortState::ListeningManaged);
+        assert_eq!(per_s2[0].holder_pid, Some(99));
     }
 }

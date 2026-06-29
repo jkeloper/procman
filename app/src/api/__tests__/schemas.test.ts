@@ -55,7 +55,6 @@ describe('ScriptSchema', () => {
     expect(parsed.ports).toEqual([]);
     expect(parsed.auto_restart).toBe(false);
     expect(parsed.env_file).toBeNull();
-    expect(parsed.expected_port).toBeNull();
     expect(parsed.schedule).toBeNull();
   });
 
@@ -81,10 +80,9 @@ describe('ScriptSchema', () => {
 });
 
 describe('PortSpecSchema', () => {
-  it('applies default bind/proto/optional', () => {
+  it('applies default bind/optional', () => {
     const spec = PortSpecSchema.parse({ name: 'http', number: 8080 });
     expect(spec.bind).toBe('127.0.0.1');
-    expect(spec.proto).toBe('tcp');
     expect(spec.optional).toBe(false);
     expect(spec.note).toBeNull();
   });
@@ -93,12 +91,23 @@ describe('PortSpecSchema', () => {
     expect(() => PortSpecSchema.parse({ name: 'x', number: 0 })).toThrow();
     expect(() => PortSpecSchema.parse({ name: 'x', number: 70000 })).toThrow();
   });
+
+  it('ignores a legacy proto key (WS7-2)', () => {
+    // Pre-removal wire payloads still carry `proto: 'tcp'`. zod strips
+    // unknown keys, so parsing must succeed and not surface `proto`.
+    const spec = PortSpecSchema.parse({ name: 'http', number: 8080, proto: 'tcp' });
+    expect(spec).not.toHaveProperty('proto');
+    expect(spec.number).toBe(8080);
+  });
 });
 
 describe('AppConfigSchema round-trip', () => {
-  it('round-trips a realistic v2 config', () => {
+  it('round-trips a realistic v4 config and strips legacy expected_port/proto', () => {
+    // WS7-2: input carries the removed `expected_port` scalar and a legacy
+    // `proto` key on the port. zod strips both; the parsed result is the
+    // clean post-v4 shape and round-trips cleanly.
     const cfg = {
-      version: '2',
+      version: '4',
       projects: [
         {
           id: 'p1',
@@ -136,6 +145,8 @@ describe('AppConfigSchema round-trip', () => {
       },
     };
     const first = AppConfigSchema.parse(cfg);
+    expect(first.projects[0].scripts[0]).not.toHaveProperty('expected_port');
+    expect(first.projects[0].scripts[0].ports[0]).not.toHaveProperty('proto');
     const back = AppConfigSchema.parse(JSON.parse(JSON.stringify(first)));
     expect(back).toEqual(first);
   });
@@ -202,6 +213,27 @@ describe('Runtime-only schemas', () => {
     });
     expect(snap.cpu_pct).toBeNull();
     expect(snap.rss_kb).toBeNull();
+  });
+
+  it('ProcessSnapshotSchema defaults kind to "piped" and accepts "pty" (WS9)', () => {
+    // Older backend payloads omit `kind` — must deserialize as piped.
+    const piped = ProcessSnapshotSchema.parse({
+      id: 's1',
+      pid: 1234,
+      status: 'running',
+      started_at_ms: 1_700_000_000_000,
+      command: 'node api.js',
+    });
+    expect(piped.kind).toBe('piped');
+    const pty = ProcessSnapshotSchema.parse({
+      id: 's2',
+      pid: 5678,
+      status: 'running',
+      started_at_ms: 1_700_000_000_000,
+      command: 'python -i',
+      kind: 'pty',
+    });
+    expect(pty.kind).toBe('pty');
   });
 
   it('RuntimeDeltaSchema accepts ports deltas', () => {

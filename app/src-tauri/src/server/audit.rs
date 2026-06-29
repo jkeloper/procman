@@ -39,7 +39,6 @@ impl AuditLog {
 
     /// Construct with disk persistence. Failure to open the file degrades
     /// to in-memory-only (we log a warning) so audit never blocks startup.
-    #[allow(dead_code)]
     pub fn with_file(path: PathBuf) -> Self {
         let writer = RotatingWriter::open(path.clone())
             .map_err(|e| {
@@ -87,6 +86,20 @@ impl AuditLog {
     }
 }
 
+/// Disk location for the persisted audit log. Mirrors the directory used by
+/// `config.yaml` / `runtime.json` (`~/Library/Application Support/procman`)
+/// so all procman state lives together. Returns None if the platform config
+/// dir can't be resolved — caller falls back to in-memory-only.
+pub fn default_audit_path() -> Option<PathBuf> {
+    match crate::config_store::default_config_path() {
+        Ok(p) => p.parent().map(|dir| dir.join("audit.log")),
+        Err(e) => {
+            log::warn!("no config dir for audit log: {}", e);
+            None
+        }
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -100,7 +113,6 @@ fn now_ms() -> i64 {
 ///   audit.log.1 ← audit.log
 ///   audit.log   ← new empty file
 /// Keeps `keep` rotated files; older numbered files are deleted.
-#[allow(dead_code)]
 struct RotatingWriter {
     path: PathBuf,
     file: File,
@@ -109,7 +121,6 @@ struct RotatingWriter {
 }
 
 impl RotatingWriter {
-    #[allow(dead_code)]
     fn open(path: PathBuf) -> std::io::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -259,5 +270,60 @@ mod tests {
         }
         let snap = log.snapshot().await;
         assert_eq!(snap.len(), RING_CAPACITY);
+    }
+
+    #[test]
+    fn open_uses_5mb_keep3_defaults() {
+        // The production `open()` path (used by `with_file`) must apply the
+        // 5 MB threshold and keep-3 policy, not the test-only `open_with`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let w = RotatingWriter::open(path).unwrap();
+        assert_eq!(w.max_bytes, ROTATE_MAX_BYTES);
+        assert_eq!(w.max_bytes, 5 * 1024 * 1024);
+        assert_eq!(w.keep, ROTATE_KEEP);
+        assert_eq!(w.keep, 3);
+    }
+
+    #[tokio::test]
+    async fn with_file_persists_records_to_disk() {
+        // The wired-up production path: record() must reach the disk writer
+        // and survive as JSON lines (one per entry).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("audit.log");
+        let log = AuditLog::with_file(path.clone());
+        assert!(log.writer.is_some(), "disk writer should be active");
+        log.record("kill", "script-7", true, Some("manual".into()))
+            .await;
+        log.record("start", "script-8", false, None).await;
+        let text = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(text.contains("\"action\":\"kill\""));
+        assert!(text.contains("\"target\":\"script-8\""));
+        assert!(text.contains("\"ok\":false"));
+    }
+
+    #[test]
+    fn rotation_drops_oldest_beyond_keep_via_default_keep() {
+        // Drive the production rotation accounting (keep=ROTATE_KEEP) with a
+        // small byte threshold so we don't have to write 5 MB.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let mut w = RotatingWriter::open_with(path.clone(), 256, ROTATE_KEEP).unwrap();
+        let entry = AuditEntry {
+            ts_ms: 0,
+            action: "a".into(),
+            target: "t".into(),
+            ok: true,
+            detail: Some("y".repeat(200)),
+        };
+        for _ in 0..30 {
+            w.append(&entry).unwrap();
+        }
+        assert!(path.exists());
+        assert!(rotate_path(&path, ROTATE_KEEP).exists());
+        // One past the keep window must never linger.
+        assert!(!rotate_path(&path, ROTATE_KEEP + 1).exists());
     }
 }

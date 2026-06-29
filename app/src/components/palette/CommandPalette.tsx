@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Project, type RuntimeStatus } from '@/api/tauri';
+import { useToast } from '@/components/Toast';
 import { LayoutDashboard, Play, Folder, Square, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
 
 interface Group {
@@ -18,6 +19,7 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<Group[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -116,7 +118,10 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
       else if (action === 'stop') await api.killProcess(scriptId);
       else await api.restartProcess(projectId, scriptId);
     } catch (e: any) {
-      alert(`${action} failed: ${e?.message ?? e}`);
+      toast.error(`${action} failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void runAction(action, projectId, scriptId),
+      });
     }
   }
 
@@ -125,7 +130,10 @@ export function CommandPalette({ projects, statuses, onSelectProject }: Props) {
     try {
       await api.runGroup(groupId);
     } catch (e: any) {
-      alert(`Run group failed: ${e?.message ?? e}`);
+      toast.error(`Run group failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void runGroupAction(groupId),
+      });
     }
   }
 

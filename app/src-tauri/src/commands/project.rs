@@ -120,6 +120,9 @@ pub async fn delete_project(
     };
     for sid in script_ids {
         let _ = pm.kill(&sid).await;
+        // WS5: the project (and its scripts) is being deleted — drop each from
+        // the session-restore set so a removed script isn't proposed next launch.
+        pm.runtime_store().mark_running(&sid, false).await;
     }
 
     // Idempotent delete: if the project is already gone (e.g. removed

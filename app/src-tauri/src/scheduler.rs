@@ -100,7 +100,7 @@ async fn run_scheduler_minute(
         if !schedule.matches(time) {
             continue;
         }
-        if pm.is_running(&scheduled.script.id) {
+        if pm.is_live(&scheduled.script.id) {
             log::debug!(
                 "scheduled script '{}' is already running; skipping",
                 scheduled.script.name
@@ -138,7 +138,7 @@ async fn run_scheduler_minute(
             );
             continue;
         }
-        if pm.is_running(&scheduled.script.id) {
+        if pm.is_live(&scheduled.script.id) {
             continue;
         }
         match pm

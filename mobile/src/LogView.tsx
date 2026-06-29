@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import AnsiToHtml from 'ansi-to-html';
 import { api, openStream, type LogLine } from './api';
 import { ArrowLeft } from './icons';
 import './mobile.css';
@@ -10,7 +11,16 @@ interface Props {
 }
 
 const MAX = 2000;
-const ANSI_ESCAPE_RE = new RegExp(String.raw`\u001B\[[0-9;]*[A-Za-z]`, 'g');
+
+// WS8: render ANSI colors instead of stripping them (matches the desktop
+// LogPanel). `escapeXML` neutralises HTML-special chars in log text before it
+// reaches dangerouslySetInnerHTML, so log output can't inject markup.
+const ansi = new AnsiToHtml({
+  fg: '#d4d4d8',
+  bg: 'rgba(8, 16, 12, 0.85)',
+  newline: false,
+  escapeXML: true,
+});
 
 export function LogView({ scriptId, scriptName, onBack }: Props) {
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -38,6 +48,14 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
   const filtered = query
     ? lines.filter((l) => l.text.toLowerCase().includes(query.toLowerCase()))
     : lines;
+
+  // Convert each visible line's ANSI to HTML once per render pass. escapeXML
+  // means the text is HTML-safe before colorization, so the rendered spans
+  // can't carry injected markup.
+  const rendered = useMemo(
+    () => filtered.map((l) => ({ line: l, html: ansi.toHtml(l.text) })),
+    [filtered],
+  );
 
   useEffect(() => {
     if (autoScroll && !query && scrollRef.current) {
@@ -99,7 +117,7 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
             {lines.length === 0 ? 'waiting for output…' : query ? `no matches for "${query}"` : 'waiting for output…'}
           </p>
         ) : (
-          filtered.map((l) => (
+          rendered.map(({ line: l, html }) => (
             <div
               key={l.seq}
               className="log-line"
@@ -109,7 +127,7 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
               }}
             >
               <span className="log-seq">{l.seq}</span>
-              <span style={{ flex: 1 }}>{l.text.replace(ANSI_ESCAPE_RE, '')}</span>
+              <span style={{ flex: 1 }} dangerouslySetInnerHTML={{ __html: html }} />
             </div>
           ))
         )}

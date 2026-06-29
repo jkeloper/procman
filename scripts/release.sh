@@ -27,6 +27,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_DIR="$REPO_ROOT/app"
 TAURI_DIR="$APP_DIR/src-tauri"
 
+# shellcheck source=scripts/lib-build.sh
+source "$SCRIPT_DIR/lib-build.sh"
+
 VERSION=""
 SKIP_NOTARIZE=0
 SKIP_UPDATER_ARTIFACTS=0
@@ -180,8 +183,7 @@ verify_codesign_identity_access
 if [[ "$DRY_RUN" == "1" ]]; then
   log "DRY-RUN: skipping build"
 else
-  log "Building mobile PWA (embedded via rust-embed)"
-  (cd "$REPO_ROOT/mobile" && pnpm install --frozen-lockfile && pnpm build)
+  build_mobile_pwa
 
   log "Building Tauri release (pnpm tauri build)"
   cd "$APP_DIR"

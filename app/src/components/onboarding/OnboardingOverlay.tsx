@@ -115,8 +115,9 @@ export function OnboardingOverlay({ open: isOpen, onFinish }: Props) {
                 createdProject.id,
                 s.name,
                 s.command,
-                s.expected_port,
                 s.auto_restart,
+                null,
+                s.ports,
               );
             } catch (e: any) {
               const msg = String(e?.message ?? e);

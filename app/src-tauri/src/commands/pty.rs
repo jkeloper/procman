@@ -1,7 +1,7 @@
-use crate::process::command_line_for_script;
+use crate::process::{command_line_for_script, ProcessManager};
 use crate::state::AppState;
 use dashmap::DashMap;
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -37,11 +37,17 @@ pub struct PtyExitEvent {
     pub success: bool,
 }
 
+/// WS9: PtyManager is now an I/O front-end. It owns only the master PTY
+/// handle (resize), the writer (keystrokes), and the scrollback buffer
+/// (snapshot). Process lifecycle — kill, crash classification, metrics,
+/// session-restore — is owned by `ProcessManager` via `register_pty` /
+/// `notify_pty_exit`. No `ChildKiller` is held here: kill routes through
+/// `pm.kill(script_id)` so PTY and piped processes share the same
+/// killpg/grace/sweep sequence.
 struct PtySession {
     info: PtySessionInfo,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
-    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     buffer: Mutex<VecDeque<String>>,
 }
 
@@ -64,10 +70,6 @@ impl PtyManager {
             .iter()
             .map(|entry| entry.value().info.clone())
             .collect()
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.sessions.len()
     }
 
     fn find_by_script(&self, script_id: &str) -> Option<PtySessionInfo> {
@@ -120,23 +122,43 @@ impl PtyManager {
         result
     }
 
-    fn kill(&self, id: &str) -> Result<(), String> {
+    /// WS9: remove the I/O session and route the actual process kill through
+    /// `ProcessManager::kill`, so a PTY stop goes through the same
+    /// killpg → grace → SIGKILL → orphan-sweep sequence as a piped stop. The
+    /// I/O session (reader/writer/buffer) is dropped here; the pm entry is
+    /// torn down by `kill` (and the wait-thread's `notify_pty_exit`). No-op
+    /// when the session is already gone.
+    async fn kill(&self, id: &str, pm: &ProcessManager) -> Result<(), String> {
         let Some((_, session)) = self.sessions.remove(id) else {
             return Ok(());
         };
-        let result = session
-            .killer
-            .lock()
-            .map_err(|_| "pty killer lock poisoned".to_string())?
-            .kill()
-            .map_err(|e| format!("pty kill: {}", e));
-        result
+        let script_id = session.info.script_id.clone();
+        // Drop our I/O handles before killing so the reader thread sees EOF.
+        drop(session);
+        pm.kill(&script_id).await
     }
 
-    pub fn kill_all(&self) {
+    /// WS9: stop every PTY by routing each through `ProcessManager::kill`
+    /// (uniform with piped). Mirrors `kill` for each live I/O session.
+    pub async fn kill_all(&self, pm: &ProcessManager) {
         let ids: Vec<String> = self.sessions.iter().map(|e| e.key().clone()).collect();
         for id in ids {
-            let _ = self.kill(&id);
+            let _ = self.kill(&id, pm).await;
+        }
+    }
+
+    /// WS9: drop a leftover I/O session for `script_id` without killing the
+    /// process (the process is already gone). Called by `dismiss_process` so a
+    /// dismissed PTY entry leaves no dangling reader/writer/buffer.
+    pub fn remove_io_for_script(&self, script_id: &str) {
+        let ids: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|e| e.value().info.script_id == script_id)
+            .map(|e| e.key().clone())
+            .collect();
+        for id in ids {
+            self.sessions.remove(&id);
         }
     }
 
@@ -147,6 +169,7 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         state: &AppState,
+        pm: &ProcessManager,
     ) -> Result<PtySessionInfo, String> {
         if let Some(existing) = self.find_by_script(&script_id) {
             let _ = self.resize(&existing.id, cols, rows);
@@ -174,17 +197,64 @@ impl PtyManager {
             .spawn_command(cmd)
             .map_err(|e| format!("pty spawn: {}", e))?;
         let pid = child.process_id();
-        let killer = child.clone_killer();
         drop(pair.slave);
 
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| format!("pty reader: {}", e))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| format!("pty writer: {}", e))?;
+        // WS9 zero-orphan guarantee: the OS process is alive the instant
+        // `spawn_command` returns, but it isn't owned by ProcessManager until
+        // `register_pty` succeeds, nor reachable for cleanup until the
+        // wait-thread is installed. So we hold an independent killer and SIGKILL
+        // the child on *every* error path between here and full tracking, and we
+        // run all fallible steps (pid / reader / writer / register) BEFORE the
+        // infallible session-insert + thread spawn. `register_pty` is therefore
+        // the last fallible step, so its failure leaves no pm entry to unwind —
+        // we just kill the freshly-spawned child.
+        let mut killer = child.clone_killer();
+        let Some(pid_u32) = pid else {
+            let _ = killer.kill();
+            return Err("pty child has no pid".into());
+        };
+        let mut reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = killer.kill();
+                return Err(format!("pty reader: {}", e));
+            }
+        };
+        let writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = killer.kill();
+                return Err(format!("pty writer: {}", e));
+            }
+        };
+
+        // `register_pty` is the double-run guard: if a live entry already owns
+        // this script (piped run or stale PTY) it returns Err, and we do a
+        // uniform kill+restart (one retry). Any failure here kills the
+        // freshly-spawned child so nothing escapes untracked.
+        let has_declared_ports = !script.ports.is_empty();
+        let (generation, _killed, _exited) = match pm
+            .register_pty(&script.id, pid_u32, has_declared_ports)
+            .await
+        {
+            Ok(handles) => handles,
+            Err(_) => {
+                if let Err(e) = pm.kill(&script.id).await {
+                    let _ = killer.kill();
+                    return Err(e);
+                }
+                match pm
+                    .register_pty(&script.id, pid_u32, has_declared_ports)
+                    .await
+                {
+                    Ok(handles) => handles,
+                    Err(e) => {
+                        let _ = killer.kill();
+                        return Err(e);
+                    }
+                }
+            }
+        };
 
         let id = Uuid::new_v4().to_string();
         let info = PtySessionInfo {
@@ -199,7 +269,6 @@ impl PtyManager {
             info: info.clone(),
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
-            killer: Mutex::new(killer),
             buffer: Mutex::new(VecDeque::new()),
         });
         self.sessions.insert(id.clone(), Arc::clone(&session));
@@ -235,24 +304,41 @@ impl PtyManager {
             }
         });
 
+        // WS9: the wait-thread owns `child.wait()` (portable-pty's child is a
+        // std blocking handle, not tokio). On exit it (a) emits the legacy
+        // `pty://exit` for the terminal UI, (b) drops the I/O session, and (c)
+        // hands the exit to `ProcessManager::notify_pty_exit` for unified
+        // disposition (status classification, crash retention, pid_index,
+        // session-restore). The async notify is bridged onto the tauri runtime
+        // since we're in a std::thread with no tokio context.
         let app = self.app.clone();
         let sessions = Arc::clone(&self.sessions);
         let wait_id = id.clone();
-        let wait_script_id = script.id;
+        let wait_script_id = script.id.clone();
+        let pm_for_wait = pm.clone();
         std::thread::spawn(move || {
             let status = child.wait();
-            if let Ok(status) = status {
+            let (exit_code, success) = match &status {
+                Ok(s) => (Some(s.exit_code() as i32), s.success()),
+                Err(_) => (None, false),
+            };
+            if let Ok(status) = &status {
                 let _ = app.emit(
                     "pty://exit",
                     PtyExitEvent {
                         id: wait_id.clone(),
-                        script_id: wait_script_id,
+                        script_id: wait_script_id.clone(),
                         exit_code: status.exit_code(),
                         success: status.success(),
                     },
                 );
             }
             sessions.remove(&wait_id);
+            tauri::async_runtime::spawn(async move {
+                pm_for_wait
+                    .notify_pty_exit(&wait_script_id, generation, exit_code, success)
+                    .await;
+            });
         });
 
         Ok(info)
@@ -283,6 +369,7 @@ pub async fn start_pty_session(
     rows: Option<u16>,
     state: tauri::State<'_, Arc<AppState>>,
     pty: tauri::State<'_, PtyManager>,
+    pm: tauri::State<'_, ProcessManager>,
 ) -> Result<PtySessionInfo, String> {
     pty.start_script(
         project_id,
@@ -290,6 +377,7 @@ pub async fn start_pty_session(
         cols.unwrap_or(80),
         rows.unwrap_or(24),
         &state,
+        &pm,
     )
     .await
 }
@@ -314,8 +402,12 @@ pub async fn resize_pty(
 }
 
 #[tauri::command]
-pub async fn kill_pty(id: String, pty: tauri::State<'_, PtyManager>) -> Result<(), String> {
-    pty.kill(&id)
+pub async fn kill_pty(
+    id: String,
+    pty: tauri::State<'_, PtyManager>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<(), String> {
+    pty.kill(&id, &pm).await
 }
 
 #[tauri::command]
@@ -334,8 +426,11 @@ pub async fn pty_snapshot(
 }
 
 #[tauri::command]
-pub async fn kill_all_pty_sessions(pty: tauri::State<'_, PtyManager>) -> Result<(), String> {
-    pty.kill_all();
+pub async fn kill_all_pty_sessions(
+    pty: tauri::State<'_, PtyManager>,
+    pm: tauri::State<'_, ProcessManager>,
+) -> Result<(), String> {
+    pty.kill_all(&pm).await;
     Ok(())
 }
 

@@ -48,6 +48,7 @@ import {
   type RuntimePortInfo,
   type RuntimeDelta,
   type ProcessSnapshot,
+  type ProcessKind,
   type RuntimeSnapshot,
   type RuntimePortsSnapshot,
   type StatusEvent,
@@ -94,7 +95,6 @@ export const api = {
     projectId: string,
     name: string,
     command: string,
-    expectedPort: number | null,
     autoRestart: boolean,
     envFile?: string | null,
     ports?: PortSpec[],
@@ -107,7 +107,6 @@ export const api = {
         projectId,
         name,
         command,
-        expectedPort,
         autoRestart,
         envFile: envFile ?? null,
         ports: ports ?? [],
@@ -122,7 +121,6 @@ export const api = {
     patch: {
       name?: string;
       command?: string;
-      expectedPort?: number | null;
       autoRestart?: boolean;
       autoRestartPolicy?: AutoRestartPolicy | null;
       envFile?: string | null;
@@ -145,6 +143,10 @@ export const api = {
     callRaw<number>('spawn_process', { projectId, scriptId, ignorePortConflicts }),
   killProcess: (scriptId: string) =>
     callRaw<null>('kill_process', { scriptId }),
+  // WS2: clear a retained Crashed entry (and its log buffer) once read.
+  // Refuses if the process is still Running — stop it first.
+  dismissProcess: (scriptId: string) =>
+    callRaw<null>('dismiss_process', { scriptId }),
   restartProcess: (projectId: string, scriptId: string) =>
     callRaw<number>('restart_process', { projectId, scriptId }),
   listProcesses: () =>
@@ -216,6 +218,15 @@ export const api = {
   // S1: declared-port APIs (backend lookup_script scans all projects)
   portStatusForScript: (scriptId: string) =>
     call('port_status_for_script', { scriptId }, z.array(DeclaredPortStatusSchema)),
+  // WS3: batch status for many scripts in one IPC call. Backend builds the
+  // ps/lsof ownership snapshot once instead of once per script. Returns a
+  // [scriptId, statuses] tuple list; callers fold it into a Record.
+  portStatusAll: (scriptIds: string[]) =>
+    call(
+      'port_status_all',
+      { scriptIds },
+      z.array(z.tuple([z.string(), z.array(DeclaredPortStatusSchema)])),
+    ),
   checkPortConflicts: (scriptId: string) =>
     call('check_port_conflicts', { scriptId }, z.array(PortConflictSchema)),
   listPortsForScript: (scriptId: string) =>
@@ -367,6 +378,7 @@ export type {
   RuntimePortInfo,
   RuntimeDelta,
   ProcessSnapshot,
+  ProcessKind,
   RuntimeSnapshot,
   RuntimePortsSnapshot,
   StatusEvent,

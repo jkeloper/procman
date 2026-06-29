@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
 
-let panel: ProcmanPanel | undefined;
-
 export function activate(context: vscode.ExtensionContext) {
   // Register webview provider for sidebar
   const provider = new ProcmanViewProvider(context.extensionUri);
@@ -171,8 +169,12 @@ function getSidebarHtml(serverUrl: string, token: string): string {
 
     function connectWS() {
       if (ws) ws.close();
-      const wsUrl = SERVER.replace(/^http/, 'ws') + '/api/stream?token=' + encodeURIComponent(TOKEN);
-      ws = new WebSocket(wsUrl);
+      const wsUrl = SERVER.replace(/^http/, 'ws') + '/api/stream';
+      // Server authenticates the WS handshake via the Sec-WebSocket-Protocol
+      // header (see app/src-tauri/src/server/auth.rs extract_bearer): it strips
+      // the 'procman-token.' prefix off each offered subprotocol. The token is
+      // URL-safe base64 so it is safe to embed verbatim.
+      ws = new WebSocket(wsUrl, ['procman-token.' + TOKEN]);
       ws.onopen = () => { connected = true; renderStatus(); };
       ws.onclose = () => { connected = false; renderStatus(); setTimeout(connectWS, 3000); };
       ws.onmessage = (e) => {
@@ -333,8 +335,10 @@ function getLogPanelHtml(
 
     // WebSocket
     function connectWS() {
-      const url = SERVER.replace(/^http/, 'ws') + '/api/stream?token=' + encodeURIComponent(TOKEN);
-      const ws = new WebSocket(url);
+      const url = SERVER.replace(/^http/, 'ws') + '/api/stream';
+      // Authenticate via Sec-WebSocket-Protocol (see auth.rs extract_bearer);
+      // query-string tokens are ignored by the server.
+      const ws = new WebSocket(url, ['procman-token.' + TOKEN]);
       ws.onopen = () => { connected = true; dotEl.className = 'dot dot-ok'; };
       ws.onclose = () => { connected = false; dotEl.className = 'dot dot-off'; setTimeout(connectWS, 3000); };
       ws.onmessage = (e) => {

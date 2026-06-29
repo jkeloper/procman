@@ -7,6 +7,7 @@ import {
   type Project,
 } from '@/api/tauri';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { Button } from '@/components/ui/button';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
@@ -22,6 +23,7 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const confirm = useConfirm();
+  const toast = useToast();
 
   const reload = useCallback(async () => {
     try {
@@ -46,7 +48,7 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
 
   async function registerAndRun(tunnel: NamedTunnel) {
     if (projects.length === 0) {
-      alert('Create a project first, then come back here.');
+      toast.show('Create a project first, then come back here.', 'info');
       return;
     }
     const proj = projects[0];
@@ -56,14 +58,16 @@ export function CloudflareTunnelsCard({ projects, onProjectsChanged }: Props) {
         proj.id,
         `cf: ${tunnel.name}`,
         `cloudflared tunnel run ${tunnel.name}`,
-        null,
         false,
       );
       onProjectsChanged();
       await api.spawnProcess(proj.id, script.id);
       await reload();
     } catch (e: any) {
-      alert(`Failed: ${e?.message ?? e}`);
+      toast.error(`Failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void registerAndRun(tunnel),
+      });
     } finally {
       setBusy(null);
     }

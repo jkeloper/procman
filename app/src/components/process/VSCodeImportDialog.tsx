@@ -106,8 +106,9 @@ export function VSCodeImportDialog({
             projectId,
             c.script.name,
             c.script.command,
-            c.script.expected_port,
             c.script.auto_restart,
+            null,
+            c.script.ports,
           );
         } catch (e: any) {
           errors.push(`${c.name}: ${e?.message ?? e}`);

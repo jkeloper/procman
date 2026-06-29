@@ -4,14 +4,13 @@ import { z } from 'zod';
 
 // --- Persisted config types ---
 
-export const PortProtoSchema = z.enum(['tcp']);
-export type PortProto = z.infer<typeof PortProtoSchema>;
-
 export const PortSpecSchema = z.object({
   name: z.string(),
   number: z.number().int().min(1).max(65535),
   bind: z.string().default('127.0.0.1'),
-  proto: PortProtoSchema.default('tcp'),
+  // WS7-2: `proto` was removed (always TCP). Legacy configs still carry a
+  // `proto: 'tcp'` key on the wire — zod strips unknown keys by default, so
+  // it is silently ignored.
   optional: z.boolean().default(false),
   note: z.string().nullable().default(null),
 });
@@ -37,7 +36,9 @@ export const ScriptSchema = z.object({
   id: z.string(),
   name: z.string(),
   command: z.string(),
-  expected_port: z.number().int().min(1).max(65535).nullable().default(null),
+  // WS7-2: `expected_port` was removed — `ports[]` is the single
+  // authoritative declared-port source. Legacy configs/wire payloads may
+  // still send it; zod strips the unknown key.
   ports: z.array(PortSpecSchema).default([]),
   auto_restart: z.boolean().default(false),
   // v3: Optional structured policy. null = fall back to `auto_restart`.
@@ -114,6 +115,16 @@ export type AppConfig = z.infer<typeof AppConfigSchema>;
 export const RuntimeStatusSchema = z.enum(['running', 'stopped', 'crashed']);
 export type RuntimeStatus = z.infer<typeof RuntimeStatusSchema>;
 
+// WS9: which backend owns a running entry. `piped` is the default (stdout/
+// stderr-captured spawn watched by `ProcessManager`); `pty` is an interactive
+// terminal-backed run (`register_pty`). Both now live in the same lifecycle
+// owner, so the only FE-visible difference is this discriminator + how output
+// is rendered. Defaults to `piped` so payloads from an older backend (which
+// omit the field) deserialize as a piped run — matching Rust's
+// `#[serde(default)]` on `ProcessSnapshot.kind`.
+export const ProcessKindSchema = z.enum(['piped', 'pty']);
+export type ProcessKind = z.infer<typeof ProcessKindSchema>;
+
 export const StatusEventSchema = z.object({
   id: z.string(),
   status: RuntimeStatusSchema,
@@ -155,6 +166,9 @@ export const ProcessSnapshotSchema = z.object({
   rss_kb: z.number().int().nullable().default(null),
   wrapper_pid: z.number().int().nullable().default(null),
   bound_at_ms: z.number().int().nullable().default(null),
+  // WS9: backend owner — `piped` (default) or `pty`. Lets the UI distinguish a
+  // terminal-backed run from a piped run (e.g. the terminal badge in ScriptRow).
+  kind: ProcessKindSchema.default('piped'),
 });
 export type ProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 

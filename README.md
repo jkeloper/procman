@@ -12,10 +12,11 @@ Mac-only process manager GUI for solo developers juggling many local servers, tu
 
 **v0.2.0 release candidate.** Post-MVP S1–S5 shipped; the project is in final packaging, signing, and docs hardening.
 
-Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **179 tests passing** on the backend and **36 tests passing** on the frontend.
+Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **215 tests passing** on the backend and **52 tests passing** on the frontend.
 
 ## Features
 
+- **Mission Control** — One global "All running" view aggregates every running/crashed process across all your projects on a single screen (crashed first, per-project labels, total CPU/RSS), with inline stop/restart/dismiss and multi-project log tracking — so you never have to dig into projects one by one to see what's alive.
 - **Scripts** — Auto-detect `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json`; start/stop/restart with one click; login-shell (`zsh -l -c`) wrapping so `nvm`/`pyenv` PATHs survive.
 - **Logs & terminal** — 5,000-line ring buffer per process, virtualized (`react-window`), ANSI color rendering, substring search, multi-tab switching, tear-off log windows, and an xterm.js PTY shell for interactive scripts. Backed by a SQLite FTS index for persistent history.
 - **Ports** — Declarative `PortSpec` (multi-port per script) + visibility-aware `lsof` polling + 400ms TCP liveness probes; one-click kill on conflicts.
@@ -29,17 +30,13 @@ Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare 
 
 ## Quick Start
 
-Install the latest signed DMG once the release is published:
+Download the latest signed, notarized DMG (Apple Silicon) — no quarantine workaround needed:
 
 ```bash
-# Option A — one-liner installer
-curl -fsSL https://raw.githubusercontent.com/jkeloper/procman/main/scripts/install.sh | bash
-
-# Option B — download the DMG directly
 open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0_aarch64.dmg"
 ```
 
-The DMG is signed and notarized; no quarantine workaround needed.
+Prefer building it yourself? `scripts/install.sh` builds and installs from a cloned checkout — see [Build from Source](#build-from-source).
 
 ## Build from Source
 
@@ -75,11 +72,11 @@ For day-to-day work prefer `pnpm tauri dev`; `watch-install.sh` is for "keep the
 ## Testing
 
 ```bash
-# Rust (backend) — 179 unit tests
+# Rust (backend) — 215 unit tests
 cd app/src-tauri
 cargo test --lib
 
-# Frontend — 36 tests
+# Frontend — 52 tests
 cd app
 pnpm test
 ```
@@ -93,7 +90,7 @@ procman/
 │   └── src-tauri/        # Rust backend (tokio, axum, dashmap, notify)
 ├── mobile/               # PWA + Capacitor iOS shell
 ├── vscode-extension/     # Sidebar extension (process control)
-├── scripts/              # install.sh, watch-install.sh, release.sh
+├── scripts/              # install.sh, watch-install.sh, release.sh, lib-build.sh
 ├── web/                  # Landing site (procman.kr)
 └── spikes/               # Week 0 spike verdicts (archival)
 ```
@@ -148,10 +145,11 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 **v0.2.0 릴리스 후보.** Post-MVP S1~S5는 반영됐고, 현재 패키징·서명·문서 하드닝 단계.
 
-스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **179개 테스트 통과**, 프론트엔드 **36개 테스트 통과**.
+스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **215개 테스트 통과**, 프론트엔드 **52개 테스트 통과**.
 
 ## 기능
 
+- **Mission Control** — 전역 "All running" 뷰가 전 프로젝트의 running/crashed 프로세스를 한 화면에 집계(crashed 우선, 프로젝트 라벨, 전체 CPU/RSS)하고, 인라인 stop/restart/dismiss + 다중 프로젝트 로그 추적을 제공 — 프로젝트를 하나씩 들어가 보지 않아도 무엇이 살아있는지 즉시 파악.
 - **스크립트** — `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json` 자동 감지, 원클릭 start/stop/restart, `zsh -l -c` 로그인 쉘 래핑으로 `nvm`/`pyenv` PATH 보존.
 - **로그 & 터미널** — 프로세스당 5,000라인 ring buffer, `react-window` 가상 스크롤, ANSI 컬러 렌더링, substring 검색, 멀티탭, 분리 로그 창, interactive script용 xterm.js PTY 셸. SQLite FTS 인덱스로 영구 히스토리 지원.
 - **포트** — 선언형 `PortSpec`(스크립트별 멀티 포트) + 2초 `lsof` 폴링 + 400ms TCP liveness probe, 충돌 시 원클릭 kill.
@@ -165,17 +163,13 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 ## 빠른 시작
 
-릴리스가 게시된 뒤 최신 서명 DMG 설치:
+서명·노터라이즈된 최신 DMG(Apple Silicon)를 받으세요 — quarantine 우회 불필요:
 
 ```bash
-# 옵션 A — 원라이너 설치 스크립트
-curl -fsSL https://raw.githubusercontent.com/jkeloper/procman/main/scripts/install.sh | bash
-
-# 옵션 B — DMG 직접 다운로드
 open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0_aarch64.dmg"
 ```
 
-DMG는 서명·노터라이즈되어 있어 quarantine 우회 불필요.
+직접 빌드하려면 `scripts/install.sh`가 클론된 체크아웃에서 빌드·설치합니다 — [소스 빌드](#build-from-source) 참고.
 
 ## 소스 빌드
 
@@ -211,11 +205,11 @@ brew install fswatch
 ## 테스트
 
 ```bash
-# Rust 백엔드 — 179개 unit test
+# Rust 백엔드 — 215개 unit test
 cd app/src-tauri
 cargo test --lib
 
-# 프론트엔드 — 36개 test
+# 프론트엔드 — 52개 test
 cd app
 pnpm test
 ```
@@ -229,7 +223,7 @@ procman/
 │   └── src-tauri/        # Rust 백엔드 (tokio, axum, dashmap, notify)
 ├── mobile/               # PWA + Capacitor iOS 셸
 ├── vscode-extension/     # 사이드바 확장 (프로세스 제어)
-├── scripts/              # install.sh, watch-install.sh, release.sh
+├── scripts/              # install.sh, watch-install.sh, release.sh, lib-build.sh
 ├── web/                  # 랜딩 사이트 (procman.kr)
 └── spikes/               # Week 0 스파이크 판정 (archival)
 ```

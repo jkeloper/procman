@@ -86,8 +86,16 @@ pub(crate) async fn wait_for_dependencies(
     };
 
     loop {
-        let running: std::collections::HashSet<String> =
-            pm.list().into_iter().map(|s| s.id).collect();
+        // WS2: a retained `Crashed` entry is still tracked by the manager
+        // but is NOT a satisfied dependency — only count actively Running
+        // scripts so a crashed dep keeps the dependent waiting (or times out
+        // with a clear "not running" message).
+        let running: std::collections::HashSet<String> = pm
+            .list()
+            .into_iter()
+            .filter(|s| s.status == crate::process::RuntimeStatus::Running)
+            .map(|s| s.id)
+            .collect();
         let mut pending: Vec<String> = Vec::new();
         for dep in &dep_scripts {
             if !running.contains(&dep.id) {
@@ -121,9 +129,15 @@ pub async fn kill_process(
     script_id: String,
     state: tauri::State<'_, Arc<AppState>>,
     pm: tauri::State<'_, ProcessManager>,
+    runtime: tauri::State<'_, Arc<crate::runtime_state::RuntimeStore>>,
 ) -> Result<(), String> {
     let timeout_ms = shutdown_timeout_ms(&state).await;
-    pm.kill_with_timeout(&script_id, timeout_ms).await
+    let res = pm.kill_with_timeout(&script_id, timeout_ms).await;
+    // WS5: user-explicit stop — drop it from the session-restore set after the
+    // kill completes (kill() itself never touches last_running so restart /
+    // shutdown paths stay intact).
+    runtime.mark_running(&script_id, false).await;
+    res
 }
 
 /// v3 고도화 6: Graceful stop. Resolves all scripts that declare
@@ -138,11 +152,20 @@ pub async fn stop_script_graceful(
     script_id: String,
     state: tauri::State<'_, Arc<AppState>>,
     pm: tauri::State<'_, ProcessManager>,
+    runtime: tauri::State<'_, Arc<crate::runtime_state::RuntimeStore>>,
 ) -> Result<(), String> {
     let dependents = resolve_dependents(&state, &script_id).await?;
     let timeout_ms = shutdown_timeout_ms(&state).await;
-    pm.stop_script_graceful_with_timeout(&script_id, &dependents, timeout_ms)
-        .await
+    let res = pm
+        .stop_script_graceful_with_timeout(&script_id, &dependents, timeout_ms)
+        .await;
+    // WS5: this stop also tears down the dependent chain — drop every script
+    // it stopped from the session-restore set (user-explicit stop).
+    for dep_id in &dependents {
+        runtime.mark_running(dep_id, false).await;
+    }
+    runtime.mark_running(&script_id, false).await;
+    res
 }
 
 /// Return every script id whose transitive `depends_on` graph contains
@@ -173,6 +196,32 @@ async fn resolve_dependents(state: &AppState, target_id: &str) -> Result<Vec<Str
         }
     }
     Ok(dependents)
+}
+
+/// WS2: dismiss a retained `Crashed` entry. After a terminal crash the
+/// watcher keeps the entry (and its LogBuffer) so the user can read the
+/// post-mortem log. This command lets the UI clear it once read. It refuses
+/// to dismiss a live (Running) process — the user must `stop` it first —
+/// guarding against accidentally dropping the buffer of a running script.
+/// A no-op (Ok) when the entry is already gone.
+#[tauri::command]
+pub async fn dismiss_process(
+    script_id: String,
+    pm: tauri::State<'_, ProcessManager>,
+    pty: tauri::State<'_, crate::commands::pty::PtyManager>,
+    runtime: tauri::State<'_, Arc<crate::runtime_state::RuntimeStore>>,
+) -> Result<(), String> {
+    if pm.is_live(&script_id) {
+        return Err("process is still running — stop it first".to_string());
+    }
+    pm.dismiss(&script_id);
+    // WS9: a dismissed entry may have been PTY-backed. Drop any leftover I/O
+    // session (reader/writer/scrollback) so the PtyManager doesn't strand it.
+    pty.remove_io_for_script(&script_id);
+    // WS5: dismissing a retained Crashed entry means the user acknowledged it —
+    // remove it from the session-restore set so it isn't proposed next launch.
+    runtime.mark_running(&script_id, false).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -237,8 +286,12 @@ pub async fn force_quit(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     let timeout_ms = shutdown_timeout_ms(&state).await;
+    // WS9: PTY processes are pm entries, but their I/O sessions live in the
+    // PtyManager. Route PTY stops first (this kills via `pm.kill` AND drops the
+    // I/O reader/writer/buffer), then kill the remaining piped entries. PTY
+    // entries already removed by the first pass are no-ops in the second.
+    pty.kill_all(&pm).await;
     pm.kill_all_with_timeout(timeout_ms).await;
-    pty.kill_all();
     app.exit(0);
     Ok(())
 }

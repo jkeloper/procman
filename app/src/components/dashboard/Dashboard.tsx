@@ -6,29 +6,33 @@ import { CloudflareTunnelsCard } from './CloudflareTunnelsCard';
 import { DockerComposeCard } from './DockerComposeCard';
 import { RemoteAccessCard } from '@/components/remote/RemoteAccessCard';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { useProcessStatus } from '@/hooks/useProcessStatus';
-import { LayoutDashboard, Network, Play, Globe } from 'lucide-react';
+import { AllRunningView } from './AllRunningView';
+import { Activity, LayoutDashboard, Network, Play, Globe } from 'lucide-react';
 
 interface Props {
   projects: Project[];
   onSelectProject?: (id: string | null) => void;
 }
 
-type Tab = 'dashboard' | 'ports' | 'groups' | 'network';
+type Tab = 'running' | 'dashboard' | 'ports' | 'groups' | 'network';
 
 const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+  { key: 'running', label: 'All running', icon: <Activity size={16} /> },
+  { key: 'dashboard', label: 'Overview', icon: <LayoutDashboard size={16} /> },
   { key: 'ports', label: 'Ports', icon: <Network size={16} /> },
   { key: 'groups', label: 'Groups', icon: <Play size={16} /> },
   { key: 'network', label: 'Network', icon: <Globe size={16} /> },
 ];
 
 export function Dashboard({ projects, onSelectProject }: Props) {
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = useState<Tab>('running');
   const [killing, setKilling] = useState<number | null>(null);
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const confirm = useConfirm();
-  const { ports, runtimeLoading, refreshRuntime } = useProcessStatus();
+  const toast = useToast();
+  const { ports, statuses, runtimeLoading, refreshRuntime } = useProcessStatus();
 
   const reloadAliases = useCallback(async () => {
     try {
@@ -49,7 +53,10 @@ export function Dashboard({ projects, onSelectProject }: Props) {
       await api.killPort(port);
       await refreshRuntime();
     } catch (e: any) {
-      alert(`Kill failed: ${e?.message ?? e}`);
+      toast.error(`Kill failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void handleKill(port),
+      });
     } finally {
       setKilling(null);
     }
@@ -73,15 +80,12 @@ export function Dashboard({ projects, onSelectProject }: Props) {
     }
   }
 
-  // Build match map: declared/legacy ports, then authoritative runtime owner.
+  // Build match map: declared ports, then authoritative runtime owner.
   const expectedPortMap = new Map<number, { project: string; script: string }>();
   for (const p of projects) {
     for (const sc of p.scripts) {
       for (const spec of sc.ports ?? []) {
         expectedPortMap.set(spec.number, { project: p.name, script: sc.name });
-      }
-      if (sc.expected_port != null) {
-        expectedPortMap.set(sc.expected_port, { project: p.name, script: sc.name });
       }
     }
   }
@@ -100,6 +104,10 @@ export function Dashboard({ projects, onSelectProject }: Props) {
   const matched = ports.filter((p) => expectedPortMap.has(p.port) || p.managed);
   const others = ports.filter((p) => !expectedPortMap.has(p.port) && !p.managed);
   const totalScripts = projects.reduce((n, p) => n + p.scripts.length, 0);
+  // Count of live + crashed scripts for the "All running" tab badge.
+  const activeCount = Object.values(statuses).filter(
+    (s) => s === 'running' || s === 'crashed',
+  ).length;
 
   return (
     <div className="flex h-full flex-col">
@@ -124,6 +132,11 @@ export function Dashboard({ projects, onSelectProject }: Props) {
             >
               <span className="flex items-center">{t.icon}</span>
               {t.label}
+              {t.key === 'running' && activeCount > 0 && (
+                <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[12px] font-mono text-primary">
+                  {activeCount}
+                </span>
+              )}
               {t.key === 'ports' && (
                 <span className="ml-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[12px] font-mono">
                   {ports.length}
@@ -137,6 +150,10 @@ export function Dashboard({ projects, onSelectProject }: Props) {
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-5xl px-6 py-4">
+
+          {tab === 'running' && (
+            <AllRunningView projects={projects} onSelectProject={onSelectProject} />
+          )}
 
           {tab === 'dashboard' && (
             <div className="space-y-5">

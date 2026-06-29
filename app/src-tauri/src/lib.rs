@@ -77,7 +77,12 @@ pub fn run() {
         .manage(app_state)
         .manage(runtime_store)
         .setup(move |app| {
-            let pm = ProcessManager::new(app.handle().clone());
+            // WS5: clone the RuntimeStore *before* creating the ProcessManager
+            // so the manager can own `last_running` (mark running on spawn,
+            // clear on user-stop / clean self-exit). The store is already
+            // `manage`d above; this just hands a clone to the PM.
+            let rs_for_pm = app.state::<Arc<RuntimeStore>>().inner().clone();
+            let pm = ProcessManager::new(app.handle().clone(), rs_for_pm);
             // Apply log capacity from settings (best-effort, non-blocking).
             if let Some(state) = app.try_state::<Arc<AppState>>() {
                 if let Ok(cfg) = state.config.try_lock() {
@@ -139,11 +144,6 @@ pub fn run() {
                             for spec in &script.ports {
                                 script_ports.push((script.id.clone(), spec.number));
                             }
-                            if script.ports.is_empty() {
-                                if let Some(port) = script.expected_port {
-                                    script_ports.push((script.id.clone(), port));
-                                }
-                            }
                         }
                     }
                     drop(cfg);
@@ -155,7 +155,7 @@ pub fn run() {
             // Orphan cleanup: if procman was force-killed last time,
             // child processes may still hold ports. For each script
             // that was running in the previous session, kill anything
-            // occupying its expected_port so the user can restart
+            // occupying its declared ports so the user can restart
             // cleanly without manual port cleanup.
             //
             // H6: verify the holder is plausibly ours before killing.
@@ -179,18 +179,10 @@ pub fn run() {
                     for project in &cfg.projects {
                         for script in &project.scripts {
                             if snap.last_running.contains(&script.id) {
-                                // S1: prefer declared ports list, fall back to legacy expected_port.
-                                if !script.ports.is_empty() {
-                                    for spec in &script.ports {
-                                        ports_to_clean.push((
-                                            spec.number,
-                                            project.path.clone(),
-                                            script.command.clone(),
-                                        ));
-                                    }
-                                } else if let Some(port) = script.expected_port {
+                                // ports[] is the authoritative declared-port source.
+                                for spec in &script.ports {
                                     ports_to_clean.push((
-                                        port,
+                                        spec.number,
                                         project.path.clone(),
                                         script.command.clone(),
                                     ));
@@ -223,7 +215,14 @@ pub fn run() {
                             log::info!("orphan cleanup: freed port {}", port);
                         }
                     }
-                    let _ = rs.clear_last_running().await;
+                    // WS5: do NOT clear last_running here. Orphan *port*
+                    // cleanup and the session-restore set are orthogonal, and
+                    // since WS5 made last_running the authoritative restore
+                    // truth, clearing it in this startup task races the
+                    // RestorePrompt's `get_last_running` read — if cleanup won,
+                    // the user silently lost the restore-on-launch prompt.
+                    // RestorePrompt owns consumption: it calls
+                    // `clear_last_running` on both restore and dismiss.
                 });
             }
 
@@ -253,12 +252,14 @@ pub fn run() {
             commands::stop_group,
             // Session
             commands::get_last_running,
+            commands::last_running_ordered,
             commands::clear_last_running,
             commands::mark_last_running,
             // Processes
             commands::spawn_process,
             commands::kill_process,
             commands::stop_script_graceful,
+            commands::dismiss_process,
             commands::restart_process,
             commands::list_processes,
             commands::runtime_snapshot,
@@ -276,6 +277,7 @@ pub fn run() {
             commands::list_descendant_pids,
             // S1: declared-port APIs
             commands::port_status_for_script,
+            commands::port_status_all,
             commands::check_port_conflicts,
             commands::list_ports_for_script,
             // VSCode scan
@@ -330,12 +332,12 @@ pub fn run() {
                         return;
                     }
                     if let Some(pm) = window.try_state::<ProcessManager>() {
-                        let running = pm.list().len();
-                        let pty_count = window
-                            .try_state::<commands::pty::PtyManager>()
-                            .map(|pty| pty.active_count())
-                            .unwrap_or(0);
-                        let count = running + pty_count;
+                        // WS9: PTY processes are now ProcessManager entries
+                        // (registered via `register_pty`), so `pm.list()`
+                        // already counts them. We must NOT add the PtyManager's
+                        // I/O-session count on top or running PTYs would be
+                        // double-counted in the confirm-quit prompt.
+                        let count = pm.list().len();
                         if count > 0 {
                             api.prevent_close();
                             let _ = window.emit("procman://confirm-quit", count);

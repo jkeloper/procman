@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
 import AnsiToHtml from 'ansi-to-html';
 import { useLogStream } from '@/hooks/useLogStream';
+import { useProcessStatus } from '@/hooks/useProcessStatus';
+import { useToast } from '@/components/Toast';
 import { api, type LogLine } from '@/api/tauri';
 
 const TerminalPanel = lazy(() =>
@@ -111,9 +113,27 @@ function Row({ index, style, lines, query, cache }: RowComponentProps<RowPropsWi
 
 export function LogPanel({ scriptId, scriptName, projectId }: Props) {
   const { lines, clear } = useLogStream(scriptId);
+  const { statuses, kinds } = useProcessStatus();
+  const toast = useToast();
   const listRef = useRef<ListImperativeAPI>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'logs' | 'terminal'>('logs');
+
+  // WS9: switching to the terminal tab while this script is a live *piped*
+  // run will (via the backend's single lifecycle owner) kill the piped
+  // process and re-spawn it in a PTY — the double-run guard refuses two live
+  // entries for one script. Warn the user before that swap so the restart is
+  // not a surprise. (terminal→piped, the reverse, kills-first the same way
+  // through the normal Start button.)
+  function enterTerminalMode() {
+    if (scriptId && statuses[scriptId] === 'running' && kinds[scriptId] !== 'pty') {
+      toast.show(
+        'Restarting in an interactive terminal — the piped run will be stopped first.',
+        'info',
+      );
+    }
+    setMode('terminal');
+  }
   const [autoScroll, setAutoScroll] = useState(true);
   const [query, setQuery] = useState('');
   const [showStdout, setShowStdout] = useState(true);
@@ -254,7 +274,7 @@ export function LogPanel({ scriptId, scriptName, projectId }: Props) {
           </button>
           {projectId && (
             <button
-              onClick={() => setMode('terminal')}
+              onClick={enterTerminalMode}
               className={`rounded px-2 py-0.5 transition-colors ${
                 mode === 'terminal'
                   ? 'bg-foreground/10 text-log-fg'

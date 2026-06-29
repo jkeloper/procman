@@ -38,6 +38,7 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/processes/:id/start", post(start_process))
         .route("/api/processes/:id/stop", post(stop_process))
         .route("/api/processes/:id/restart", post(restart_process))
+        .route("/api/groups/:id/run", post(run_group))
         .route("/api/projects", get(list_projects))
         .route("/api/ports", get(list_ports))
         .route(
@@ -46,6 +47,7 @@ pub fn build_router(state: ServerState) -> Router {
         )
         .route("/api/logs/:id", get(log_snapshot))
         .route("/api/logs/:id/search", get(search_log))
+        .route("/api/ports/status", post(port_status_batch))
         .route("/api/ports/:script_id/status", get(port_status))
         .route("/api/ports/:script_id/conflicts", get(port_conflicts))
         .route("/api/ports/:script_id/list", get(ports_for_script))
@@ -207,7 +209,6 @@ async fn list_projects(State(state): State<ServerState>) -> Json<serde_json::Val
                     "id": s.id,
                     "name": s.name,
                     "command": s.command,
-                    "expected_port": s.expected_port,
                     "ports": s.ports,
                     "auto_restart": s.auto_restart,
                     "schedule": s.schedule,
@@ -347,7 +348,11 @@ async fn stop_process(
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let timeout_ms = shutdown_timeout_ms(&state).await;
-    match state.pm.kill_with_timeout(&id, timeout_ms).await {
+    let res = state.pm.kill_with_timeout(&id, timeout_ms).await;
+    // WS5: remote stop is a user-explicit stop — drop it from the
+    // session-restore set (kill() leaves last_running untouched on purpose).
+    state.pm.runtime_store().mark_running(&id, false).await;
+    match res {
         Ok(_) => {
             state.audit.record("stop", &id, true, None).await;
             Ok(StatusCode::NO_CONTENT)
@@ -413,6 +418,50 @@ async fn restart_process(
     }
 }
 
+/// WS8: remote group batch-run. Delegates to the exact same
+/// `commands::group::run_group_core` the desktop uses, so ordering,
+/// depends_on readiness gating, port-conflict blocking and partial-success
+/// reporting are identical across desktop and phone. The whole-group outcome
+/// is audited (`run_group`), and each launch additionally lands a per-member
+/// `start` audit entry mirroring the single-process route so the audit log
+/// reads the same whether a script was started solo or via a group.
+async fn run_group(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<crate::commands::group::GroupRunResult>>, StatusCode> {
+    match crate::commands::group::run_group_core(&id, state.app_state.as_ref(), &state.pm).await {
+        Ok(results) => {
+            for r in &results {
+                let detail = match (r.ok, &r.error, r.pid) {
+                    (true, _, Some(pid)) => Some(format!("pid {}", pid)),
+                    (false, Some(e), _) => Some(e.clone()),
+                    _ => None,
+                };
+                state
+                    .audit
+                    .record("start", &r.script_id, r.ok, detail)
+                    .await;
+            }
+            let started = results.iter().filter(|r| r.ok).count();
+            state
+                .audit
+                .record(
+                    "run_group",
+                    &id,
+                    results.iter().all(|r| r.ok),
+                    Some(format!("{}/{} started", started, results.len())),
+                )
+                .await;
+            Ok(Json(results))
+        }
+        Err(e) => {
+            // Group lookup failure (unknown id) — nothing was launched.
+            state.audit.record("run_group", &id, false, Some(e)).await;
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
+}
+
 async fn shutdown_timeout_ms(state: &ServerState) -> u64 {
     let guard = state.app_state.config.lock().await;
     crate::types::clamp_shutdown_timeout_ms(guard.settings.shutdown_timeout_ms)
@@ -447,29 +496,69 @@ async fn port_status(
     let listening = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let ownership = crate::commands::port::build_port_ownership_cache(
+    // WS3: read path → cached ownership snapshot.
+    let ownership = crate::commands::port::build_port_ownership_cache_cached(
         state.app_state.as_ref(),
         &state.pm,
         &listening,
     )
     .await;
-    let managed_pids =
-        crate::commands::port::managed_pids_for_script(&script_id, &listening, &ownership);
-    let mut statuses =
-        crate::commands::port::build_declared_status(&script.ports, &listening, &managed_pids);
-    // TCP probe each port
-    let probes: Vec<_> = statuses
-        .iter()
-        .map(|st| {
-            let bind = st.spec.bind.clone();
-            let port = st.spec.number;
-            tokio::spawn(async move { crate::commands::port::tcp_probe(&bind, port, 400).await })
-        })
-        .collect();
-    for (i, handle) in probes.into_iter().enumerate() {
-        statuses[i].reachable = handle.await.ok();
-    }
+    let statuses = crate::commands::port::declared_status_with_probe(
+        &script_id,
+        &script.ports,
+        &listening,
+        &ownership,
+    )
+    .await;
     Ok(Json(statuses))
+}
+
+/// WS3: batch port status. Body: `{"script_ids": ["a","b",...]}`. Builds the
+/// listening snapshot + ownership view once and classifies every requested
+/// script against it, mirroring the desktop `port_status_all` command so the
+/// mobile client pays one round trip and the server pays one `ps`/`lsof`
+/// build for the whole dashboard poll.
+async fn port_status_batch(
+    State(state): State<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Vec<(String, Vec<crate::commands::port::DeclaredPortStatus>)>>, StatusCode> {
+    let script_ids: Vec<String> = body
+        .get("script_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if script_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let specs_by_id = lookup_scripts_from_state(&state, &script_ids).await;
+
+    let listening = crate::commands::port::list_ports()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let ownership = crate::commands::port::build_port_ownership_cache_cached(
+        state.app_state.as_ref(),
+        &state.pm,
+        &listening,
+    )
+    .await;
+
+    let mut out: Vec<(String, Vec<crate::commands::port::DeclaredPortStatus>)> =
+        Vec::with_capacity(script_ids.len());
+    for id in &script_ids {
+        let statuses = match specs_by_id.get(id) {
+            Some(specs) if !specs.is_empty() => {
+                crate::commands::port::declared_status_with_probe(id, specs, &listening, &ownership)
+                    .await
+            }
+            _ => Vec::new(),
+        };
+        out.push((id.clone(), statuses));
+    }
+    Ok(Json(out))
 }
 
 async fn port_conflicts(
@@ -509,7 +598,8 @@ async fn ports_for_script(
     let all = crate::commands::port::list_ports()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let ownership = crate::commands::port::build_port_ownership_cache(
+    // WS3: read path → cached ownership snapshot.
+    let ownership = crate::commands::port::build_port_ownership_cache_cached(
         state.app_state.as_ref(),
         &state.pm,
         &all,
@@ -538,6 +628,25 @@ async fn lookup_script_from_state(
         }
     }
     None
+}
+
+/// WS3: resolve many script_ids → their declared PortSpecs in one config
+/// lock acquisition (used by the batch status route).
+async fn lookup_scripts_from_state(
+    state: &ServerState,
+    script_ids: &[String],
+) -> std::collections::HashMap<String, Vec<crate::types::PortSpec>> {
+    let wanted: std::collections::HashSet<&str> = script_ids.iter().map(|s| s.as_str()).collect();
+    let guard = state.app_state.config.lock().await;
+    let mut out = std::collections::HashMap::new();
+    for proj in &guard.projects {
+        for s in &proj.scripts {
+            if wanted.contains(s.id.as_str()) {
+                out.insert(s.id.clone(), s.ports.clone());
+            }
+        }
+    }
+    out
 }
 
 fn now_ms() -> i64 {

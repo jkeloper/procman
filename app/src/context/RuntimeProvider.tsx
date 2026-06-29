@@ -9,10 +9,10 @@ import {
   type SetStateAction,
 } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import {
   api,
+  type ProcessKind,
   type RuntimeDelta,
   type RuntimePortInfo,
   type RuntimeSnapshot,
@@ -29,6 +29,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [startTimes, setStartTimes] = useState<Record<string, number>>({});
   const [restartCounts, setRestartCounts] = useState<Record<string, number>>({});
   const [metrics, setMetrics] = useState<Record<string, { cpu: number | null; rss: number | null }>>({});
+  // WS9: scriptId → backend owner (`piped`/`pty`). Sourced from the runtime
+  // snapshot + metrics delta (both carry ProcessSnapshot.kind). Lets the
+  // process rows badge a terminal-backed run. Cleared on a non-running status.
+  const [kinds, setKinds] = useState<Record<string, ProcessKind>>({});
   const [shutdowns, setShutdowns] = useState<Record<string, ShutdownEvent>>({});
   const [ports, setPorts] = useState<RuntimePortInfo[]>([]);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
@@ -43,16 +47,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const p: Record<string, number> = {};
     const t: Record<string, number> = {};
     const m: Record<string, { cpu: number | null; rss: number | null }> = {};
+    const k: Record<string, ProcessKind> = {};
     for (const row of snap.processes) {
       s[row.id] = row.status;
       p[row.id] = row.pid;
       t[row.id] = row.started_at_ms;
       m[row.id] = { cpu: row.cpu_pct, rss: row.rss_kb };
+      k[row.id] = row.kind;
     }
     setStatuses((prev) => ({ ...prev, ...s }));
     setPids((prev) => ({ ...prev, ...p }));
     setStartTimes((prev) => ({ ...prev, ...t }));
     setMetrics((prev) => ({ ...prev, ...m }));
+    setKinds((prev) => ({ ...prev, ...k }));
     setRuntimeLoading(false);
   }, []);
 
@@ -64,6 +71,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           const next: Record<string, { cpu: number | null; rss: number | null }> = { ...prev };
           for (const row of delta.processes) {
             next[row.id] = { cpu: row.cpu_pct, rss: row.rss_kb };
+          }
+          return next;
+        });
+        // WS9: metrics rows carry ProcessSnapshot.kind, so this 5s tick picks
+        // up the backend owner for any run that started after the initial
+        // snapshot (e.g. a terminal session opened mid-session).
+        setKinds((prev) => {
+          const next: Record<string, ProcessKind> = { ...prev };
+          for (const row of delta.processes) {
+            next[row.id] = row.kind;
           }
           return next;
         });
@@ -129,9 +146,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         removeKey(setPids, id);
         removeKey(setStartTimes, id);
         removeKey(setMetrics, id);
+        // WS9: drop the kind discriminator once the entry stops/crashes; a
+        // crashed row no longer reflects an active terminal vs piped owner.
+        removeKey(setKinds, id);
       }
 
-      invoke('mark_last_running', { scriptId: id, running: status === 'running' }).catch(() => {});
+      // WS5: `last_running` is now owned by the backend (ProcessManager marks
+      // running on spawn, clears on user-stop / clean self-exit). The FE no
+      // longer mirrors process://status into mark_last_running — that drifted
+      // from the backend truth on window-close / FE-crash / remote spawn.
     });
 
     const unShutdown = listen<ShutdownEvent>('process://shutdown', (ev) => {
@@ -166,6 +189,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       startTimes,
       restartCounts,
       metrics,
+      kinds,
       shutdowns,
       snapshot,
       ports,
@@ -178,6 +202,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       startTimes,
       restartCounts,
       metrics,
+      kinds,
       shutdowns,
       snapshot,
       ports,

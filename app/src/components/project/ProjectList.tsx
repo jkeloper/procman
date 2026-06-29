@@ -24,7 +24,15 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
   // for the parent to reload the projects prop.
   const [order, setOrder] = useState<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then((v) => setVersion(v))
+      .catch(() => setVersion(null));
+  }, []);
 
   // Reset local order whenever the parent changes the project set
   // (add/delete/reload). We compare by id-join so reordering inside
@@ -257,7 +265,7 @@ export function ProjectList({ selectedId, onSelect, projects, onProjectsChanged 
             {' · '}
             {projects.reduce((n, p) => n + p.scripts.length, 0)} scripts
           </span>
-          <span className="font-mono text-muted-foreground/40">v0.1.0</span>
+          <span className="font-mono text-muted-foreground/40">{version ? `v${version}` : ''}</span>
         </div>
       </div>
 

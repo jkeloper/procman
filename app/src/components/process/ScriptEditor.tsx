@@ -60,6 +60,30 @@ const TEMPLATES: Template[] = [
 
 const CATEGORIES = [...new Set(TEMPLATES.map((t) => t.category))];
 
+/**
+ * WS7-2: declare-time autofill helper (no longer a runtime path). Best-effort
+ * port extraction from a shell command string. Catches:
+ *   --port 3000          --port=3000
+ *   -p 3000              -p=3000
+ *   --server.port=4242   --server.port 4242
+ *   PORT=8080            -Dserver.port=4242
+ */
+export function inferPortFromCommand(cmd: string): number | null {
+  const patterns: RegExp[] = [
+    /(?:^|\s)(?:--port|--server\.port|-p|-Dserver\.port)[=\s]+(\d{2,5})\b/,
+    /\bPORT=(\d{2,5})\b/,
+    /\b--server\.port=(\d{2,5})\b/,
+  ];
+  for (const re of patterns) {
+    const m = cmd.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > 0 && n <= 65535) return n;
+    }
+  }
+  return null;
+}
+
 export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved }: Props) {
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
@@ -74,13 +98,20 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
   const [siblings, setSiblings] = useState<Script[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // WS7-3: progressive disclosure. Advanced fields (env_file, depends_on,
+  // structured auto-restart policy, schedule) collapse behind a toggle.
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const confirm = useConfirm();
 
   useEffect(() => {
     if (open) {
       setName(existing?.name ?? '');
       setCommand(existing?.command ?? '');
-      setExpectedPort(existing?.expected_port?.toString() ?? '');
+      // WS7-2: `expected_port` was removed — `ports[]` is authoritative.
+      // The inline field is now a convenience that seeds the first declared
+      // port. Pre-fill it from ports[0] so editing an existing script keeps
+      // the same look.
+      setExpectedPort(existing?.ports?.[0]?.number?.toString() ?? '');
       setPorts(existing?.ports ?? []);
       setAutoRestart(existing?.auto_restart ?? false);
       setAutoRestartPolicy(existing?.auto_restart_policy ?? null);
@@ -88,6 +119,15 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       setScheduleEnabled(existing?.schedule?.enabled ?? false);
       setScheduleCron(existing?.schedule?.cron ?? '0 9 * * 1-5');
       setDependsOn(existing?.depends_on ?? []);
+      // WS7-3: auto-expand Advanced when editing a script that already has any
+      // advanced field configured, so those values stay visible on open.
+      setShowAdvanced(
+        !!existing &&
+          (!!existing.env_file ||
+            (existing.depends_on?.length ?? 0) > 0 ||
+            existing.auto_restart_policy != null ||
+            (existing.schedule?.enabled ?? false)),
+      );
       setErr(null);
       // Load sibling scripts for depends_on picker.
       api
@@ -107,7 +147,6 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
         name: ports.length === 0 ? 'default' : `port${ports.length + 1}`,
         number: nextNumber,
         bind: '127.0.0.1',
-        proto: 'tcp',
         optional: false,
         note: null,
       },
@@ -154,6 +193,15 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
       }
       trimmedPorts.push({ ...p, name: nm });
     }
+    // WS7-2: `ports[]` is the single authoritative source. If the user left
+    // the declared-ports list empty but typed a port in the inline quick
+    // field, fold it into ports[0] as a synthetic "default" spec.
+    let effectivePorts = trimmedPorts;
+    if (effectivePorts.length === 0 && portNum != null) {
+      effectivePorts = [
+        { name: 'default', number: portNum, bind: '127.0.0.1', optional: false, note: null },
+      ];
+    }
     const envVal = envFile.trim() || null;
     const schedule = scheduleEnabled
       ? { enabled: true, cron: scheduleCron.trim() }
@@ -168,11 +216,10 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
         await api.updateScript(projectId, existing.id, {
           name,
           command,
-          expectedPort: portNum,
           autoRestart,
           autoRestartPolicy,
           envFile: envVal,
-          ports: trimmedPorts,
+          ports: effectivePorts,
           dependsOn,
           schedule,
         });
@@ -181,10 +228,9 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           projectId,
           name,
           command,
-          portNum,
           autoRestart,
           envVal,
-          trimmedPorts,
+          effectivePorts,
           dependsOn,
           schedule,
         );
@@ -287,7 +333,8 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           </div>
           {ports.length === 0 ? (
             <div className="rounded-md border border-dashed border-border/50 px-3 py-2 text-[12px] text-muted-foreground/70">
-              No declared ports. Falling back to the <code className="font-mono">expected_port</code> field above.
+              No declared ports. The <span className="font-mono">port</span> field above seeds a single
+              {' '}<code className="font-mono">default</code> port on save.
             </div>
           ) : (
             <ul className="flex flex-col gap-1">
@@ -349,190 +396,226 @@ export function ScriptEditor({ open, onOpenChange, projectId, existing, onSaved 
           )}
         </div>
 
-        {/* M5: Env file path */}
-        <div className="flex items-center gap-2">
-          <span className="shrink-0 text-[13px] font-medium text-muted-foreground">.env file</span>
-          <Input
-            value={envFile}
-            onChange={(e) => setEnvFile(e.target.value)}
-            placeholder=".env or /absolute/path/.env.local"
-            disabled={busy}
-            className="flex-1 border-border/60 bg-muted/30 px-2 py-1 font-mono text-[13px]"
-          />
-        </div>
-
-        {/* S6-05: Structured auto-restart policy */}
-        <div className="flex flex-col gap-1.5">
-          <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={autoRestartPolicy != null}
-              onChange={(e) =>
-                setAutoRestartPolicy(
-                  e.target.checked
-                    ? { enabled: true, max_retries: 5, backoff_ms: 1000, jitter_ms: 500 }
-                    : null,
-                )
-              }
-              disabled={busy}
-              className="accent-primary"
-            />
-            Advanced auto-restart policy
-            <span className="text-[11px] text-muted-foreground/70">
-              (overrides the simple toggle)
-            </span>
-          </label>
-          {autoRestartPolicy && (
-            <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
-              <label className="flex items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
-                  checked={autoRestartPolicy.enabled}
-                  onChange={(e) =>
-                    setAutoRestartPolicy({ ...autoRestartPolicy, enabled: e.target.checked })
-                  }
-                  disabled={busy}
-                  className="accent-primary"
-                />
-                Enabled
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-muted-foreground">Max retries</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={autoRestartPolicy.max_retries}
-                    onChange={(e) =>
-                      setAutoRestartPolicy({
-                        ...autoRestartPolicy,
-                        max_retries: Math.max(0, parseInt(e.target.value, 10) || 0),
-                      })
-                    }
-                    disabled={busy}
-                    className="h-7 font-mono text-[12px]"
-                  />
-                  <span className="text-[10px] text-muted-foreground/70">0 = unlimited</span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-muted-foreground">Backoff (ms)</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={autoRestartPolicy.backoff_ms}
-                    onChange={(e) =>
-                      setAutoRestartPolicy({
-                        ...autoRestartPolicy,
-                        backoff_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
-                      })
-                    }
-                    disabled={busy}
-                    className="h-7 font-mono text-[12px]"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-muted-foreground">Jitter (ms)</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={autoRestartPolicy.jitter_ms}
-                    onChange={(e) =>
-                      setAutoRestartPolicy({
-                        ...autoRestartPolicy,
-                        jitter_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
-                      })
-                    }
-                    disabled={busy}
-                    className="h-7 font-mono text-[12px]"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={scheduleEnabled}
-              onChange={(e) => setScheduleEnabled(e.target.checked)}
-              disabled={busy}
-              className="accent-primary"
-            />
-            Schedule
-          </label>
-          {scheduleEnabled && (
-            <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
-              <span className="shrink-0 text-[12px] text-muted-foreground">Cron</span>
-              <Input
-                value={scheduleCron}
-                onChange={(e) => setScheduleCron(e.target.value)}
-                placeholder="*/30 * * * *"
-                disabled={busy}
-                className="h-8 flex-1 font-mono text-[12px]"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* S4: Depends-on picker */}
-        {siblings.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="text-[13px] font-medium text-muted-foreground">
-              Depends on
-              {dependsOn.length > 0 && (
-                <span className="ml-1.5 text-muted-foreground/60">({dependsOn.length})</span>
-              )}
-            </span>
-            <div className="flex flex-wrap gap-1.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5">
-              {siblings.map((sib) => {
-                const picked = dependsOn.includes(sib.id);
-                return (
-                  <button
-                    type="button"
-                    key={sib.id}
-                    disabled={busy}
-                    onClick={() =>
-                      setDependsOn(
-                        picked
-                          ? dependsOn.filter((id) => id !== sib.id)
-                          : [...dependsOn, sib.id],
-                      )
-                    }
-                    className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors ${
-                      picked
-                        ? 'border-primary bg-primary/15 text-primary'
-                        : 'border-border/50 text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                    }`}
-                    title={
-                      picked
-                        ? 'Click to remove dependency'
-                        : 'Click to require this script to be running first'
-                    }
-                  >
-                    {picked ? '✓ ' : ''}{sib.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Command — large editor-like textarea */}
+        {/* Command — large editor-like textarea (core, always visible) */}
         <div className="flex flex-1 flex-col min-h-0">
           <div className="mb-1.5 text-[13px] font-medium text-muted-foreground">
             Command
           </div>
           <textarea
             value={command}
-            onChange={(e) => setCommand(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCommand(next);
+              // Declare-time convenience: if no ports declared and the quick
+              // port field is empty, infer one from the command string.
+              if (ports.length === 0 && expectedPort.trim() === '') {
+                const inferred = inferPortFromCommand(next);
+                if (inferred != null) setExpectedPort(inferred.toString());
+              }
+            }}
             placeholder="pnpm dev&#10;# or multi-line script..."
             disabled={busy}
             style={{ flex: 1, minHeight: 200 }}
             className="w-full resize-none rounded-lg border border-border/60 bg-log-bg p-4 font-mono text-[14px] leading-relaxed text-foreground placeholder:text-muted-foreground/30 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
             spellCheck={false}
           />
+        </div>
+
+        {/* WS7-3: Advanced — progressive disclosure for power-user fields */}
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            disabled={busy}
+            aria-expanded={showAdvanced}
+            aria-controls="script-editor-advanced"
+            className="flex w-fit items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded"
+          >
+            <span
+              aria-hidden
+              className={`inline-block text-[10px] transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+            >
+              ▶
+            </span>
+            Advanced
+            <span className="text-[11px] text-muted-foreground/70">
+              env file, dependencies, restart policy, schedule
+            </span>
+          </button>
+
+          {showAdvanced && (
+            <div id="script-editor-advanced" className="flex flex-col gap-4">
+              {/* M5: Env file path */}
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[13px] font-medium text-muted-foreground">.env file</span>
+                <Input
+                  value={envFile}
+                  onChange={(e) => setEnvFile(e.target.value)}
+                  placeholder=".env or /absolute/path/.env.local"
+                  disabled={busy}
+                  className="flex-1 border-border/60 bg-muted/30 px-2 py-1 font-mono text-[13px]"
+                />
+              </div>
+
+              {/* S6-05: Structured auto-restart policy */}
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoRestartPolicy != null}
+                    onChange={(e) =>
+                      setAutoRestartPolicy(
+                        e.target.checked
+                          ? { enabled: true, max_retries: 5, backoff_ms: 1000, jitter_ms: 500 }
+                          : null,
+                      )
+                    }
+                    disabled={busy}
+                    className="accent-primary"
+                  />
+                  Advanced auto-restart policy
+                  <span className="text-[11px] text-muted-foreground/70">
+                    (overrides the simple toggle)
+                  </span>
+                </label>
+                {autoRestartPolicy && (
+                  <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+                    <label className="flex items-center gap-2 text-[12px]">
+                      <input
+                        type="checkbox"
+                        checked={autoRestartPolicy.enabled}
+                        onChange={(e) =>
+                          setAutoRestartPolicy({ ...autoRestartPolicy, enabled: e.target.checked })
+                        }
+                        disabled={busy}
+                        className="accent-primary"
+                      />
+                      Enabled
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-muted-foreground">Max retries</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={autoRestartPolicy.max_retries}
+                          onChange={(e) =>
+                            setAutoRestartPolicy({
+                              ...autoRestartPolicy,
+                              max_retries: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            })
+                          }
+                          disabled={busy}
+                          className="h-7 font-mono text-[12px]"
+                        />
+                        <span className="text-[10px] text-muted-foreground/70">0 = unlimited</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-muted-foreground">Backoff (ms)</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={autoRestartPolicy.backoff_ms}
+                          onChange={(e) =>
+                            setAutoRestartPolicy({
+                              ...autoRestartPolicy,
+                              backoff_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            })
+                          }
+                          disabled={busy}
+                          className="h-7 font-mono text-[12px]"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-muted-foreground">Jitter (ms)</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={autoRestartPolicy.jitter_ms}
+                          onChange={(e) =>
+                            setAutoRestartPolicy({
+                              ...autoRestartPolicy,
+                              jitter_ms: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            })
+                          }
+                          disabled={busy}
+                          className="h-7 font-mono text-[12px]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={scheduleEnabled}
+                    onChange={(e) => setScheduleEnabled(e.target.checked)}
+                    disabled={busy}
+                    className="accent-primary"
+                  />
+                  Schedule
+                </label>
+                {scheduleEnabled && (
+                  <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+                    <span className="shrink-0 text-[12px] text-muted-foreground">Cron</span>
+                    <Input
+                      value={scheduleCron}
+                      onChange={(e) => setScheduleCron(e.target.value)}
+                      placeholder="*/30 * * * *"
+                      disabled={busy}
+                      className="h-8 flex-1 font-mono text-[12px]"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* S4: Depends-on picker */}
+              {siblings.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-medium text-muted-foreground">
+                    Depends on
+                    {dependsOn.length > 0 && (
+                      <span className="ml-1.5 text-muted-foreground/60">({dependsOn.length})</span>
+                    )}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5">
+                    {siblings.map((sib) => {
+                      const picked = dependsOn.includes(sib.id);
+                      return (
+                        <button
+                          type="button"
+                          key={sib.id}
+                          disabled={busy}
+                          onClick={() =>
+                            setDependsOn(
+                              picked
+                                ? dependsOn.filter((id) => id !== sib.id)
+                                : [...dependsOn, sib.id],
+                            )
+                          }
+                          className={`rounded border px-2 py-0.5 font-mono text-[12px] transition-colors ${
+                            picked
+                              ? 'border-primary bg-primary/15 text-primary'
+                              : 'border-border/50 text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                          }`}
+                          title={
+                            picked
+                              ? 'Click to remove dependency'
+                              : 'Click to require this script to be running first'
+                          }
+                        >
+                          {picked ? '✓ ' : ''}{sib.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {err && <p className="text-[13px] text-red-500">{err}</p>}

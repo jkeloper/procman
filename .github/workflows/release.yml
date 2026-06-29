@@ -146,10 +146,6 @@ jobs:
               "darwin-aarch64": {
                 "signature": "${SIG_CONTENT}",
                 "url": "${DOWNLOAD_URL}"
-              },
-              "darwin-x86_64": {
-                "signature": "${SIG_CONTENT}",
-                "url": "${DOWNLOAD_URL}"
               }
             }
           }

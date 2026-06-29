@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import type {
+  ProcessKind,
   RuntimeSnapshot,
   RuntimeStatus,
   RuntimePortInfo,
@@ -12,6 +13,8 @@ export interface ProcessStatusState {
   startTimes: Record<string, number>;
   restartCounts: Record<string, number>;
   metrics: Record<string, { cpu: number | null; rss: number | null }>;
+  /** WS9: scriptId → backend owner (`piped`/`pty`) for currently-tracked runs. */
+  kinds: Record<string, ProcessKind>;
   shutdowns: Record<string, ShutdownEvent>;
   snapshot: RuntimeSnapshot | null;
   ports: RuntimePortInfo[];
@@ -25,6 +28,7 @@ export const EMPTY_PROCESS_STATUS: ProcessStatusState = {
   startTimes: {},
   restartCounts: {},
   metrics: {},
+  kinds: {},
   shutdowns: {},
   snapshot: null,
   ports: [],

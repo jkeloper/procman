@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { api } from '@/api/tauri';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { useSettings } from '@/hooks/useSettings';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
@@ -59,6 +60,7 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
     { running: boolean; url: string | null; pid: number | null } | null
   >({ running: false, url: null, pid: null });
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   const reload = useCallback(async () => {
     try {
@@ -83,7 +85,10 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
       );
       setTunnel({ running: true, url: result.url, pid: result.pid });
     } catch (e: any) {
-      alert(`Tunnel failed: ${e?.message ?? e}`);
+      toast.error(`Tunnel failed: ${e?.message ?? e}`, {
+        label: 'Retry',
+        onClick: () => void start(),
+      });
     } finally {
       setBusy(false);
     }
@@ -99,7 +104,6 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
     }
   }
 
-  const toast = useToast();
   function copy(text: string) {
     toast.copy(text, 'Tunnel URL copied');
   }
@@ -175,6 +179,7 @@ export function RemoteAccessCard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const { settings } = useSettings();
+  const confirm = useConfirm();
   const lanOptIn = settings?.lan_mode_opt_in ?? false;
 
   const reload = useCallback(async () => {
@@ -211,7 +216,13 @@ export function RemoteAccessCard() {
   }
 
   async function rotate() {
-    if (!window.confirm('Rotate token? You will need to re-enter on your phone.')) return;
+    const ok = await confirm({
+      title: 'Rotate token?',
+      description: 'You will need to re-enter the new token on your phone.',
+      confirmLabel: 'Rotate',
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await api.rotateToken();

@@ -18,9 +18,17 @@ pub struct RemoteServerState {
 
 impl RemoteServerState {
     pub fn new(initial_token: String) -> Self {
+        // Persist the audit trail to disk so remote mutations (kill/start of
+        // prod-adjacent processes from a phone) survive app restarts. The
+        // rotating writer (5 MB × keep-3) creates the parent dir on open and
+        // degrades to in-memory-only if the path can't be opened.
+        let audit = match crate::server::audit::default_audit_path() {
+            Some(path) => AuditLog::with_file(path),
+            None => AuditLog::new(),
+        };
         Self {
             token: Arc::new(RwLock::new(initial_token)),
-            audit: Arc::new(AuditLog::new()),
+            audit: Arc::new(audit),
             handle: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
@@ -85,18 +93,7 @@ pub async fn start_server(
         }
     }
 
-    let app_state = app.state::<Arc<AppState>>().inner().clone();
-    let pm = app.state::<ProcessManager>().inner().clone();
-
-    let state = ServerState {
-        app_handle: app.clone(),
-        app_state,
-        pm,
-        token: Arc::clone(&remote.token),
-        audit: Arc::clone(&remote.audit),
-    };
-
-    let handle = server::start(state, port, mode).await?;
+    let handle = spawn_server(&app, &remote, port, mode).await?;
     let status = ServerStatus {
         running: true,
         port: Some(handle.port),
@@ -107,6 +104,28 @@ pub async fn start_server(
     };
     *remote.handle.lock().await = Some(handle);
     Ok(status)
+}
+
+/// Build a fresh `ServerState` from the live Tauri state and start the axum
+/// server. Shared by `start_server` and the token-rotation restart path so
+/// both construct the server identically.
+async fn spawn_server(
+    app: &AppHandle,
+    remote: &RemoteServerState,
+    port: u16,
+    mode: ServerMode,
+) -> Result<server::ServerHandle, String> {
+    let app_state = app.state::<Arc<AppState>>().inner().clone();
+    let pm = app.state::<ProcessManager>().inner().clone();
+
+    let state = ServerState {
+        app_handle: app.clone(),
+        app_state,
+        pm,
+        token: Arc::clone(&remote.token),
+        audit: Arc::clone(&remote.audit),
+    };
+    server::start(state, port, mode).await
 }
 
 #[tauri::command]
@@ -120,6 +139,7 @@ pub async fn stop_server(remote: tauri::State<'_, RemoteServerState>) -> Result<
 
 #[tauri::command]
 pub async fn rotate_token(
+    app: AppHandle,
     remote: tauri::State<'_, RemoteServerState>,
     store: tauri::State<'_, Arc<RuntimeStore>>,
 ) -> Result<String, String> {
@@ -129,6 +149,39 @@ pub async fn rotate_token(
         .set_remote_token(new_token.clone())
         .await
         .map_err(|e| e.to_string())?;
+
+    // Token auth is only checked at the HTTP/WS handshake, so already-open
+    // WebSockets would otherwise keep streaming under the old credential.
+    // Bounce the server (if running) on the same port/mode: graceful
+    // shutdown drops every active connection, forcing clients to re-handshake
+    // with the new token. The QR/pairing payload is derived from the token,
+    // so the desktop UI re-renders it after this returns.
+    let prev = {
+        let mut guard = remote.handle.lock().await;
+        guard.take()
+    };
+    if let Some(h) = prev {
+        let port = h.port;
+        let mode = h.mode;
+        let _ = h.shutdown.send(());
+        // Give the listener a beat to release the socket before re-binding.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        match spawn_server(&app, &remote, port, mode).await {
+            Ok(new_handle) => {
+                *remote.handle.lock().await = Some(new_handle);
+            }
+            Err(e) => {
+                // Restart failed: leave the server stopped rather than running
+                // with stale active sockets. The user can start it again.
+                log::warn!("server restart after token rotation failed: {}", e);
+                return Err(format!(
+                    "token rotated but server restart failed: {}. Start the server again.",
+                    e
+                ));
+            }
+        }
+    }
+
     Ok(new_token)
 }
 

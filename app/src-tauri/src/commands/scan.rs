@@ -12,7 +12,7 @@
 use crate::types::Script;
 use crate::vscode_scanner;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use uuid::Uuid;
 
 const NODE_MARKERS: &[&str] = &["package.json"];
@@ -143,7 +143,6 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             id: Uuid::new_v4().to_string(),
             name: "cargo run".into(),
             command: "cargo run".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,
@@ -155,7 +154,6 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             id: Uuid::new_v4().to_string(),
             name: "cargo test".into(),
             command: "cargo test".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,
@@ -171,7 +169,6 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             id: Uuid::new_v4().to_string(),
             name: "go run".into(),
             command: "go run .".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,
@@ -188,8 +185,7 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
                 id: Uuid::new_v4().to_string(),
                 name: "django runserver".into(),
                 command: "python manage.py runserver".into(),
-                expected_port: Some(8000),
-                ports: Vec::new(),
+                ports: ports_from(Some(8000)),
                 auto_restart: false,
                 auto_restart_policy: None,
                 env_file: None,
@@ -219,7 +215,6 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             id: Uuid::new_v4().to_string(),
             name: "compose up".into(),
             command: "docker compose up".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,
@@ -231,7 +226,6 @@ fn detect_project(dir: &Path) -> Option<ProjectCandidate> {
             id: Uuid::new_v4().to_string(),
             name: "compose down".into(),
             command: "docker compose down".into(),
-            expected_port: None,
             ports: Vec::new(),
             auto_restart: false,
             auto_restart_policy: None,
@@ -477,8 +471,7 @@ fn scripts_from_package_json(path: &Path) -> Vec<Script> {
                 id: Uuid::new_v4().to_string(),
                 name: k.clone(),
                 command: format!("{} {}", pm, k),
-                expected_port: infer_port(cmd_str),
-                ports: Vec::new(),
+                ports: ports_from(infer_port(cmd_str)),
                 auto_restart: false,
                 auto_restart_policy: None,
                 env_file: None,
@@ -511,6 +504,23 @@ fn is_safe_script_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c))
 }
 
+/// Build a single-entry `ports` vec from an optional inferred/known port.
+/// Returns an empty vec when `port` is None. The synthesized PortSpec uses
+/// the same defaults the v3→v4 migration applies (name "default", bind
+/// 127.0.0.1) so scanned scripts and migrated scripts look identical.
+fn ports_from(port: Option<u16>) -> Vec<crate::types::PortSpec> {
+    match port {
+        Some(p) => vec![crate::types::PortSpec {
+            name: "default".to_string(),
+            number: p,
+            bind: "127.0.0.1".to_string(),
+            optional: false,
+            note: None,
+        }],
+        None => Vec::new(),
+    }
+}
+
 fn infer_port(cmd: &str) -> Option<u16> {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     for i in 0..tokens.len().saturating_sub(1) {
@@ -528,16 +538,6 @@ fn infer_port(cmd: &str) -> Option<u16> {
         }
     }
     None
-}
-
-#[allow(unused_imports)]
-#[allow(dead_code)]
-mod _ensure_path_buf_used {
-    use super::PathBuf;
-    #[allow(dead_code)]
-    fn _never_called() -> PathBuf {
-        PathBuf::new()
-    }
 }
 
 #[cfg(test)]
