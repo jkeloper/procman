@@ -5,6 +5,7 @@ import { LogView } from './LogView';
 import { PortsView } from './PortsView';
 import { ArrowLeft, Menu, RefreshCw, Settings, WifiOff, Loader, ChevronRight, RotateCcw } from './icons';
 import { useMobileAlerts } from './useMobileAlerts';
+import { useToast, useConfirm } from './feedback';
 import {
   checkNotificationPermission,
   loadNotificationSettings,
@@ -27,6 +28,8 @@ type Screen =
   | { name: 'ports' };
 
 export function MainView({ onUnpair }: Props) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
   const [projects, setProjects] = useState<ProjectsPayload['projects']>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -103,24 +106,31 @@ export function MainView({ onUnpair }: Props) {
       else await api.restart(scriptId);
       setTimeout(refresh, 300);
     } catch (e: unknown) {
-      alert(`${action}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`${action}: ${e instanceof Error ? e.message : String(e)}`);
     }
     finally { setBusy(null); }
   }
 
   async function runGroup(group: Group) {
-    if (!window.confirm(`Run "${group.name}" (${group.members.length} scripts)?`)) return;
+    const ok = await confirm({
+      title: `Run "${group.name}"?`,
+      description: `${group.members.length} scripts will start.`,
+      confirmLabel: 'Run',
+    });
+    if (!ok) return;
     setRunningGroup(group.id);
     try {
       const results = await api.runGroup(group.id);
       const failed = results.filter((r) => !r.ok);
       if (failed.length > 0) {
         const detail = failed.map((r) => r.error ?? r.script_id).join('\n');
-        alert(`${results.length - failed.length}/${results.length} started\n\nFailed:\n${detail}`);
+        toast.error(`${results.length - failed.length}/${results.length} started\n\nFailed:\n${detail}`);
+      } else {
+        toast.show(`${results.length}/${results.length} started`, 'success');
       }
       setTimeout(refresh, 300);
     } catch (e: unknown) {
-      alert(`run group: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`run group: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRunningGroup(null);
     }
@@ -284,7 +294,15 @@ export function MainView({ onUnpair }: Props) {
 
         <div style={{ padding: '0 20px 24px' }}>
           <button className="btn-outline" style={{ width: '100%', padding: 16, marginTop: 8, color: 'var(--red)', fontSize: 16, minHeight: 52 }}
-            onClick={() => { if (window.confirm('Disconnect?')) { clearPair(); onUnpair(); } }}>Disconnect & log out</button>
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Disconnect & log out?',
+                description: 'You will need to pair again to reconnect.',
+                confirmLabel: 'Disconnect',
+                destructive: true,
+              });
+              if (ok) { clearPair(); onUnpair(); }
+            }}>Disconnect & log out</button>
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type DeclaredPortStatus, type ProcessSnapshot, type ProjectsPayload } from './api';
 import { ArrowLeft, RefreshCw } from './icons';
+import { useToast, useConfirm } from './feedback';
 import './mobile.css';
 
 interface PortEntry {
@@ -20,6 +21,8 @@ interface Props {
 }
 
 export function PortsView({ onBack, projects, processes }: Props) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [ports, setPorts] = useState<PortEntry[]>([]);
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -115,7 +118,12 @@ export function PortsView({ onBack, projects, processes }: Props) {
   }
 
   async function stopOwner(scriptId: string, label: string) {
-    if (!window.confirm(`Stop "${label}"?`)) return;
+    const ok = await confirm({
+      title: `Stop "${label}"?`,
+      confirmLabel: 'Stop',
+      destructive: true,
+    });
+    if (!ok) return;
     setStopping(scriptId);
     try {
       await api.stop(scriptId);
@@ -123,7 +131,7 @@ export function PortsView({ onBack, projects, processes }: Props) {
       // snapshot so the port disappears once the process releases it.
       setTimeout(reload, 400);
     } catch (e: unknown) {
-      alert(`stop: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`stop: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setStopping(null);
     }

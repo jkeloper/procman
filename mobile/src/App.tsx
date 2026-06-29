@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { PairView } from './PairView';
 import { MainView } from './MainView';
+import { FeedbackProvider } from './feedback';
 import { loadPair, tryAutoPairFromHash } from './pair';
 
 export default function App() {
@@ -12,8 +13,13 @@ export default function App() {
     return !!loadPair();
   });
 
-  if (!paired) {
-    return <PairView onPaired={() => setPaired(true)} />;
-  }
-  return <MainView onUnpair={() => setPaired(false)} />;
+  return (
+    <FeedbackProvider>
+      {paired ? (
+        <MainView onUnpair={() => setPaired(false)} />
+      ) : (
+        <PairView onPaired={() => setPaired(true)} />
+      )}
+    </FeedbackProvider>
+  );
 }

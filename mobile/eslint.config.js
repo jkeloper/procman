@@ -19,5 +19,12 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Mirror the desktop (app/eslint.config.js): the feedback provider file
+      // co-exports its `FeedbackProvider` component with the `useToast` /
+      // `useConfirm` hooks (same pattern as the desktop Toast/Confirm context),
+      // which this HMR-only rule flags. Correctness is unaffected.
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])
