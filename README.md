@@ -10,7 +10,7 @@ Mac-only process manager GUI for solo developers juggling many local servers, tu
 
 ## Status
 
-**v0.2.0 release candidate.** Post-MVP S1–S5 shipped; the project is in final packaging, signing, and docs hardening.
+**v0.2.0 release candidate**, with the **v0.3 targeted refactor** (WS1–WS9 — global "All running" view, single piped+PTY runtime, batched port status, config v4) landed on the `redesign/v0.3-targeted-refactor` branch. The project is in final packaging, signing, and docs hardening.
 
 Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **215 tests passing** on the backend and **52 tests passing** on the frontend.
 
@@ -19,8 +19,8 @@ Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare 
 - **Mission Control** — One global "All running" view aggregates every running/crashed process across all your projects on a single screen (crashed first, per-project labels, total CPU/RSS), with inline stop/restart/dismiss and multi-project log tracking — so you never have to dig into projects one by one to see what's alive.
 - **Scripts** — Auto-detect `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json`; start/stop/restart with one click; login-shell (`zsh -l -c`) wrapping so `nvm`/`pyenv` PATHs survive.
 - **Logs & terminal** — 5,000-line ring buffer per process, virtualized (`react-window`), ANSI color rendering, substring search, multi-tab switching, tear-off log windows, and an xterm.js PTY shell for interactive scripts. Backed by a SQLite FTS index for persistent history.
-- **Ports** — Declarative `PortSpec` (multi-port per script) + visibility-aware `lsof` polling + 400ms TCP liveness probes; one-click kill on conflicts.
-- **Groups** — "Morning Stack" style batches that launch multiple scripts sequentially with a 400ms stagger; individual failures don't block the rest.
+- **Ports** — Declarative `ports[]` (multi-port per script; legacy `expected_port` migrated to `ports[0]` in config v4) + visibility-aware batched `lsof` polling + TCP liveness probes; one-click kill on conflicts.
+- **Groups** — "Morning Stack" style batches that launch scripts in `depends_on` topological order behind readiness gates (independent members start immediately; a crashed dependency fails fast); individual failures don't block the rest.
 - **Mobile** — iOS/PWA companion via Capacitor; QR-code pairing, full S1–S5 feature parity, local notifications for crashes/port conflicts/unreachable procman, reachable over Cloudflare Tunnel.
 - **Scheduling** — Five-field local-time cron schedules can repeat scripts without adding external cron jobs.
 - **Auto-updater** — Tauri signed update feed from the GitHub Releases channel.
@@ -72,7 +72,7 @@ For day-to-day work prefer `pnpm tauri dev`; `watch-install.sh` is for "keep the
 ## Testing
 
 ```bash
-# Rust (backend) — 215 unit tests
+# Rust (backend) — 214 unit tests
 cd app/src-tauri
 cargo test --lib
 
@@ -143,7 +143,7 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 ## 상태
 
-**v0.2.0 릴리스 후보.** Post-MVP S1~S5는 반영됐고, 현재 패키징·서명·문서 하드닝 단계.
+**v0.2.0 릴리스 후보** + **v0.3 targeted refactor**(WS1~WS9 — 전역 "All running" 뷰, 단일 piped+PTY 런타임, 배치 포트 상태, config v4)가 `redesign/v0.3-targeted-refactor` 브랜치에 반영됨. 현재 패키징·서명·문서 하드닝 단계.
 
 스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **215개 테스트 통과**, 프론트엔드 **52개 테스트 통과**.
 
@@ -152,8 +152,8 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 - **Mission Control** — 전역 "All running" 뷰가 전 프로젝트의 running/crashed 프로세스를 한 화면에 집계(crashed 우선, 프로젝트 라벨, 전체 CPU/RSS)하고, 인라인 stop/restart/dismiss + 다중 프로젝트 로그 추적을 제공 — 프로젝트를 하나씩 들어가 보지 않아도 무엇이 살아있는지 즉시 파악.
 - **스크립트** — `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` / `docker-compose.yml` / `.vscode/launch.json` 자동 감지, 원클릭 start/stop/restart, `zsh -l -c` 로그인 쉘 래핑으로 `nvm`/`pyenv` PATH 보존.
 - **로그 & 터미널** — 프로세스당 5,000라인 ring buffer, `react-window` 가상 스크롤, ANSI 컬러 렌더링, substring 검색, 멀티탭, 분리 로그 창, interactive script용 xterm.js PTY 셸. SQLite FTS 인덱스로 영구 히스토리 지원.
-- **포트** — 선언형 `PortSpec`(스크립트별 멀티 포트) + 2초 `lsof` 폴링 + 400ms TCP liveness probe, 충돌 시 원클릭 kill.
-- **그룹** — "Morning Stack" 스타일로 여러 스크립트를 400ms 간격으로 순차 실행. 개별 실패가 나머지를 막지 않음.
+- **포트** — 선언형 `ports[]`(스크립트별 멀티 포트; 레거시 `expected_port`는 config v4에서 `ports[0]`로 마이그레이션) + visibility-aware 배치 `lsof` 폴링 + TCP liveness probe, 충돌 시 원클릭 kill.
+- **그룹** — "Morning Stack" 스타일로 `depends_on` 위상정렬 + readiness 게이트 순차 실행(독립 멤버는 즉시 시작, 크래시한 의존성은 fast-fail). 개별 실패가 나머지를 막지 않음.
 - **모바일** — Capacitor 기반 iOS/PWA 동반 앱. QR 코드 페어링, S1~S5 기능 전부 미러링, 크래시/포트 충돌/procman 접속 불가 로컬 알림, Cloudflare Tunnel 경유 접근.
 - **스케줄링** — 외부 cron 없이 5필드 로컬 시간 cron 표현식으로 스크립트 반복 실행.
 - **자동 업데이터** — GitHub Releases 채널에서 Tauri 서명 업데이트 피드 수신.

@@ -5,12 +5,13 @@
 
 VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리하는 1인 개발자 페인을 해결하는 Mac 전용 GUI. 데스크톱 Tauri 앱 + 모바일 PWA/iOS 동반 앱으로 구성.
 
-## 현재 상태 (2026-05-15)
-🟢 **Post-MVP S1~S5 완료** + 모바일/원격 통합 완료
+## 현재 상태 (2026-06-29)
+🟢 **v0.3 targeted refactor (WS1~WS9) 완료 + 코드리뷰 하드닝 적용** (브랜치 `redesign/v0.3-targeted-refactor`)
 
-- Week 0 스파이크(4/5) → MVP Sprint 1-3(4/5 단일 세션) → v0.2 Feature Pack(4/6) → Post-MVP S1-S5(4/15~16) → 모바일 PWA + iOS Capacitor(4/17) 순으로 진행됨
-- 현재 v0.2.0 이후 안정화 구간. 다음 로드맵은 TODO.md 참고.
-- Rust 테스트 167개, frontend vitest 29개 통과 기준.
+- Week 0 스파이크 → MVP Sprint 1-3 → v0.2 Feature Pack → Post-MVP S1-S5 → 모바일 PWA + iOS Capacitor → **v0.3 점진 개편(WS1~WS9, 2026-06)** 순으로 진행됨
+- v0.3은 검증된 코어(race-safe kill·영속화·순수함수)를 verbatim 보존하며 "한 화면 장악" 목표의 빈틈만 외과적으로 메움. 헤드라인은 전역 "All running" 뷰 + 단일 런타임(piped+PTY) 수렴.
+- v0.3 코드리뷰에서 2 HIGH·3 MED·9 LOW를 적대적 검증 후 수정 완료. 다음 로드맵은 TODO.md 참고.
+- Rust 테스트 214개, frontend vitest 52개 통과 기준 (clippy --all-targets / fmt / app·mobile tsc·eslint 전부 green).
 
 ## 구현된 기능
 
@@ -18,10 +19,10 @@ VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리�
 - **프로젝트/스크립트 CRUD** — 폴더 선택 → 직접 하위 스캔(`package.json`/`Cargo.toml`/`go.mod`/`pyproject.toml`/`docker-compose.yml`) + 멀티스택 자동 감지
 - **프로세스 실행** — `zsh -l -c` 로그인 쉘 래핑, killpg SIGTERM→SIGKILL, 좀비/고아 제로, 크래시 감지
 - **로그 뷰어** — 프로세스당 5000줄 ring buffer + `react-window` 가상 스크롤 + `ansi-to-html` 컬러 + substring 검색
-- **포트 관리 v2** — 선언형 `PortSpec` 멀티 포트 + visibility-aware `lsof` 폴링 + TCP liveness probe + 원클릭 kill
+- **포트 관리** — 선언형 `ports[]` 멀티 포트(단일 모델; 레거시 `expected_port`는 config v4에서 `ports[0]`로 마이그레이션 후 제거) + visibility-aware `lsof` 폴링(배치 `port_status_all`) + TCP liveness probe + 원클릭 kill
 - **depends_on** — 의존 스크립트 포트 reachable 될 때까지 30s 대기
 - **관측성** — CPU%/RSS 5s 수집, 창 비활성 상태에서 pause
-- **그룹 ("Morning Stack")** — 400ms 딜레이 순차 실행
+- **그룹 ("Morning Stack")** — `depends_on` 위상정렬 + readiness 게이트 순차 실행 (독립 멤버는 즉시 시작, 크래시한 의존성은 fast-fail)
 - **⌘K 커맨드 팔레트** + 단축키 (⌘L 로그, ⌘, 대시보드)
 - **세션 복원** — 앱 재시작 시 running 스크립트 일괄 재실행
 - **Cloudflare Tunnels** — 설치 감지 + named tunnel run/kill + startup recovery
@@ -62,10 +63,10 @@ Flow: `User → Manager → Planner → Worker → Evaluator + User-tester → (
 ## 핵심 규칙
 - **수정사항마다 `TODO.md` / `CHANGELOG.md` / `README.md` 업데이트 필수** (사용자 피드백 규칙)
 - 에이전트 작업 시 반드시 `~/.claude/agents/{name}.md` 정의를 따를 것
-- Scope 변경은 TODO.md 🔮 섹션에서만 추가/이동
+- Scope 변경은 TODO.md `Planned (next)` / `Not planned` 섹션에서만 추가/이동 (기존 목표 외 신규 scope 금지)
 
 ## 문서 맵
-- **[README.md](README.md)** / **[README.en.md](README.en.md)** — 개요 + 기능 + 빌드
+- **[README.md](README.md)** — 개요 + 기능 + 빌드 (영문/국문 한 파일)
 - **[TODO.md](TODO.md)** — 작업 체크리스트 + Post-S5 선택지
 - **[CHANGELOG.md](CHANGELOG.md)** — 변경 이력
 - **[docs/07-port-management-v2.md](docs/07-port-management-v2.md)** — 현행 포트 관리 설계
