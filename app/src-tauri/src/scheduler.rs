@@ -107,55 +107,68 @@ async fn run_scheduler_minute(
             );
             continue;
         }
-        if !scheduled.script.depends_on.is_empty() {
-            if let Err(e) = crate::commands::process::wait_for_dependencies(
-                state,
-                pm,
-                &scheduled.script.depends_on,
+        // Move the (potentially 30s) dependency wait + conflict check + spawn
+        // into its own task so one candidate waiting on an unready dependency
+        // can't stall sibling candidates or push out the next tick. Distinct
+        // scripts are distinct DashMap keys; pm.spawn's in-flight guard plus
+        // the is_live recheck below keep a same-id double-launch safe.
+        let state = Arc::clone(state);
+        let pm = pm.clone();
+        tauri::async_runtime::spawn(async move {
+            let script = &scheduled.script;
+            if !script.depends_on.is_empty() {
+                if let Err(e) =
+                    crate::commands::process::wait_for_dependencies(&state, &pm, &script.depends_on)
+                        .await
+                {
+                    log::warn!(
+                        "scheduled script '{}' skipped while waiting for dependencies: {}",
+                        script.name,
+                        e
+                    );
+                    return;
+                }
+            }
+            match crate::commands::port::blocking_conflicts_for_script(
+                &script.id,
+                &script.ports,
+                &state,
+                &pm,
             )
             .await
             {
-                log::warn!(
-                    "scheduled script '{}' skipped while waiting for dependencies: {}",
-                    scheduled.script.name,
-                    e
-                );
-                continue;
+                Ok(conflicts) => {
+                    if let Some(conflict) = conflicts.first() {
+                        log::warn!(
+                            "scheduled script '{}' skipped: {}",
+                            script.name,
+                            crate::commands::port::describe_port_conflict(conflict)
+                        );
+                        return;
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "scheduled script '{}' conflict check failed: {}",
+                        script.name,
+                        e
+                    );
+                    return;
+                }
             }
-        }
-        let conflicts = crate::commands::port::blocking_conflicts_for_script(
-            &scheduled.script.id,
-            &scheduled.script.ports,
-            state,
-            pm,
-        )
-        .await?;
-        if let Some(conflict) = conflicts.first() {
-            log::warn!(
-                "scheduled script '{}' skipped: {}",
-                scheduled.script.name,
-                crate::commands::port::describe_port_conflict(conflict)
-            );
-            continue;
-        }
-        if pm.is_live(&scheduled.script.id) {
-            continue;
-        }
-        match pm
-            .spawn(&scheduled.script, Some(scheduled.project_path.clone()))
-            .await
-        {
-            Ok(pid) => log::info!(
-                "scheduled script '{}' started with pid {}",
-                scheduled.script.name,
-                pid
-            ),
-            Err(e) => log::warn!(
-                "scheduled script '{}' failed to start: {}",
-                scheduled.script.name,
-                e
-            ),
-        }
+            // Final guard immediately before spawn — no await in between.
+            if pm.is_live(&script.id) {
+                return;
+            }
+            match pm.spawn(script, Some(scheduled.project_path.clone())).await {
+                Ok(pid) => log::info!(
+                    "scheduled script '{}' started with pid {}",
+                    script.name,
+                    pid
+                ),
+                Err(e) => log::warn!("scheduled script '{}' failed to start: {}", script.name, e),
+            }
+        });
     }
     Ok(())
 }

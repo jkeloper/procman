@@ -31,6 +31,20 @@ const KILL_POLL_INTERVAL_MS: u64 = 50;
 const SHUTDOWN_PROGRESS_EMIT_INTERVAL_MS: u64 = 250;
 const AUTO_RESTART_BASE_MS: u64 = 1000;
 const AUTO_RESTART_MAX_MS: u64 = 30_000;
+/// Floor for a policy's per-attempt backoff. A hand-edited config (or a
+/// future UI/remote path) can set `backoff_ms: 0`, which would otherwise make
+/// an instantly-crashing script respawn with zero delay — a tight crash→
+/// respawn loop that pegs a core and floods logs. Flooring the *computed*
+/// delay (not the stored config) guarantees the OS always gets time to
+/// reclaim ports/fds between attempts.
+const AUTO_RESTART_BACKOFF_MIN_MS: u64 = 250;
+/// How long an incarnation must stay up before its crash is treated as a
+/// fresh episode rather than a continuation of a flapping run. On a crash, if
+/// the just-ended incarnation ran at least this long, the retry budget resets,
+/// so `max_retries` bounds *consecutive rapid* crashes (flapping) instead of
+/// total lifetime restarts — a long-stable service that crashes once is never
+/// permanently abandoned.
+const STABLE_UPTIME_MS: u64 = 60_000;
 const METRICS_BROADCAST_INTERVAL_MS: u64 = 5000;
 
 /// Phase B Worker L: ensure we spawn exactly one metrics broadcaster
@@ -181,6 +195,28 @@ pub struct ProcessManager {
     /// auto-restart/restart/shutdown kill paths intentionally do NOT touch
     /// it so the session-restore set survives those transitions.
     runtime_store: Arc<RuntimeStore>,
+    /// Per-id "spawn in progress" set. `spawn_inner` claims an id here before
+    /// it does its check-then-spawn-then-insert (which spans `cmd.spawn()` and
+    /// several awaits), so two concurrent starts of the SAME script — desktop
+    /// double-click, a remote `POST /processes/:id` racing a manual start, the
+    /// scheduler racing a user start — can't both spawn a child and have the
+    /// second `procs.insert` overwrite (and orphan) the first, leaking a
+    /// port-binding child `kill()` can never reach. Released via RAII.
+    spawn_in_flight: Arc<DashMap<String, ()>>,
+}
+
+/// RAII claim for `ProcessManager::spawn_in_flight`. Removing the id on drop
+/// guarantees the slot is released on every `spawn_inner` exit path (early
+/// `?`, error, or success).
+struct SpawnGuard {
+    set: Arc<DashMap<String, ()>>,
+    id: String,
+}
+
+impl Drop for SpawnGuard {
+    fn drop(&mut self) {
+        self.set.remove(&self.id);
+    }
 }
 
 impl ProcessManager {
@@ -192,6 +228,7 @@ impl ProcessManager {
             log_capacity: Arc::new(AtomicU64::new(LOG_CAPACITY_DEFAULT as u64)),
             app,
             runtime_store,
+            spawn_in_flight: Arc::new(DashMap::new()),
         }
     }
 
@@ -251,6 +288,28 @@ impl ProcessManager {
         cwd: Option<String>,
         restart_count: Arc<AtomicU32>,
     ) -> Result<u32, String> {
+        // Claim a per-id spawn slot atomically (check-then-insert under the
+        // DashMap shard lock, released before any await) so a concurrent start
+        // of the same script can't race past the contains_key/insert window
+        // below and orphan our child. The guard wraps the ENTIRE body —
+        // including the kill() below — so a concurrent caller serializes behind
+        // this start instead of racing it. Released on drop (every exit path).
+        let _spawn_guard = {
+            use dashmap::mapref::entry::Entry;
+            match self.spawn_in_flight.entry(script.id.clone()) {
+                Entry::Occupied(_) => {
+                    return Err(format!("start already in progress: {}", script.id));
+                }
+                Entry::Vacant(v) => {
+                    v.insert(());
+                }
+            }
+            SpawnGuard {
+                set: Arc::clone(&self.spawn_in_flight),
+                id: script.id.clone(),
+            }
+        };
+
         // Ensure previous instance is fully exited before respawning (UNI-2).
         // kill() sets the previous entry's `respawn_cancelled`, so any
         // auto-restart timer still sleeping for that entry will abort when
@@ -404,6 +463,14 @@ impl ProcessManager {
                 restart_allowed && status == RuntimeStatus::Crashed && !user_killed;
             let mut attempt_for_restart: Option<u32> = None;
             let delay_ms: Option<u64> = if crash_eligible {
+                // Flapping window: if THIS incarnation stayed up for a stable
+                // period, reset the retry budget first so `max_retries` bounds
+                // consecutive rapid crashes, not total lifetime restarts. The
+                // status event above already emitted the pre-reset count, so
+                // the current crash's reported `restart_count` is unaffected.
+                if should_reset_restart_count(now_ms() - started_at_ms, STABLE_UPTIME_MS) {
+                    restart_count.store(0, Ordering::SeqCst);
+                }
                 let attempt = restart_count.fetch_add(1, Ordering::SeqCst) + 1;
                 let computed = match &policy {
                     Some(p) => match compute_restart_delay_policy(p, attempt, |jmax| {
@@ -1392,13 +1459,24 @@ pub(crate) fn compute_restart_delay_policy(
     if policy.max_retries != 0 && attempt > policy.max_retries {
         return None;
     }
-    let base = (policy.backoff_ms as u64).saturating_mul(attempt as u64);
+    // Floor the per-attempt backoff so a `backoff_ms: 0` (or any sub-floor)
+    // policy can never produce a zero-delay restart storm. Clamps a local copy
+    // only — the stored config is untouched.
+    let backoff = (policy.backoff_ms as u64).max(AUTO_RESTART_BACKOFF_MIN_MS);
+    let base = backoff.saturating_mul(attempt as u64);
     let jitter = if policy.jitter_ms == 0 {
         0
     } else {
         jitter_fn(policy.jitter_ms as u64)
     };
     Some(base.saturating_add(jitter).min(AUTO_RESTART_MAX_MS))
+}
+
+/// Whether a crashed incarnation's uptime is long enough to reset the
+/// auto-restart retry budget (flapping window). Pure so it is unit-testable
+/// without a live child. A negative `uptime_ms` (clock skew) never resets.
+pub(crate) fn should_reset_restart_count(uptime_ms: i64, threshold_ms: u64) -> bool {
+    uptime_ms >= 0 && (uptime_ms as u64) >= threshold_ms
 }
 
 /// v3: Legacy exponential-backoff delay (pre-policy behaviour). Kept as
@@ -1577,6 +1655,44 @@ mod tests {
             compute_restart_delay_policy(&p, 1, |_| panic!("should not run")),
             Some(1000)
         );
+    }
+
+    #[test]
+    fn policy_zero_backoff_is_floored_not_zero_delay() {
+        // A hand-edited `backoff_ms: 0` must NOT yield a zero-delay restart
+        // storm: the computed delay is floored to AUTO_RESTART_BACKOFF_MIN_MS.
+        let p = AutoRestartPolicy {
+            enabled: true,
+            max_retries: 0, // unlimited — the dangerous storm case
+            backoff_ms: 0,
+            jitter_ms: 0,
+        };
+        let d = compute_restart_delay_policy(&p, 1, |_| 0).expect("enabled → Some");
+        assert!(
+            d >= AUTO_RESTART_BACKOFF_MIN_MS,
+            "expected floored delay >= {AUTO_RESTART_BACKOFF_MIN_MS}, got {d}"
+        );
+    }
+
+    #[test]
+    fn restart_budget_resets_only_after_stable_uptime() {
+        // Below the threshold (flapping) → keep counting toward max_retries.
+        assert!(!should_reset_restart_count(0, STABLE_UPTIME_MS));
+        assert!(!should_reset_restart_count(
+            STABLE_UPTIME_MS as i64 - 1,
+            STABLE_UPTIME_MS
+        ));
+        // At/above the threshold (a stable run that then crashed) → reset.
+        assert!(should_reset_restart_count(
+            STABLE_UPTIME_MS as i64,
+            STABLE_UPTIME_MS
+        ));
+        assert!(should_reset_restart_count(
+            STABLE_UPTIME_MS as i64 + 5_000,
+            STABLE_UPTIME_MS
+        ));
+        // Clock skew (negative uptime) must never reset the budget.
+        assert!(!should_reset_restart_count(-1, STABLE_UPTIME_MS));
     }
 
     #[test]
