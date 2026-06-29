@@ -11,7 +11,7 @@ VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리�
 - Week 0 스파이크 → MVP Sprint 1-3 → v0.2 Feature Pack → Post-MVP S1-S5 → 모바일 PWA + iOS Capacitor → **v0.3 점진 개편(WS1~WS9, 2026-06)** 순으로 진행됨
 - v0.3은 검증된 코어(race-safe kill·영속화·순수함수)를 verbatim 보존하며 "한 화면 장악" 목표의 빈틈만 외과적으로 메움. 헤드라인은 전역 "All running" 뷰 + 단일 런타임(piped+PTY) 수렴.
 - v0.3 코드리뷰에서 2 HIGH·3 MED·9 LOW를 적대적 검증 후 수정 완료. 다음 로드맵은 TODO.md 참고.
-- Rust 테스트 214개, frontend vitest 52개 통과 기준 (clippy --all-targets / fmt / app·mobile tsc·eslint 전부 green).
+- Rust 테스트 219개, frontend vitest 52개 통과 기준 (clippy --all-targets / fmt / app·mobile tsc·eslint 전부 green).
 
 ## 구현된 기능
 
