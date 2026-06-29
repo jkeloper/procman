@@ -86,16 +86,38 @@ pub(crate) async fn wait_for_dependencies(
     };
 
     loop {
+        let snapshot = pm.list();
         // WS2: a retained `Crashed` entry is still tracked by the manager
         // but is NOT a satisfied dependency — only count actively Running
         // scripts so a crashed dep keeps the dependent waiting (or times out
         // with a clear "not running" message).
-        let running: std::collections::HashSet<String> = pm
-            .list()
-            .into_iter()
+        let running: std::collections::HashSet<String> = snapshot
+            .iter()
             .filter(|s| s.status == crate::process::RuntimeStatus::Running)
-            .map(|s| s.id)
+            .map(|s| s.id.clone())
             .collect();
+
+        // Fail fast on a crashed dependency. A `Crashed` entry is terminal
+        // (WS2 only retains it when no auto-restart is pending), so it will
+        // never become ready within the 30s deadline. Without this, a
+        // dependency that dies on boot would block the dependent for the full
+        // timeout and — because group launches are sequential — stall every
+        // later member by that same 30s. (A dep that is auto-restarting is
+        // not `Crashed`; it is briefly absent and correctly keeps us waiting.)
+        let crashed: std::collections::HashSet<String> = snapshot
+            .iter()
+            .filter(|s| s.status == crate::process::RuntimeStatus::Crashed)
+            .map(|s| s.id.clone())
+            .collect();
+        let dead: Vec<String> = dep_scripts
+            .iter()
+            .filter(|d| crashed.contains(&d.id))
+            .map(|d| format!("{} (crashed)", d.name))
+            .collect();
+        if !dead.is_empty() {
+            return Err(format!("dependency crashed: {}", dead.join(", ")));
+        }
+
         let mut pending: Vec<String> = Vec::new();
         for dep in &dep_scripts {
             if !running.contains(&dep.id) {

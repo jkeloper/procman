@@ -81,6 +81,23 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
       } catch {}
     })();
 
+    // Fire the eviction toast + prune any active-selection pointer that still
+    // points at the evicted (oldest) tab. Kept OUT of the setTabs updater:
+    // state updaters must be pure, and React StrictMode double-invokes them —
+    // dispatching from inside would double-fire the toast in dev.
+    const announceEviction = (evicted: Tab) => {
+      window.dispatchEvent(
+        new CustomEvent('procman:log-tab-evicted', { detail: { name: evicted.name } }),
+      );
+      setActiveByProject((a) => {
+        if (a[evicted.projectId] !== evicted.scriptId) return a;
+        const next = { ...a };
+        delete next[evicted.projectId];
+        return next;
+      });
+      setGlobalActive((g) => (g === evicted.scriptId ? null : g));
+    };
+
     const onFocus = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       const scriptId: string | undefined = detail?.scriptId;
@@ -111,22 +128,21 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
             }
           }
           if (!projectId) return;
+          let evicted: Tab | null = null;
           setTabs((cur) => {
             if (cur.some((t) => t.scriptId === scriptId)) return cur;
             const next = [...cur, { projectId: projectId!, scriptId, name }];
-            // Honour the pool cap; warn the user if it evicts (WS7 §4).
+            // Honour the pool cap; capture the evicted tab and announce it
+            // AFTER the updater (see announceEviction — the dispatch must not
+            // live inside this pure updater).
             if (next.length > MAX_LOG_TABS) {
-              const evicted = next[0];
-              window.dispatchEvent(
-                new CustomEvent('procman:log-tab-evicted', {
-                  detail: { name: evicted.name },
-                }),
-              );
+              evicted = next[0];
               return next.slice(-MAX_LOG_TABS);
             }
             return next;
           });
           setActiveByProject((a) => ({ ...a, [projectId!]: scriptId }));
+          if (evicted) announceEviction(evicted);
         })();
         return prev;
       });
@@ -148,23 +164,21 @@ export function LogViewer({ isExpanded = true, currentProjectId }: Props) {
           }
         }
         if (!projectId) return;
+        let evicted: Tab | null = null;
         setTabs((prev) => {
           if (prev.some((t) => t.scriptId === id)) return prev;
           const next = [...prev, { projectId: projectId!, scriptId: id, name }];
-          // WS6 §4: cap the global pool — evict the oldest tab past the
-          // limit. WS7 §4: surface the eviction so it's not silent.
+          // WS6 §4: cap the global pool — evict the oldest tab past the limit.
+          // WS7 §4: surface the eviction (announced AFTER the updater so the
+          // dispatch stays out of this pure updater).
           if (next.length > MAX_LOG_TABS) {
-            const evicted = next[0];
-            window.dispatchEvent(
-              new CustomEvent('procman:log-tab-evicted', {
-                detail: { name: evicted.name },
-              }),
-            );
+            evicted = next[0];
             return next.slice(-MAX_LOG_TABS);
           }
           return next;
         });
         setActiveByProject((a) => ({ ...a, [projectId!]: id }));
+        if (evicted) announceEviction(evicted);
       }
       // NOTE: we intentionally do NOT close tabs on `stopped` or
       // `crashed`. The user wants to keep reading logs after a

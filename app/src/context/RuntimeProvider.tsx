@@ -76,11 +76,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         });
         // WS9: metrics rows carry ProcessSnapshot.kind, so this 5s tick picks
         // up the backend owner for any run that started after the initial
-        // snapshot (e.g. a terminal session opened mid-session).
+        // snapshot (e.g. a terminal session opened mid-session). Only merge the
+        // kind for *running* rows — the metrics payload includes retained
+        // Crashed entries, and re-adding their kind here would defeat the
+        // per-status cleanup (`removeKey(setKinds, id)` on stop/crash) and
+        // resurrect a stale discriminator within 5s of a crash.
         setKinds((prev) => {
           const next: Record<string, ProcessKind> = { ...prev };
           for (const row of delta.processes) {
-            next[row.id] = row.kind;
+            if (row.status === 'running') {
+              next[row.id] = row.kind;
+            } else {
+              delete next[row.id];
+            }
           }
           return next;
         });

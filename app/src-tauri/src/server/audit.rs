@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
 
@@ -25,8 +26,9 @@ pub struct AuditLog {
     ring: Mutex<VecDeque<AuditEntry>>,
     // File writer is optional: callers can opt in by constructing with a
     // path; older tests / lightweight callers still get an in-memory-only
-    // instance via `AuditLog::new()`.
-    writer: Option<StdMutex<RotatingWriter>>,
+    // instance via `AuditLog::new()`. Wrapped in `Arc` so `record` can hand
+    // it to a `spawn_blocking` task (disk I/O off the async worker thread).
+    writer: Option<Arc<StdMutex<RotatingWriter>>>,
 }
 
 impl AuditLog {
@@ -45,7 +47,7 @@ impl AuditLog {
                 log::warn!("audit log disk writer disabled: {} ({})", path.display(), e);
             })
             .ok()
-            .map(StdMutex::new);
+            .map(|w| Arc::new(StdMutex::new(w)));
         Self {
             ring: Mutex::new(VecDeque::with_capacity(RING_CAPACITY)),
             writer,
@@ -68,10 +70,22 @@ impl AuditLog {
             entry.detail.as_deref().unwrap_or("")
         );
         if let Some(w) = &self.writer {
-            if let Ok(mut guard) = w.lock() {
-                if let Err(e) = guard.append(&entry) {
-                    log::warn!("audit log write failed: {}", e);
-                }
+            // Offload the blocking file I/O (size stat + write + possible
+            // rotation renames) to the blocking pool so it never stalls an
+            // async worker thread — amplified by the per-member group-run loop
+            // that records N+1 entries back-to-back. Awaited so ordering and
+            // error reporting are preserved.
+            let w = Arc::clone(w);
+            let entry_for_disk = entry.clone();
+            let res = tokio::task::spawn_blocking(move || match w.lock() {
+                Ok(mut guard) => guard.append(&entry_for_disk).map_err(|e| e.to_string()),
+                Err(_) => Err("audit writer mutex poisoned".to_string()),
+            })
+            .await;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => log::warn!("audit log write failed: {}", e),
+                Err(e) => log::warn!("audit log write task failed: {}", e),
             }
         }
         let mut guard = self.ring.lock().await;

@@ -157,15 +157,17 @@ export function MainView({ onUnpair }: Props) {
     let cancelled = false;
     async function tick() {
       // WS3: one batch request instead of N per-script requests.
-      const next: Record<string, DeclaredPortStatus[]> = {};
       try {
         const rows = await api.portStatusBatch(targets.map((s) => s.id));
+        const next: Record<string, DeclaredPortStatus[]> = {};
         for (const [id, st] of rows) next[id] = st;
+        // Only commit on success — a failed batch poll must NOT clear the
+        // existing status panel; keep the last good values and let the next
+        // tick repopulate.
+        if (!cancelled) setPortStatuses(next);
       } catch {
-        // A failed batch poll should not clear the existing status panel;
-        // leave `next` empty and let the next tick repopulate.
+        // Transient batch failure: preserve the current panel.
       }
-      if (!cancelled) setPortStatuses(next);
     }
     tick();
     const iv = setInterval(tick, 5000);

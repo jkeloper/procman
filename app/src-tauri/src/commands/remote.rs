@@ -89,6 +89,7 @@ pub async fn start_server(
     {
         let mut guard = remote.handle.lock().await;
         if let Some(h) = guard.take() {
+            let _ = h.close_conns.send(());
             let _ = h.shutdown.send(());
         }
     }
@@ -118,12 +119,17 @@ async fn spawn_server(
     let app_state = app.state::<Arc<AppState>>().inner().clone();
     let pm = app.state::<ProcessManager>().inner().clone();
 
+    // Fresh per-instance force-close channel; the sender is also stored on the
+    // returned `ServerHandle` so stop/rotate can drop every open WebSocket.
+    let (close_conns, _) = tokio::sync::broadcast::channel::<()>(16);
+
     let state = ServerState {
         app_handle: app.clone(),
         app_state,
         pm,
         token: Arc::clone(&remote.token),
         audit: Arc::clone(&remote.audit),
+        close_conns,
     };
     server::start(state, port, mode).await
 }
@@ -132,6 +138,7 @@ async fn spawn_server(
 pub async fn stop_server(remote: tauri::State<'_, RemoteServerState>) -> Result<(), String> {
     let mut guard = remote.handle.lock().await;
     if let Some(h) = guard.take() {
+        let _ = h.close_conns.send(());
         let _ = h.shutdown.send(());
     }
     Ok(())
@@ -152,10 +159,12 @@ pub async fn rotate_token(
 
     // Token auth is only checked at the HTTP/WS handshake, so already-open
     // WebSockets would otherwise keep streaming under the old credential.
-    // Bounce the server (if running) on the same port/mode: graceful
-    // shutdown drops every active connection, forcing clients to re-handshake
-    // with the new token. The QR/pairing payload is derived from the token,
-    // so the desktop UI re-renders it after this returns.
+    // Graceful server shutdown alone does NOT drop them — an upgraded socket
+    // detaches from axum's shutdown at upgrade time — so we explicitly fire
+    // `close_conns` (below) to force every live socket closed, then bounce the
+    // server on the same port/mode so clients must re-handshake with the new
+    // token. The QR/pairing payload is derived from the token, so the desktop
+    // UI re-renders it after this returns.
     let prev = {
         let mut guard = remote.handle.lock().await;
         guard.take()
@@ -163,6 +172,10 @@ pub async fn rotate_token(
     if let Some(h) = prev {
         let port = h.port;
         let mode = h.mode;
+        // Force every open WebSocket closed first — graceful server shutdown
+        // alone does NOT drop upgraded sockets, so the old token would keep
+        // streaming without this. Then bounce the listener.
+        let _ = h.close_conns.send(());
         let _ = h.shutdown.send(());
         // Give the listener a beat to release the socket before re-binding.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;

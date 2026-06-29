@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type ProcessSnapshot, type ProjectsPayload } from './api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, type DeclaredPortStatus, type ProcessSnapshot, type ProjectsPayload } from './api';
 import { ArrowLeft, RefreshCw } from './icons';
 import './mobile.css';
 
@@ -26,34 +26,66 @@ export function PortsView({ onBack, projects, processes }: Props) {
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [stopping, setStopping] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<Record<string, DeclaredPortStatus[]>>({});
 
-  // Map a listening port number → the registered, *running* script that
-  // declares it. Only running scripts are stoppable, and the lookup is keyed
-  // on declared PortSpecs so we can't act on unregistered processes.
+  // Map a listening (pid, port) pair → the registered, running script the
+  // BACKEND confirms owns that listener. We key on the actual holder PID +
+  // `owned_by_script` (not a mere declared-number match) so a foreign process
+  // that happens to sit on a declared port is NOT mislabelled as ours and does
+  // NOT get a Stop button that would kill the wrong script. The Stop button
+  // still only ever targets a registered script id, never an arbitrary PID.
   const ownerByPort = useMemo(() => {
-    const running = new Set(processes.filter((p) => p.status === 'running').map((p) => p.id));
-    const map = new Map<number, { scriptId: string; label: string }>();
-    for (const proj of projects) {
-      for (const s of proj.scripts) {
-        if (!running.has(s.id)) continue;
-        for (const spec of s.ports ?? []) {
-          if (!map.has(spec.number)) {
-            map.set(spec.number, { scriptId: s.id, label: `${proj.name}/${s.name}` });
-          }
+    const labelOf = (scriptId: string) => {
+      for (const proj of projects) {
+        const s = proj.scripts.find((x) => x.id === scriptId);
+        if (s) return `${proj.name}/${s.name}`;
+      }
+      return scriptId;
+    };
+    const map = new Map<string, { scriptId: string; label: string }>();
+    for (const [scriptId, sts] of Object.entries(statuses)) {
+      for (const st of sts) {
+        if (st.owned_by_script && st.state === 'listening_managed' && st.holder_pid != null) {
+          map.set(`${st.holder_pid}:${st.spec.number}`, { scriptId, label: labelOf(scriptId) });
         }
       }
     }
     return map;
-  }, [projects, processes]);
+  }, [projects, statuses]);
+
+  // Keep the latest projects/processes in a ref so `reload` can stay stable
+  // (empty deps). Otherwise `reload` would change identity on every WS status
+  // event (each hands `processes` a fresh array ref), tearing down and
+  // re-firing the 3s interval — and an extra lsof/ps-heavy portStatusBatch —
+  // on every status change while this view is open.
+  const dataRef = useRef({ projects, processes });
+  dataRef.current = { projects, processes };
 
   const reload = useCallback(async () => {
+    const { projects, processes } = dataRef.current;
+    const targets = projects
+      .flatMap((p) => p.scripts)
+      .filter(
+        (s) =>
+          processes.some((x) => x.id === s.id && x.status === 'running') &&
+          s.ports &&
+          s.ports.length > 0,
+      );
     try {
-      const [p, a] = await Promise.all([
+      const [p, a, statusRows] = await Promise.all([
         api.ports(),
         api.portAliases().catch(() => ({})),
+        targets.length
+          ? api
+              .portStatusBatch(targets.map((s) => s.id))
+              .catch(() => [] as Array<[string, DeclaredPortStatus[]]>)
+          : Promise.resolve([] as Array<[string, DeclaredPortStatus[]]>),
       ]);
       setPorts(p);
       setAliases(a ?? {});
+      const sm: Record<string, DeclaredPortStatus[]> = {};
+      for (const [id, st] of statusRows) sm[id] = st;
+      setStatuses(sm);
     } catch {
       // Leave the previous snapshot visible when a poll fails.
     } finally {
@@ -115,7 +147,7 @@ export function PortsView({ onBack, projects, processes }: Props) {
           ports.map((p) => {
             const alias = aliases[String(p.port)] ?? '';
             const isEditing = editing === p.port;
-            const owner = ownerByPort.get(p.port);
+            const owner = ownerByPort.get(`${p.pid}:${p.port}`);
             return (
               <div key={`${p.pid}-${p.port}`} className="script-row" style={{ minHeight: 56 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>

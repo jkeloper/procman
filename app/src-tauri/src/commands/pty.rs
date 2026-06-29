@@ -232,21 +232,14 @@ impl PtyManager {
         // this script (piped run or stale PTY) it returns Err, and we do a
         // uniform kill+restart (one retry). Any failure here kills the
         // freshly-spawned child so nothing escapes untracked.
-        let has_declared_ports = !script.ports.is_empty();
-        let (generation, _killed, _exited) = match pm
-            .register_pty(&script.id, pid_u32, has_declared_ports)
-            .await
-        {
+        let (generation, _killed, exited) = match pm.register_pty(&script.id, pid_u32).await {
             Ok(handles) => handles,
             Err(_) => {
                 if let Err(e) = pm.kill(&script.id).await {
                     let _ = killer.kill();
                     return Err(e);
                 }
-                match pm
-                    .register_pty(&script.id, pid_u32, has_declared_ports)
-                    .await
-                {
+                match pm.register_pty(&script.id, pid_u32).await {
                     Ok(handles) => handles,
                     Err(e) => {
                         let _ = killer.kill();
@@ -316,8 +309,17 @@ impl PtyManager {
         let wait_id = id.clone();
         let wait_script_id = script.id.clone();
         let pm_for_wait = pm.clone();
+        let exited_for_wait = Arc::clone(&exited);
         std::thread::spawn(move || {
             let status = child.wait();
+            // Mark exited SYNCHRONOUSLY, the instant the child is reaped, before
+            // the async `notify_pty_exit` hop. `kill_with_timeout` gates its
+            // `killpg` on this flag; setting it only inside the deferred async
+            // task leaves a window where the pid is already reaped (and the OS
+            // may reuse it) yet a concurrent kill still sees exited==false and
+            // could `killpg` a freed pid. (notify_pty_exit also sets it —
+            // idempotent.)
+            exited_for_wait.store(true, std::sync::atomic::Ordering::SeqCst);
             let (exit_code, success) = match &status {
                 Ok(s) => (Some(s.exit_code() as i32), s.success()),
                 Err(_) => (None, false),

@@ -173,8 +173,11 @@ function getSidebarHtml(serverUrl: string, token: string): string {
       // Server authenticates the WS handshake via the Sec-WebSocket-Protocol
       // header (see app/src-tauri/src/server/auth.rs extract_bearer): it strips
       // the 'procman-token.' prefix off each offered subprotocol. The token is
-      // URL-safe base64 so it is safe to embed verbatim.
-      ws = new WebSocket(wsUrl, ['procman-token.' + TOKEN]);
+      // URL-safe base64 so it is safe to embed verbatim. Offer the stable
+      // 'procman' protocol first so the server echoes THAT (not the token) in
+      // the handshake response — otherwise the token would leak into response
+      // headers (proxy/devtools logs).
+      ws = new WebSocket(wsUrl, ['procman', 'procman-token.' + TOKEN]);
       ws.onopen = () => { connected = true; renderStatus(); };
       ws.onclose = () => { connected = false; renderStatus(); setTimeout(connectWS, 3000); };
       ws.onmessage = (e) => {
@@ -337,8 +340,9 @@ function getLogPanelHtml(
     function connectWS() {
       const url = SERVER.replace(/^http/, 'ws') + '/api/stream';
       // Authenticate via Sec-WebSocket-Protocol (see auth.rs extract_bearer);
-      // query-string tokens are ignored by the server.
-      const ws = new WebSocket(url, ['procman-token.' + TOKEN]);
+      // query-string tokens are ignored by the server. Offer 'procman' first
+      // so the server echoes that (not the token) in the handshake response.
+      const ws = new WebSocket(url, ['procman', 'procman-token.' + TOKEN]);
       ws.onopen = () => { connected = true; dotEl.className = 'dot dot-ok'; };
       ws.onclose = () => { connected = false; dotEl.className = 'dot dot-off'; setTimeout(connectWS, 3000); };
       ws.onmessage = (e) => {

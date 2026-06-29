@@ -34,6 +34,13 @@ pub struct ServerState {
     pub pm: ProcessManager,
     pub token: Arc<RwLock<String>>,
     pub audit: Arc<audit::AuditLog>,
+    /// Broadcast that force-closes every open WebSocket stream. Token auth is
+    /// only checked at the handshake, and an upgraded WebSocket detaches from
+    /// axum's graceful shutdown at upgrade time, so bouncing the server does
+    /// NOT drop live streams. Each `handle_socket` subscribes and breaks its
+    /// forwarding loop when a `()` is sent here; `rotate_token`/`stop_server`
+    /// fire it so a rotated/leaked token can no longer stream.
+    pub close_conns: tokio::sync::broadcast::Sender<()>,
 }
 
 pub struct ServerHandle {
@@ -44,6 +51,10 @@ pub struct ServerHandle {
     pub tls: bool,
     /// SHA-256 fingerprint of the active LAN TLS certificate.
     pub cert_fingerprint_sha256: Option<String>,
+    /// Fire (`send(())`) to force every open WebSocket on this instance to
+    /// close. Must be triggered alongside `shutdown` when bouncing the server
+    /// (see `ServerState::close_conns`).
+    pub close_conns: tokio::sync::broadcast::Sender<()>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -171,6 +182,7 @@ pub async fn start(
         mode,
         tls: use_tls,
         cert_fingerprint_sha256,
+        close_conns: state.close_conns.clone(),
     })
 }
 

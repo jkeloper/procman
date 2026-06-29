@@ -86,12 +86,16 @@ export function ProcessGrid({ projectId, projectPath, onScriptsChanged }: Props)
     }
     // WS3: one batch call instead of N per-script calls — the backend builds
     // the ps/lsof ownership snapshot a single time for the whole poll.
-    const next: Record<string, DeclaredPortStatus[]> = {};
     try {
       const rows = await api.portStatusAll(targets.map((s) => s.id));
+      const next: Record<string, DeclaredPortStatus[]> = {};
       for (const [id, st] of rows) next[id] = st;
-    } catch {}
-    setPortStatuses(next);
+      // Only commit on success; a transient poll failure must not blank the
+      // panel (it would flicker every failed tick).
+      setPortStatuses(next);
+    } catch {
+      // Preserve the last good statuses until the next successful poll.
+    }
   }, [scripts, statuses]);
   useVisibleInterval(reloadPortStatuses, 3000);
 

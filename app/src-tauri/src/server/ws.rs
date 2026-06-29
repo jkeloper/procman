@@ -18,10 +18,13 @@ pub async fn ws_handler(
     headers: HeaderMap,
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
-    // New clients offer both `procman` and a token-bearing subprotocol.
-    // Echo the stable `procman` protocol when present so the token does not
-    // appear in the response headers. Older clients that only offer
-    // `procman-token.<token>` still work because auth already validated it.
+    // Clients offer both `procman` and a token-bearing subprotocol. Only ever
+    // echo the stable, non-secret `procman` protocol — NEVER echo a
+    // `procman-token.<token>` value, or the bearer token leaks into the
+    // handshake *response* headers (reverse-proxy access logs, devtools
+    // Network tab). A client that omits `procman` simply gets no subprotocol
+    // echoed; that is valid per RFC 6455 and the token was already validated
+    // from the request header by `require_token`.
     let selected = headers
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
@@ -30,10 +33,7 @@ pub async fn ws_handler(
             if protocols.contains(&"procman") {
                 Some("procman".to_string())
             } else {
-                protocols
-                    .into_iter()
-                    .find(|p| p.starts_with("procman-token."))
-                    .map(str::to_string)
+                None
             }
         });
 
@@ -67,6 +67,15 @@ enum OutEvent {
 }
 
 async fn handle_socket(mut socket: WebSocket, state: ServerState) {
+    // Force-close signal: fired by `rotate_token`/`stop_server` so a rotated
+    // or leaked token can no longer keep streaming through this already-open
+    // socket (the handshake auth check is never re-run on a live connection).
+    // Subscribe FIRST — before the hello send and any await — because a
+    // `broadcast` receiver only sees sends that happen after `subscribe()`. Any
+    // later we would leave a window where a rotation fired between upgrade and
+    // subscribe is missed and the socket keeps streaming under the old token.
+    let mut close_rx = state.close_conns.subscribe();
+
     // Greet
     let hello = serde_json::to_string(&OutEvent::Hello {
         name: "procman",
@@ -153,6 +162,9 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
     // Forwarding loop
     loop {
         tokio::select! {
+            // Server bounce / token rotation: drop this stream immediately.
+            // Any outcome (signalled, lagged, or sender gone) means close.
+            _ = close_rx.recv() => break,
             Some(msg) = rx.recv() => {
                 if socket.send(Message::Text(msg)).await.is_err() {
                     break;

@@ -120,10 +120,39 @@ impl ConfigStore {
                     continue;
                 };
                 // Pull and remove the legacy scalar regardless of outcome.
-                let legacy = map
-                    .remove(Value::from("expected_port"))
-                    .and_then(|v| v.as_u64())
-                    .and_then(|n| u16::try_from(n).ok());
+                // Coerce leniently: hand-edited configs commonly quote the
+                // number (`expected_port: "3000"`) or write it as `3000.0`.
+                // Rescue those too rather than silently dropping a real port;
+                // only genuinely unusable values (negative, > 65535, garbage)
+                // are dropped, and then with a warning so the loss is visible.
+                let raw = map.remove(Value::from("expected_port"));
+                let legacy: Option<u16> = match &raw {
+                    None | Some(Value::Null) => None,
+                    Some(v) => {
+                        let coerced = v
+                            .as_u64()
+                            .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+                            .or_else(|| {
+                                v.as_f64().and_then(|f| {
+                                    if f.fract() == 0.0 && f >= 0.0 {
+                                        Some(f as u64)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+                            .and_then(|n| u16::try_from(n).ok());
+                        if coerced.is_none() {
+                            log::warn!(
+                                "config migration: dropping unparseable expected_port {:?} \
+                                 (could not promote to ports[])",
+                                v
+                            );
+                        }
+                        coerced
+                    }
+                };
                 let ports_empty = match map.get(Value::from("ports")) {
                     Some(Value::Sequence(seq)) => seq.is_empty(),
                     Some(Value::Null) | None => true,

@@ -144,11 +144,6 @@ struct Managed {
     /// *retains* the entry so the post-mortem LogBuffer survives for the
     /// user. `Stopped`/user-kill paths still remove the entry outright.
     status: RuntimeStatus,
-    /// WS4: whether the script declared any ports (`ports` non-empty).
-    /// Captured at spawn so `kill()` only pays the pre-SIGTERM `lsof`
-    /// descendant snapshot for port-bearing scripts — port-free scripts
-    /// SIGTERM immediately (no hot-path `lsof` stall).
-    has_declared_ports: bool,
     /// WS9: which backend owns this entry. `Piped` for `spawn_inner`,
     /// `Pty` for `register_pty`. Surfaced through `ProcessSnapshot`.
     kind: ProcessKind,
@@ -310,16 +305,12 @@ impl ProcessManager {
         let cur_restart = restart_count.load(Ordering::Relaxed);
         let generation = self.generation_counter.fetch_add(1, Ordering::SeqCst) + 1;
         let bound_at_ms = started_at_ms.max(0) as u64;
-        // WS4: capture port declaration once at spawn so kill() can decide
-        // whether the pre-SIGTERM descendant snapshot is worth its lsof cost.
-        let has_declared_ports = !script.ports.is_empty();
         self.procs.insert(
             script.id.clone(),
             Managed {
                 generation,
                 pid,
                 status: RuntimeStatus::Running,
-                has_declared_ports,
                 kind: ProcessKind::Piped,
                 started_at_ms,
                 wrapper_pid: Some(pid),
@@ -480,21 +471,22 @@ impl ProcessManager {
             // restarts. We only need to clear when status is `Stopped` AND the
             // exit was genuinely the script's own clean exit.
             //
-            // Generation guard: a clean self-exit can coincide with a fresh
-            // spawn that already re-took the slot (and re-marked running=true).
-            // `mark_running` carries no generation, so an unguarded `false`
-            // here could clobber that newer spawn. Only clear when the slot is
-            // gone (we were the last word) or still carries our generation; if
-            // a different generation now owns the id, a newer spawn's mark is
-            // authoritative and we must not touch the restore set.
-            if status == RuntimeStatus::Stopped
-                && !user_killed
-                && procs
-                    .get(&id)
-                    .map(|m| m.generation == generation)
-                    .unwrap_or(true)
-            {
-                pm_clone.runtime_store.mark_running(&id, false).await;
+            // Generation guard + late liveness recheck: a clean self-exit can
+            // coincide with a fresh spawn that already re-took the slot (and
+            // re-marked running=true). `mark_running` carries no generation, so
+            // an unguarded `false` here could clobber that newer spawn's mark.
+            // (1) If a *different* generation now owns the id, the newer spawn
+            //     is authoritative — never touch the restore set (this also
+            //     preserves a retained Crashed entry, a restore candidate).
+            // (2) Otherwise re-read liveness as late as possible before the
+            //     clear: a fresh spawn inserts a Running entry *before* it
+            //     marks running=true, so `is_live` catches the common restart
+            //     race and we skip the clobbering clear.
+            if status == RuntimeStatus::Stopped && !user_killed {
+                let newer_owns = procs.get(&id).is_some_and(|m| m.generation != generation);
+                if !newer_owns && !pm_clone.is_live(&id) {
+                    pm_clone.runtime_store.mark_running(&id, false).await;
+                }
             }
 
             if let Some(delay_ms) = delay_ms {
@@ -591,7 +583,7 @@ impl ProcessManager {
 
     pub async fn kill_with_timeout(&self, id: &str, timeout_ms: u64) -> Result<(), String> {
         let timeout_ms = clamp_shutdown_timeout_ms(timeout_ms);
-        let (pid, killed_flag, exited_flag, generation, respawn_cancelled_flag, has_declared_ports) = {
+        let (pid, killed_flag, exited_flag, generation, respawn_cancelled_flag) = {
             let Some(m) = self.procs.get(id) else {
                 emit_shutdown(
                     &self.app,
@@ -609,7 +601,6 @@ impl ProcessManager {
                 Arc::clone(&m.exited),
                 m.generation,
                 Arc::clone(&m.respawn_cancelled),
-                m.has_declared_ports,
             )
         };
         // H2: cancel any pending auto-restart timer that belongs to this
@@ -628,24 +619,25 @@ impl ProcessManager {
 
         // Snapshot all descendant PIDs holding ports BEFORE kill.
         // This catches detached processes (Gradle daemon, etc.) that
-        // setsid/setpgid away from our group.
+        // setsid/setpgid away from our group so killpg(pgid) misses them.
+        // `list_ports_for_script_pid` resolves the root_pid's cwd via `lsof`
+        // (to follow reparented daemons) and MUST run while the root is still
+        // alive — hence it stays *before* SIGTERM.
         //
-        // WS4: only port-declaring scripts pay for this snapshot. The
-        // `list_ports_for_script_pid` call resolves the root_pid's cwd via
-        // `lsof` (to follow reparented daemons) and MUST run while the root
-        // is still alive — hence it stays *before* SIGTERM. But a port-free
-        // script (e.g. a one-shot build, a logger) can never own a port
-        // holder, so for those we skip the lsof/ps round-trip entirely and
-        // SIGTERM immediately, removing the hot-path stall on `stop`.
+        // We snapshot for EVERY still-live script, not only port-declaring
+        // ones: `ports` is optional UI/`depends_on` metadata, and a script
+        // that declares no ports can still spawn a detached daemon that binds
+        // one (the exact Gradle/launchd case). Gating on declared ports leaked
+        // those daemons across stop/restart, so we gate on liveness alone. The
+        // `lsof` cost is bounded to the user-initiated stop path, not the
+        // metrics/poll hot path.
         //
-        // WS2 hardening: a retained Crashed entry (exited_flag already set)
-        // has a dead pid that the OS may have reused. Walking
-        // `list_ports_for_script_pid(reused_pid)` could attribute an
-        // unrelated live process tree as our "descendants" and the post-kill
-        // sweep below would then SIGKILL innocent processes. Only snapshot
-        // while the process is genuinely still alive.
-        let descendant_pids: Vec<u32> = if has_declared_ports && !exited_flag.load(Ordering::SeqCst)
-        {
+        // WS2 hardening: the `!exited_flag` guard is the load-bearing one — a
+        // retained Crashed entry has a dead pid the OS may have reused, and
+        // `list_ports_for_script_pid(reused_pid)` could attribute an unrelated
+        // live process tree as our "descendants" so the post-kill sweep below
+        // would SIGKILL innocent processes. Only snapshot while genuinely alive.
+        let descendant_pids: Vec<u32> = if !exited_flag.load(Ordering::SeqCst) {
             crate::commands::port::list_ports_for_script_pid(pid)
                 .await
                 .unwrap_or_default()
@@ -796,7 +788,6 @@ impl ProcessManager {
         &self,
         script_id: &str,
         pid: u32,
-        has_declared_ports: bool,
     ) -> Result<(u64, Arc<AtomicBool>, Arc<AtomicBool>), String> {
         // Double-run guard: refuse to register if a live entry already owns
         // this id. The caller kills + retries for a uniform restart.
@@ -818,7 +809,6 @@ impl ProcessManager {
                 generation,
                 pid,
                 status: RuntimeStatus::Running,
-                has_declared_ports,
                 kind: ProcessKind::Pty,
                 started_at_ms,
                 wrapper_pid: Some(pid),
@@ -932,16 +922,17 @@ impl ProcessManager {
         }
 
         // Clean self-exit drops out of the session-restore set (matches the
-        // piped watcher). Generation-guarded so a newer spawn's mark wins.
-        if status == RuntimeStatus::Stopped
-            && !user_killed
-            && self
+        // piped watcher). Generation-guarded + late liveness recheck so a
+        // newer spawn's running=true mark is never clobbered (see the piped
+        // watcher for the full rationale).
+        if status == RuntimeStatus::Stopped && !user_killed {
+            let newer_owns = self
                 .procs
                 .get(script_id)
-                .map(|m| m.generation == generation)
-                .unwrap_or(true)
-        {
-            self.runtime_store.mark_running(script_id, false).await;
+                .is_some_and(|m| m.generation != generation);
+            if !newer_owns && !self.is_live(script_id) {
+                self.runtime_store.mark_running(script_id, false).await;
+            }
         }
     }
 
@@ -1752,26 +1743,14 @@ mod tests {
         drop(buf);
     }
 
-    // --- WS4: kill() descendant-snapshot gating. ---
+    // --- kill() descendant-snapshot gating. ---
     //
-    // The gate is `has_declared_ports = !ports.is_empty()`. We can't run a
-    // real kill here, but we verify the predicate that decides whether
-    // kill_with_timeout pays the pre-SIGTERM lsof cost.
-
-    fn has_declared_ports(ports_len: usize) -> bool {
-        ports_len != 0
-    }
-
-    #[test]
-    fn declared_ports_gate_true_when_ports_present() {
-        assert!(has_declared_ports(1));
-    }
-
-    #[test]
-    fn declared_ports_gate_false_for_portless_script() {
-        // Port-free scripts skip the pre-SIGTERM lsof snapshot — the WS4 win.
-        assert!(!has_declared_ports(0));
-    }
+    // The pre-SIGTERM `lsof` descendant snapshot is gated purely on liveness
+    // (`!exited_flag`), NOT on declared ports: a port-free script can still
+    // spawn a detached daemon that binds a port, so the snapshot must run for
+    // every live script. The `!exited_flag` guard prevents walking a
+    // retained-Crashed entry's reused pid. This is timing/process behavior
+    // exercised by manual QA, not a unit-testable pure predicate.
 
     // --- WS9: PTY as a ProcessManager-owned lifecycle. ---
     //

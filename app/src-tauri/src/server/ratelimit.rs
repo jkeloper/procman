@@ -80,6 +80,27 @@ impl RateLimiter {
         Decision::Allow
     }
 
+    /// Ban-window check that does NOT consume rate budget. Use this when a
+    /// second middleware layer needs to know whether an IP is banned without
+    /// counting the request again — calling `check` twice per request would
+    /// otherwise burn two of the per-minute budget and roughly halve the
+    /// effective limit. Lazily clears an expired ban.
+    pub fn is_banned(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut map = self.inner.lock().unwrap();
+        match map.get_mut(&ip) {
+            Some(entry) => match entry.banned_until {
+                Some(until) if now < until => true,
+                Some(_) => {
+                    entry.banned_until = None;
+                    false
+                }
+                None => false,
+            },
+            None => false,
+        }
+    }
+
     /// Register a 401 for this IP. Returns true if the IP was just banned.
     pub fn record_auth_failure(&self, ip: IpAddr) -> bool {
         let now = Instant::now();
@@ -170,6 +191,26 @@ mod tests {
             assert_eq!(banned, i + 1 == AUTH_FAIL_LIMIT);
         }
         assert_eq!(rl.check(a), Decision::Banned);
+    }
+
+    #[test]
+    fn is_banned_reflects_ban_without_consuming_budget() {
+        let rl = RateLimiter::new();
+        let a = ip(7);
+        // Not banned, unknown IP: no entry created, no budget consumed.
+        assert!(!rl.is_banned(a));
+        // Calling is_banned many times must not burn the rate budget.
+        for _ in 0..1000 {
+            assert!(!rl.is_banned(a));
+        }
+        for _ in 0..REQ_PER_MINUTE {
+            assert_eq!(rl.check(a), Decision::Allow);
+        }
+        // Drive into the ban window and confirm is_banned observes it.
+        for _ in 0..AUTH_FAIL_LIMIT {
+            rl.record_auth_failure(a);
+        }
+        assert!(rl.is_banned(a));
     }
 
     #[test]

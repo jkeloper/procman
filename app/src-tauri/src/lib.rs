@@ -337,7 +337,17 @@ pub fn run() {
                         // already counts them. We must NOT add the PtyManager's
                         // I/O-session count on top or running PTYs would be
                         // double-counted in the confirm-quit prompt.
-                        let count = pm.list().len();
+                        //
+                        // WS2: `procs` also retains terminally-crashed entries
+                        // (so their post-mortem logs survive), and `list()`
+                        // returns them. Count only `Running` entries so a stale
+                        // crashed card never produces a spurious "N running —
+                        // confirm quit?" prompt that blocks a clean close.
+                        let count = pm
+                            .list()
+                            .iter()
+                            .filter(|s| s.status == process::RuntimeStatus::Running)
+                            .count();
                         if count > 0 {
                             api.prevent_close();
                             let _ = window.emit("procman://confirm-quit", count);
@@ -368,7 +378,18 @@ pub fn run() {
             // interrupt via prevent_exit.
             if let tauri::RunEvent::Exit = event {
                 if let Some(pm) = app_handle.try_state::<ProcessManager>() {
-                    let snaps = pm.list();
+                    // WS2: `list()` returns retained `Crashed` entries whose
+                    // `pid` is already dead and may have been reused by the OS.
+                    // Filter to `Running` before computing kill targets so the
+                    // killpg loop and the descendant BFS below can never SIGKILL
+                    // an unrelated live process group at shutdown. (This mirrors
+                    // the `!exited_flag` guard in `kill_with_timeout` and the
+                    // `Running`-only metrics filter in `list()`.)
+                    let snaps: Vec<_> = pm
+                        .list()
+                        .into_iter()
+                        .filter(|s| s.status == process::RuntimeStatus::Running)
+                        .collect();
                     if !snaps.is_empty() {
                         log::info!("procman exiting — killing {} child process group(s)", snaps.len());
 

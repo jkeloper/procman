@@ -57,9 +57,12 @@ pub async fn require_token(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let peer_ip: Option<IpAddr> = connect_info.map(|ConnectInfo(s)| s.ip());
-    // Reject early if this IP is in the auth-failure ban window.
+    // Reject early if this IP is in the auth-failure ban window. Use the
+    // budget-free `is_banned` here: the outer `rate_limit` layer already
+    // consumed this request's rate budget via `check`, so calling `check`
+    // again would double-count and roughly halve the effective per-IP limit.
     if let Some(ip) = peer_ip {
-        if matches!(ratelimit::global().check(ip), Decision::Banned) {
+        if ratelimit::global().is_banned(ip) {
             return Err(StatusCode::TOO_MANY_REQUESTS);
         }
     }
