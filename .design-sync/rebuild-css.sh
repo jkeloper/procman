@@ -51,7 +51,9 @@ EOF
   echo '@source inline("bg-background bg-foreground bg-card bg-popover bg-primary bg-secondary bg-muted bg-accent bg-destructive");'
   echo '@source inline("text-foreground text-card-foreground text-popover-foreground text-primary text-primary-foreground text-secondary-foreground text-muted-foreground text-accent-foreground text-destructive");'
   echo '@source inline("border-border border-input ring-ring ring-2 outline-none");'
-  tail -n +10 app/src/index.css
+  # Drop the app's own top import block (tailwind plugins + @fontsource) by
+  # pattern, not line offset — robust to the block growing or shrinking.
+  grep -v '^@import ' app/src/index.css
 } > app/.design-sync-tw.css
 
 node .ds-sync/node_modules/.bin/tailwindcss -i app/.design-sync-tw.css -o app/.design-sync-css.css

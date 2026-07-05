@@ -42,11 +42,10 @@ CVA), bundled to `window.Procman`. Project: `procman Design System`
 
 ## Re-sync risks / watch-list
 
-- **`rebuild-css.sh` uses `tail -n +10` on `app/src/index.css`** to drop the top import
-  block (3 tailwind/plugin imports + 6 @fontsource imports = lines 1–9). If that import
-  block changes size, fix the offset, or the compiled CSS will be malformed / re-include
-  fonts. It derives tokens/layers from `index.css` each run, so those don't rot — but the
-  offset assumption does.
+- **`rebuild-css.sh` drops `index.css`'s import block by pattern** (`grep -v '^@import '`),
+  so it's robust to the block growing/shrinking. Caveat: if `index.css` ever gains an
+  `@import` **below** the top block that should ship (e.g. a new component stylesheet),
+  it would be silently dropped — re-add it explicitly in the script.
 - **The `@source inline` safelist is hand-maintained.** If the conventions header (or the
   design agent's needs) grows new utility classes, add them to the safelist in
   `rebuild-css.sh`, else designs using them render unstyled.
@@ -55,7 +54,8 @@ CVA), bundled to `window.Procman`. Project: `procman Design System`
   barrel list in `rebuild-css.sh`).
 - **`cfg.dtsPropsFor` is hand-written** (no shipped types) and can drift from the real
   component props. Re-check on component API changes.
-- **`typescript` is not installed in `.ds-sync`**, so validate's `[DTS_PARSE]` check of the
-  hand-written props is skipped. `npm i -D typescript` in `.ds-sync` to enable it.
+- **Install `typescript` in `.ds-sync` on a fresh clone** (alongside esbuild/ts-morph/
+  @types/react) — it enables validate's `[DTS_PARSE]` check of the hand-written
+  `dtsPropsFor` contracts. Verified clean (12/12) on 2026-07-06.
 - Only the light theme + Latin/Geist rendering was visually verified. Dark mode
   (`class="dark"`) and Korean (Noto Sans KR) were not.
