@@ -1,0 +1,47 @@
+{
+  "pkg": "procman",
+  "globalName": "Procman",
+  "projectId": "81ce47af-5315-45e2-820f-2a9a7de06191",
+  "shape": "package",
+  "srcDir": "src/components/ui",
+  "tsconfig": "tsconfig.app.json",
+  "cssEntry": ".design-sync-css.css",
+  "componentSrcMap": {
+    "Badge": "src/components/ui/badge.tsx",
+    "Button": "src/components/ui/button.tsx",
+    "Card": "src/components/ui/card.tsx",
+    "Command": "src/components/ui/command.tsx",
+    "Dialog": "src/components/ui/dialog.tsx",
+    "Input": "src/components/ui/input.tsx",
+    "InputGroup": "src/components/ui/input-group.tsx",
+    "Label": "src/components/ui/label.tsx",
+    "ScrollArea": "src/components/ui/scroll-area.tsx",
+    "Separator": "src/components/ui/separator.tsx",
+    "Tabs": "src/components/ui/tabs.tsx",
+    "Textarea": "src/components/ui/textarea.tsx"
+  },
+  "dtsPropsFor": {
+    "Button": "variant?: \"default\" | \"outline\" | \"secondary\" | \"ghost\" | \"destructive\" | \"link\";\n  size?: \"default\" | \"xs\" | \"sm\" | \"lg\" | \"icon\" | \"icon-xs\" | \"icon-sm\" | \"icon-lg\";\n  disabled?: boolean;\n  type?: \"button\" | \"submit\" | \"reset\";\n  className?: string;\n  children?: React.ReactNode;\n  onClick?: React.MouseEventHandler<HTMLButtonElement>;",
+    "Badge": "variant?: \"default\" | \"secondary\" | \"destructive\" | \"outline\" | \"ghost\" | \"link\";\n  /** Render as a different element (e.g. an anchor) — Base UI useRender. */\n  render?: React.ReactElement;\n  className?: string;\n  children?: React.ReactNode;",
+    "Card": "/** Surface container. Compose with CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter. */\n  className?: string;\n  children?: React.ReactNode;",
+    "Command": "/** Command palette (cmdk). Compose with CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut; CommandDialog wraps it in a modal. */\n  value?: string;\n  onValueChange?: (value: string) => void;\n  className?: string;\n  children?: React.ReactNode;",
+    "Dialog": "/** Modal root (Base UI). Compose with DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  children?: React.ReactNode;",
+    "Input": "type?: string;\n  placeholder?: string;\n  value?: string;\n  defaultValue?: string;\n  disabled?: boolean;\n  className?: string;\n  onChange?: React.ChangeEventHandler<HTMLInputElement>;",
+    "InputGroup": "/** Wraps an Input/Textarea with addons. Compose with InputGroupInput, InputGroupTextarea, InputGroupAddon (align: inline-start|inline-end|block-start|block-end), InputGroupButton, InputGroupText. */\n  className?: string;\n  children?: React.ReactNode;",
+    "Label": "htmlFor?: string;\n  className?: string;\n  children?: React.ReactNode;",
+    "ScrollArea": "/** Custom-scrollbar viewport (Base UI). Give it a fixed height and place scrollable content as children. */\n  className?: string;\n  children?: React.ReactNode;",
+    "Separator": "orientation?: \"horizontal\" | \"vertical\";\n  className?: string;",
+    "Tabs": "/** Tabs root (Base UI). Compose with TabsList (variant: default|line), TabsTrigger, TabsContent. */\n  value?: string;\n  defaultValue?: string;\n  onValueChange?: (value: string) => void;\n  orientation?: \"horizontal\" | \"vertical\";\n  className?: string;\n  children?: React.ReactNode;",
+    "Textarea": "placeholder?: string;\n  value?: string;\n  defaultValue?: string;\n  rows?: number;\n  disabled?: boolean;\n  className?: string;\n  onChange?: React.ChangeEventHandler<HTMLTextAreaElement>;"
+  },
+  "overrides": {
+    "Dialog": { "cardMode": "single", "viewport": "760x520" }
+  },
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraFonts": [
+    "node_modules/@fontsource-variable/geist/index.css",
+    "node_modules/@fontsource/jetbrains-mono/400.css",
+    "node_modules/@fontsource/jetbrains-mono/500.css"
+  ],
+  "runtimeFontPrefixes": ["Noto Sans KR"]
+}

@@ -117,6 +117,7 @@ Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is en
 - [app/README.md](app/README.md) — desktop app dev guide
 - [mobile/README.md](mobile/README.md) — mobile PWA / iOS guide
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 spike verdict
+- [.design-sync/NOTES.md](.design-sync/NOTES.md) — claude.ai/design sync (12 shadcn/ui primitives, re-sync guide)
 
 ## Contributing
 
@@ -250,6 +251,7 @@ procman/
 - [app/README.md](app/README.md) — 데스크톱 앱 개발 가이드
 - [mobile/README.md](mobile/README.md) — 모바일 PWA/iOS 가이드
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 스파이크 최종 판정
+- [.design-sync/NOTES.md](.design-sync/NOTES.md) — claude.ai/design 동기화 (shadcn/ui 프리미티브 12종, 재동기화 가이드)
 
 ## 기여
 

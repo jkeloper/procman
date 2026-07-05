@@ -47,6 +47,18 @@ MEMORY.md
 CLAUDE.local.md
 *.private.md
 
+# /design-sync (claude.ai/design import) — regenerable staging + build output.
+# Durable inputs (.design-sync/config.json, NOTES.md, conventions.md, previews/,
+# overrides/, rebuild-css.sh) are committed; everything below is regenerated.
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+app/.design-sync-entry.ts
+app/.design-sync-tw.css
+app/.design-sync-css.css
+
 # Internal-only: entire docs/ directory (planning notes, audit records,
 # charter, UX personas, submission guides). Kept local, never pushed.
 docs/
