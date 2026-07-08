@@ -4,6 +4,8 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-09
+
 ### Added
 - **Design-system export to claude.ai/design** — the 12 shadcn/ui primitives (`app/src/components/ui/`) sync to the "procman Design System" Claude Design project via `/design-sync`, so AI-generated designs are built from procman's real components (forest-green theme, Geist/JetBrains Mono, glass utilities). Durable inputs live in `.design-sync/` (config, 12 authored previews, conventions header, `rebuild-css.sh`); build artifacts are gitignored and re-sync is one driver command.
 - **Global "All running" view** — the dashboard's first tab aggregates every running/crashed process across all projects on one screen (crashed first, per-project labels, Running/Crashed/total-CPU/total-RSS summary) with inline stop/restart/start/dismiss/logs/tunnel controls — the headline "one screen to govern everything" surface. Backed by a behavior-preserving decomposition of `ProcessGrid` into a reusable `ScriptRow` + `useScriptActions`/`useTunnelLauncher` hooks.

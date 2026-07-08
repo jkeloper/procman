@@ -36,10 +36,8 @@ Public roadmap. Internal planning, decision logs, and completed-issue detail are
 - Mobile push notifications: mobile alerts for script crashes, port conflicts, and unreachable procman
 
 ## Planned (next)
-- v0.2.0 release hardening: restore local/CI Developer ID private-key access; local `codesign` currently times out in the preflight probe.
-- v0.2.0 release hardening: verify a signed release build with Apple notarization credentials and `TAURI_SIGNING_PRIVATE_KEY` in CI.
-- v0.2.0 release hardening: manual QA for desktop lifecycle/logs/terminal/ports/remote pairing/mobile notifications.
-- v0.2.0 release hardening: publish a draft GitHub Release and verify the generated updater `latest.json`.
+- **v0.3.0 release** (in progress): version bumped 0.2.0 → 0.3.0 across `package.json` / `tauri.conf.json` / `Cargo.toml` / `Cargo.lock`; CHANGELOG `[0.3.0]` finalized. Tag `v0.3.0` triggers the signed + notarized DMG + updater workflow (`.github/workflows/release.yml`), which creates a **draft** Release — publish it so the auto-updater picks up `latest.json`.
+- v0.2.0 release hardening — **done** (v0.2.0 shipped signed + notarized via the pipeline: DMG + `.app.tar.gz`/`.sig` + `latest.json`, published 2026-04-25; 7 repo secrets + Developer ID cert + Tauri key all in place).
 
 ## v0.3 — targeted refactor (complete — committed on `redesign/v0.3-targeted-refactor`, review-hardened)
 Outcome of a full-codebase assessment: keep the verified core (race-safe kill, config/runtime persistence, pure helpers) verbatim and surgically close the gaps that block the "one screen to govern everything" goal. No new scope beyond the existing goal.
