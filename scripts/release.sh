@@ -3,8 +3,8 @@
 #
 # Usage:
 #   ./scripts/release.sh                        # use current version in package.json
-#   ./scripts/release.sh --version 0.2.0        # bump to 0.2.0 (package.json/tauri.conf.json/Cargo.toml)
-#   ./scripts/release.sh --version 0.2.0-rc.1   # pre-release tag
+#   ./scripts/release.sh --version X.Y.Z        # sync desktop release surfaces, then build
+#   ./scripts/release.sh --version X.Y.Z-rc.1   # pre-release tag
 #   ./scripts/release.sh --skip-notarize        # sign only
 #   ./scripts/release.sh --skip-updater-artifacts  # local app/dmg candidate only
 #   ./scripts/release.sh --dry-run              # print actions without executing build
@@ -85,7 +85,7 @@ run_with_timeout() {
 # ───────── 1. Version sync ─────────
 sync_version() {
   local v="$1"
-  log "Syncing version → $v (package.json / tauri.conf.json / Cargo.toml)"
+  log "Syncing desktop release surfaces → $v"
 
   # package.json
   node -e "const fs=require('fs');const p='$APP_DIR/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='$v';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
@@ -95,6 +95,13 @@ sync_version() {
 
   # Cargo.toml — only the [package] version line (first match)
   node -e "const fs=require('fs');const p='$TAURI_DIR/Cargo.toml';let s=fs.readFileSync(p,'utf8');s=s.replace(/^version\s*=\s*\"[^\"]+\"/m,'version = \"$v\"');fs.writeFileSync(p,s);"
+
+  # Cargo.lock — update only procman's own package entry.
+  node -e "const fs=require('fs');const p='$TAURI_DIR/Cargo.lock';let s=fs.readFileSync(p,'utf8');s=s.replace(/(\[\[package\]\]\s+name = \"procman\"\s+version = \s*\")[^\"]+(\")/m,'\$1$v\$2');fs.writeFileSync(p,s);"
+
+  # Public website + README release marker/status/download links.
+  node -e "const fs=require('fs');const p='$REPO_ROOT/web/src/config/site.ts';let s=fs.readFileSync(p,'utf8');s=s.replace(/(version:\s*')[^']+(')/,'\$1$v\$2').replace(/procman_[^/]+_aarch64\.dmg/g,'procman_${v}_aarch64.dmg');fs.writeFileSync(p,s);"
+  node -e "const fs=require('fs');const p='$REPO_ROOT/README.md';let s=fs.readFileSync(p,'utf8');s=s.replace(/(latest-release:\s*)[^\s]+/,'\$1${v}').replace(/\*\*v[^\s]+ is the latest stable release/,'**v${v} is the latest stable release').replace(/\*\*v[^\s]+이 최신 안정 릴리스/,'**v${v}이 최신 안정 릴리스').replace(/procman_[^/]+_aarch64\.dmg/g,'procman_${v}_aarch64.dmg');fs.writeFileSync(p,s);"
 }
 
 current_version() {
@@ -106,6 +113,7 @@ if [[ -n "$VERSION" ]]; then
 fi
 EFFECTIVE_VERSION="$(current_version)"
 log "Release version: $EFFECTIVE_VERSION"
+"$SCRIPT_DIR/check-release-version.sh" --expected "$EFFECTIVE_VERSION"
 
 # ───────── 2. Codesign identity ─────────
 detect_identity() {

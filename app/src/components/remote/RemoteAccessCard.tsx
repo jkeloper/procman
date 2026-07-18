@@ -7,26 +7,48 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import { useSettings } from '@/hooks/useSettings';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
-// QR code that encodes the procman pairing payload as a URL with the
-// token and optional TLS pin in the fragment (so neither is sent server-side).
-// Mobile picks the URL up, parses the fragment, and auto-pairs.
-function PairingQR({
+type PairingMode = 'loopback' | 'lan' | 'tunnel' | null;
+
+// Pure helper so the LAN/Tunnel credential boundary can be tested without
+// relying on QR canvas rendering.
+export function buildPairingUrl({
   url,
   token,
   certFingerprint,
+  mode,
 }: {
   url: string;
   token: string;
   certFingerprint: string | null;
+  mode: PairingMode;
+}) {
+  const payload = new URL(url);
+  const params = new URLSearchParams({ token });
+  if (certFingerprint) params.set('fp', certFingerprint);
+  if (mode === 'lan' || mode === 'tunnel') params.set('mode', mode);
+  payload.hash = params.toString();
+  return payload.toString();
+}
+
+// QR code that encodes the procman pairing payload as a URL with the
+// token and optional TLS fingerprint in the fragment (so neither is sent server-side).
+// Capacitor iOS pins that fingerprint for LAN REST/WS; browser PWA uses Tunnel only.
+function PairingQR({
+  url,
+  token,
+  certFingerprint,
+  mode,
+}: {
+  url: string;
+  token: string;
+  certFingerprint: string | null;
+  mode: PairingMode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!canvasRef.current) return;
-    const payload = new URL(url);
-    const params = new URLSearchParams({ token });
-    if (certFingerprint) params.set('fp', certFingerprint);
-    payload.hash = params.toString();
-    QRCode.toCanvas(canvasRef.current, payload.toString(), {
+    const payload = buildPairingUrl({ url, token, certFingerprint, mode });
+    QRCode.toCanvas(canvasRef.current, payload, {
       width: 180,
       margin: 1,
       color: {
@@ -35,7 +57,7 @@ function PairingQR({
       },
       errorCorrectionLevel: 'M',
     }).catch(() => {});
-  }, [url, token, certFingerprint]);
+  }, [url, token, certFingerprint, mode]);
   return (
     <div className="flex flex-col items-center gap-2">
       <canvas
@@ -44,7 +66,11 @@ function PairingQR({
         style={{ width: 180, height: 180 }}
       />
       <p className="text-center text-[11px] text-muted-foreground">
-        Scan with your phone camera to pair instantly
+        {mode === 'lan'
+          ? 'Open the procman iOS app → Scan QR (in-app scanner only)'
+          : mode === 'tunnel'
+            ? 'Open with your phone camera or the browser PWA'
+            : 'Local-only endpoint · use Cloudflare Tunnel for mobile access'}
       </p>
     </div>
   );
@@ -55,7 +81,15 @@ function PairingQR({
 const REMOTE_SERVER_TUNNEL_ID = '__procman_remote_server__';
 
 // ---- Tunnel sub-section ---- //
-function TunnelSection({ serverPort }: { serverPort: number | null }) {
+function TunnelSection({
+  serverPort,
+  serverMode,
+  token,
+}: {
+  serverPort: number | null;
+  serverMode: Mode | null;
+  token: string;
+}) {
   const [tunnel, setTunnel] = useState<
     { running: boolean; url: string | null; pid: number | null } | null
   >({ running: false, url: null, pid: null });
@@ -129,28 +163,45 @@ function TunnelSection({ serverPort }: { serverPort: number | null }) {
         ) : (
           <Button size="sm"
             onClick={start}
-            disabled={busy || !serverPort}
+            disabled={busy || !serverPort || serverMode !== 'loopback'}
+            title={serverMode === 'lan' ? 'Stop LAN, then start Local only before exposing a Tunnel' : undefined}
           >
             {busy ? 'Connecting...' : 'Expose via Cloudflare'}
           </Button>
         )}
       </div>
 
-      {tunnel.running && tunnel.url && (
-        <div className="flex items-center gap-2 text-[11px]">
-          <span className="min-w-0 flex-1 truncate font-mono text-primary">{tunnel.url}</span>
-          <Button variant="ghost" size="sm" className="h-6 px-2"
-            onClick={() => copy(tunnel.url!)}
-          >
-            Copy
-          </Button>
+      {tunnel.running && tunnel.url && serverMode === 'loopback' && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="min-w-0 flex-1 truncate font-mono text-primary">{tunnel.url}</span>
+            <Button variant="ghost" size="sm" className="h-6 px-2"
+              onClick={() => copy(tunnel.url!)}
+            >
+              Copy
+            </Button>
+          </div>
+          <PairingQR
+            url={tunnel.url}
+            token={token}
+            certFingerprint={null}
+            mode="tunnel"
+          />
         </div>
+      )}
+
+      {tunnel.running && serverMode !== 'loopback' && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-300">
+          This Tunnel no longer has a compatible loopback HTTP origin. Stop it,
+          restart Remote Access as Local only, and expose it again.
+        </p>
       )}
 
       {!tunnel.running && (
         <p className="text-[10px] text-muted-foreground/70">
-          Creates a Cloudflare quick tunnel so you can access procman from anywhere.
-          Requires cloudflared installed.
+          {serverMode === 'lan'
+            ? 'Tunnel uses the loopback HTTP origin. Stop LAN, start Local only, then expose it here.'
+            : 'Browser PWA access requires this HTTPS Cloudflare Tunnel; direct LAN pairing is available only in the pinned iOS app. Requires cloudflared.'}
         </p>
       )}
     </div>
@@ -205,8 +256,15 @@ export function RemoteAccessCard() {
     setBusy(true);
     setErr(null);
     try {
-      if (enable) await api.startServer(7777, mode);
-      else await api.stopServer();
+      if (enable) {
+        await api.startServer(7777, mode);
+      } else {
+        // A cloudflared child can outlive its HTTP origin. Stop the special
+        // tunnel first so a later loopback restart cannot silently reactivate
+        // an old public URL.
+        await api.stopTunnel(REMOTE_SERVER_TUNNEL_ID);
+        await api.stopServer();
+      }
       await reload();
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -289,24 +347,29 @@ export function RemoteAccessCard() {
       {!status?.running && !lanOptIn && (
         <div className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
           <span className="font-semibold">LAN mode disabled.</span> Opt-in from Settings
-          to expose procman on your local network. Cloudflare Tunnel is recommended for
-          anything beyond a trusted Wi-Fi.
+          for pinned Capacitor iOS access. Browser PWA clients always require a
+          Cloudflare Tunnel.
         </div>
       )}
       {!status?.running && lanOptIn && (
         <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
-          LAN mode uses a self-signed TLS certificate. The pairing QR includes
-          its SHA-256 fingerprint for client pinning.
+          Direct LAN pairing is for the Capacitor iOS app only. Native REST and
+          WebSocket pin this self-signed certificate&apos;s SHA-256 leaf fingerprint
+          and fail closed on mismatch. Browser PWA clients must use Cloudflare
+          Tunnel; a replaced certificate requires scanning a new QR.
         </div>
       )}
 
       {!status?.running ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/50 p-3 text-[11px] text-muted-foreground">
-          Start the server to control procman from your phone.
-          <br />
-          <span className="text-muted-foreground/70">
-            Phone → open the URL → enter token → done.
-          </span>
+          <div>
+            Start the server to control procman from your phone.
+            <br />
+            <span className="text-muted-foreground/70">
+              iOS LAN → scan in app. Browser PWA → start Cloudflare Tunnel.
+            </span>
+          </div>
+          <TunnelSection serverPort={null} serverMode={null} token="" />
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
@@ -366,13 +429,19 @@ export function RemoteAccessCard() {
             )}
           </div>
 
-          {url && status.token && (
+          {url && status.token && status.mode === 'lan' && (
             <div className="border-t border-border/40 pt-3">
               <PairingQR
                 url={url}
                 token={status.token}
                 certFingerprint={status.cert_fingerprint_sha256}
+                mode={status.mode}
               />
+              {status.mode === 'lan' && (
+                <p className="mt-2 text-center text-[10px] text-muted-foreground/70">
+                  iOS app only · pinned certificate · re-pair after certificate changes
+                </p>
+              )}
             </div>
           )}
 
@@ -384,11 +453,17 @@ export function RemoteAccessCard() {
               Rotate token
             </Button>
             <span className="text-[10px] text-muted-foreground/50">
-              Or scan QR ↑ on your phone
+              {status.mode === 'lan'
+                ? 'Or scan QR ↑ in the procman iOS app'
+                : 'Use Cloudflare Tunnel for mobile access'}
             </span>
           </div>
 
-          <TunnelSection serverPort={status.port} />
+          <TunnelSection
+            serverPort={status.port}
+            serverMode={status.mode}
+            token={status.token}
+          />
 
           {audit.length > 0 && (
             <div>

@@ -1,27 +1,28 @@
 // HTTP routes for remote control API.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::{header, HeaderValue, Method, StatusCode},
-    middleware,
-    response::Json,
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use serde::Serialize;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
-use super::{auth, ws::ws_handler, ServerState};
+use super::{auth, ws::ws_handler, ServerMode, ServerState};
 use crate::types::PortInfo;
 
-pub fn build_router(state: ServerState) -> Router {
+pub fn build_router(state: ServerState, mode: ServerMode) -> Router {
+    let auth_state = auth::AuthState::new(state.token.clone());
     // SEC-08: CORS — allow known origins + any *.trycloudflare.com host.
     // Native mobile uses capacitor:// scheme; tunnel uses https://*.trycloudflare.com;
-    // LAN dev uses http://<private-ip>:port. Substring matches are deliberately
-    // avoided here — "trycloudflare.com.evil.example" would have passed the
-    // previous implementation.
+    // Browser/PWA LAN access is intentionally unsupported: LAN REST + WS use
+    // the iOS native pinned transport, while browser clients use a public-TLS
+    // Cloudflare tunnel. Substring matches are deliberately avoided here —
+    // "trycloudflare.com.evil.example" would have passed the old check.
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::AllowOrigin::predicate(
             |origin: &HeaderValue, _req: &axum::http::request::Parts| {
@@ -54,18 +55,29 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/audit", get(audit_snapshot))
         .route("/api/stream", get(ws_handler))
         .route_layer(middleware::from_fn_with_state(
-            state.clone(),
+            auth_state.clone(),
             auth::require_token,
         ));
 
-    Router::new()
+    // A stale service worker or an already-open copy of the former LAN PWA
+    // must not bypass the new native-pinning boundary. Browsers attach Fetch
+    // Metadata and/or Origin headers that native URLSession does not. Native
+    // REST/WS also carries a versioned transport marker that old PWA bundles
+    // never sent. Require both properties before an authenticated LAN endpoint
+    // can run.
+    let protected = if matches!(mode, ServerMode::Lan) {
+        protected.route_layer(middleware::from_fn(require_native_lan_transport))
+    } else {
+        protected
+    };
+
+    let router = Router::new()
         .route("/api/health", get(health))
         .merge(protected)
-        .fallback(super::spa::spa_fallback)
         // Rate limit runs on EVERY request (including /api/health + SPA). Placed
         // outermost (after `.layer()` stacking it's innermost-applied) so anonymous
         // floods can't exhaust the auth middleware.
-        .layer(middleware::from_fn(auth::rate_limit))
+        .layer(middleware::from_fn_with_state(auth_state, auth::rate_limit))
         .layer(cors)
         // SEC-10: Security headers
         .layer(SetResponseHeaderLayer::overriding(
@@ -75,8 +87,61 @@ pub fn build_router(state: ServerState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
-        ))
-        .with_state(state)
+        ));
+
+    let router = if matches!(mode, ServerMode::Lan) {
+        // The LAN QR is consumed by the scanner inside the iOS app. If a phone
+        // camera opens it in Safari, show a safe explanation rather than
+        // booting a browser client that cannot inspect or pin TLS certificates.
+        router.fallback(lan_native_client_required)
+    } else {
+        router.fallback(super::spa::spa_fallback)
+    };
+
+    router.with_state(state)
+}
+
+async fn require_native_lan_transport(req: Request, next: Next) -> Response {
+    if request_has_browser_metadata(req.headers()) || !request_has_native_lan_marker(req.headers())
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(req).await
+}
+
+fn request_has_browser_metadata(headers: &axum::http::HeaderMap) -> bool {
+    headers.contains_key(header::ORIGIN)
+        || headers.contains_key("sec-fetch-site")
+        || headers.contains_key("sec-fetch-mode")
+        || headers.contains_key("sec-fetch-dest")
+}
+
+fn request_has_native_lan_marker(headers: &axum::http::HeaderMap) -> bool {
+    if headers
+        .get("x-procman-transport")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == "ios-pinned-v1")
+    {
+        return true;
+    }
+
+    headers
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|protocols| {
+            protocols
+                .split(',')
+                .any(|protocol| protocol.trim() == "procman-native-pinned-v1")
+        })
+}
+
+async fn lan_native_client_required() -> impl IntoResponse {
+    (
+        StatusCode::FORBIDDEN,
+        Html(
+            r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>procman iOS app required</title><script>if(location.hash)history.replaceState(null,"",location.pathname+location.search)</script><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1.25rem;line-height:1.55"><h1>Open the procman iOS app</h1><p>Direct LAN control requires certificate pinning and is available only through the QR scanner inside the procman iOS app.</p><p>For browser access, start a Cloudflare Tunnel from procman and open its HTTPS URL.</p></body></html>"#,
+        ),
+    )
 }
 
 /// Returns true if the given Origin header value is allowed by CORS policy.
@@ -105,10 +170,6 @@ pub(crate) fn origin_is_allowed(origin: &str) -> bool {
     if host == "trycloudflare.com" || host.ends_with(".trycloudflare.com") {
         return true;
     }
-    // RFC1918 / link-local IPs
-    if let Some(ip) = parse_host_ip(host) {
-        return is_private_ip(ip);
-    }
     false
 }
 
@@ -130,44 +191,6 @@ fn parse_origin(s: &str) -> Option<(&str, &str)> {
         authority
     };
     Some((scheme, host))
-}
-
-fn parse_host_ip(host: &str) -> Option<IpAddr> {
-    // Strip IPv6 brackets if present.
-    let h = host
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(host);
-    h.parse::<IpAddr>().ok()
-}
-
-fn is_private_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => is_private_v4(v4),
-        IpAddr::V6(v6) => is_private_v6(v6),
-    }
-}
-
-fn is_private_v4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback()
-        || ip.is_private() // 10/8, 172.16/12, 192.168/16
-        || ip.is_link_local() // 169.254/16
-}
-
-fn is_private_v6(ip: Ipv6Addr) -> bool {
-    if ip.is_loopback() {
-        return true;
-    }
-    let segs = ip.segments();
-    // fc00::/7 unique-local
-    if (segs[0] & 0xfe00) == 0xfc00 {
-        return true;
-    }
-    // fe80::/10 link-local
-    if (segs[0] & 0xffc0) == 0xfe80 {
-        return true;
-    }
-    false
 }
 
 #[derive(Serialize)]
@@ -667,9 +690,6 @@ mod tests {
         assert!(origin_is_allowed("capacitor://localhost"));
         assert!(origin_is_allowed("https://alpha.trycloudflare.com"));
         assert!(origin_is_allowed("https://trycloudflare.com"));
-        assert!(origin_is_allowed("http://192.168.1.5:8080"));
-        assert!(origin_is_allowed("http://10.0.0.2"));
-        assert!(origin_is_allowed("http://172.16.0.1"));
     }
 
     #[test]
@@ -686,6 +706,9 @@ mod tests {
     fn cors_rejects_public_ips_and_random_hosts() {
         assert!(!origin_is_allowed("http://8.8.8.8"));
         assert!(!origin_is_allowed("https://example.com"));
+        assert!(!origin_is_allowed("https://192.168.1.5:7777"));
+        assert!(!origin_is_allowed("http://10.0.0.2"));
+        assert!(!origin_is_allowed("http://172.16.0.1"));
         assert!(!origin_is_allowed(""));
         assert!(!origin_is_allowed("not-a-url"));
         // Invalid schemes
@@ -712,14 +735,74 @@ mod tests {
         assert_eq!(parse_origin("http://[::1]:8080/x"), Some(("http", "[::1]")));
     }
 
-    #[test]
-    fn private_ip_classifier() {
-        assert!(is_private_ip("127.0.0.1".parse().unwrap()));
-        assert!(is_private_ip("10.0.0.1".parse().unwrap()));
-        assert!(is_private_ip("172.16.5.5".parse().unwrap()));
-        assert!(is_private_ip("192.168.1.1".parse().unwrap()));
-        assert!(is_private_ip("169.254.1.1".parse().unwrap()));
-        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
-        assert!(!is_private_ip("172.32.0.1".parse().unwrap())); // just outside 172.16/12
+    #[tokio::test]
+    async fn lan_transport_rejects_browser_metadata_but_accepts_native_requests() {
+        use axum::{body::Body, routing::get, Router};
+        use tower::ServiceExt;
+
+        let app = Router::new()
+            .route("/protected", get(|| async { StatusCode::NO_CONTENT }))
+            .route_layer(middleware::from_fn(require_native_lan_transport));
+
+        let missing_marker = Request::builder()
+            .uri("/protected")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(missing_marker).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+
+        for (name, value) in [
+            ("x-procman-transport", "ios-pinned-v1"),
+            (
+                "sec-websocket-protocol",
+                "procman, procman-native-pinned-v1, procman-token.test",
+            ),
+        ] {
+            let native = Request::builder()
+                .uri("/protected")
+                .header(name, value)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(native).await.unwrap().status(),
+                StatusCode::NO_CONTENT,
+                "native LAN marker {name} must be accepted"
+            );
+        }
+
+        for (name, value) in [
+            ("origin", "https://192.168.1.20:7777"),
+            ("sec-fetch-site", "same-origin"),
+            ("sec-fetch-mode", "cors"),
+            ("sec-fetch-dest", "empty"),
+        ] {
+            let browser = Request::builder()
+                .uri("/protected")
+                .header("x-procman-transport", "ios-pinned-v1")
+                .header(name, value)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(browser).await.unwrap().status(),
+                StatusCode::FORBIDDEN,
+                "browser metadata header {name} must be rejected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn lan_browser_fallback_strips_pairing_secret_fragment() {
+        let response = lan_native_client_required().await.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("history.replaceState"));
+        assert!(html.contains("location.pathname+location.search"));
+        assert!(!html.contains("token="));
+        assert!(html.contains("Open the procman iOS app"));
     }
 }

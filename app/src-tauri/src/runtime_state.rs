@@ -104,11 +104,17 @@ impl RuntimeStore {
     }
 
     pub async fn set_remote_token(self: &Arc<Self>, token: String) -> Result<(), ConfigError> {
-        {
-            let mut guard = self.state.lock().await;
-            guard.remote_token = token;
-        }
-        self.flush_now().await
+        // Token rotation is a security boundary: never expose a token in
+        // memory unless the same value is already durable. Build and persist
+        // a next snapshot first, then commit it while still holding the state
+        // lock. There are no await points after the snapshot is written, so a
+        // cancelled/failed rotation cannot leave memory and disk disagreeing.
+        let mut current = self.state.lock().await;
+        let mut next = current.clone();
+        next.remote_token = token;
+        self.persist_snapshot(&next)?;
+        *current = next;
+        Ok(())
     }
 
     pub async fn clear_last_running(self: &Arc<Self>) -> Result<(), ConfigError> {
@@ -142,11 +148,18 @@ impl RuntimeStore {
     }
 
     async fn flush_now(&self) -> Result<(), ConfigError> {
-        let snap = self.state.lock().await.clone();
+        // Keep the state lock through the synchronous atomic write. Otherwise
+        // a debounced flush could clone the old token, release the lock, and
+        // overwrite a newer successful rotation after it reaches disk.
+        let snap = self.state.lock().await;
+        self.persist_snapshot(&snap)
+    }
+
+    fn persist_snapshot(&self, snap: &RuntimeState) -> Result<(), ConfigError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(&snap)
+        let json = serde_json::to_string_pretty(snap)
             .map_err(|e| ConfigError::Io(std::io::Error::other(e)))?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;

@@ -2,7 +2,7 @@
 
 use crate::process::ProcessManager;
 use crate::runtime_state::RuntimeStore;
-use crate::server::{self, audit::AuditLog, auth, ServerMode, ServerState};
+use crate::server::{self, audit::AuditLog, auth, ConnectionCloseReason, ServerMode, ServerState};
 use crate::state::AppState;
 use serde::Serialize;
 use std::sync::Arc;
@@ -42,6 +42,12 @@ pub struct ServerStatus {
     pub tls: bool,
     pub cert_fingerprint_sha256: Option<String>,
     pub token: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ServerRestart {
+    port: u16,
+    mode: ServerMode,
 }
 
 #[tauri::command]
@@ -89,7 +95,8 @@ pub async fn start_server(
     {
         let mut guard = remote.handle.lock().await;
         if let Some(h) = guard.take() {
-            let _ = h.close_conns.send(());
+            h.close_conns
+                .send_replace(Some(ConnectionCloseReason::ServerStopped));
             let _ = h.shutdown.send(());
         }
     }
@@ -119,9 +126,10 @@ async fn spawn_server(
     let app_state = app.state::<Arc<AppState>>().inner().clone();
     let pm = app.state::<ProcessManager>().inner().clone();
 
-    // Fresh per-instance force-close channel; the sender is also stored on the
-    // returned `ServerHandle` so stop/rotate can drop every open WebSocket.
-    let (close_conns, _) = tokio::sync::broadcast::channel::<()>(16);
+    // Fresh per-instance sticky force-close token; it is also stored on the
+    // returned `ServerHandle` so stop/rotate can drop every open WebSocket,
+    // including one still in the auth→upgrade interval.
+    let (close_conns, _) = tokio::sync::watch::channel(None);
 
     let state = ServerState {
         app_handle: app.clone(),
@@ -138,10 +146,48 @@ async fn spawn_server(
 pub async fn stop_server(remote: tauri::State<'_, RemoteServerState>) -> Result<(), String> {
     let mut guard = remote.handle.lock().await;
     if let Some(h) = guard.take() {
-        let _ = h.close_conns.send(());
+        h.close_conns
+            .send_replace(Some(ConnectionCloseReason::ServerStopped));
         let _ = h.shutdown.send(());
     }
     Ok(())
+}
+
+/// Persist and commit a token rotation as one security transition.
+///
+/// The server handle and live token stay locked while persistence runs. If the
+/// write fails, both remain untouched and existing WebSockets remain open with
+/// the still-valid old credential. Once persistence succeeds there are no
+/// await points between swapping the live token, taking the server handle, and
+/// signalling every upgraded connection plus the listener to close.
+async fn commit_token_rotation(
+    remote: &RemoteServerState,
+    store: &Arc<RuntimeStore>,
+    new_token: &str,
+) -> Result<Option<ServerRestart>, String> {
+    // Match server_status's lock order (handle -> token) to avoid inversion.
+    let mut handle = remote.handle.lock().await;
+    let mut live_token = remote.token.write().await;
+    let next_token = new_token.to_string();
+
+    store
+        .set_remote_token(next_token.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    *live_token = next_token;
+    let restart = handle.take().map(|server| {
+        let restart = ServerRestart {
+            port: server.port,
+            mode: server.mode,
+        };
+        server
+            .close_conns
+            .send_replace(Some(ConnectionCloseReason::TokenRotated));
+        let _ = server.shutdown.send(());
+        restart
+    });
+    Ok(restart)
 }
 
 #[tauri::command]
@@ -151,11 +197,6 @@ pub async fn rotate_token(
     store: tauri::State<'_, Arc<RuntimeStore>>,
 ) -> Result<String, String> {
     let new_token = auth::generate_token();
-    *remote.token.write().await = new_token.clone();
-    store
-        .set_remote_token(new_token.clone())
-        .await
-        .map_err(|e| e.to_string())?;
 
     // Token auth is only checked at the HTTP/WS handshake, so already-open
     // WebSockets would otherwise keep streaming under the old credential.
@@ -165,21 +206,11 @@ pub async fn rotate_token(
     // server on the same port/mode so clients must re-handshake with the new
     // token. The QR/pairing payload is derived from the token, so the desktop
     // UI re-renders it after this returns.
-    let prev = {
-        let mut guard = remote.handle.lock().await;
-        guard.take()
-    };
-    if let Some(h) = prev {
-        let port = h.port;
-        let mode = h.mode;
-        // Force every open WebSocket closed first — graceful server shutdown
-        // alone does NOT drop upgraded sockets, so the old token would keep
-        // streaming without this. Then bounce the listener.
-        let _ = h.close_conns.send(());
-        let _ = h.shutdown.send(());
+    let restart = commit_token_rotation(&remote, &store, &new_token).await?;
+    if let Some(restart) = restart {
         // Give the listener a beat to release the socket before re-binding.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        match spawn_server(&app, &remote, port, mode).await {
+        match spawn_server(&app, &remote, restart.port, restart.mode).await {
             Ok(new_handle) => {
                 *remote.handle.lock().await = Some(new_handle);
             }
@@ -217,5 +248,102 @@ pub fn local_ip() -> Result<String, String> {
     match addr.ip() {
         IpAddr::V4(ip) => Ok(ip.to_string()),
         IpAddr::V6(ip) => Ok(ip.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server_handle(
+        port: u16,
+    ) -> (
+        server::ServerHandle,
+        tokio::sync::watch::Receiver<Option<ConnectionCloseReason>>,
+        tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (close_conns, close_observer) = tokio::sync::watch::channel(None);
+        (
+            server::ServerHandle {
+                shutdown,
+                port,
+                mode: ServerMode::Loopback,
+                tls: false,
+                cert_fingerprint_sha256: None,
+                close_conns,
+            },
+            close_observer,
+            shutdown_rx,
+        )
+    }
+
+    fn remote_with_handle(token: &str, handle: server::ServerHandle) -> RemoteServerState {
+        RemoteServerState {
+            token: Arc::new(RwLock::new(token.to_string())),
+            audit: Arc::new(AuditLog::new()),
+            handle: Arc::new(tokio::sync::Mutex::new(Some(handle))),
+        }
+    }
+
+    #[tokio::test]
+    async fn rotation_success_persists_swaps_and_closes_as_one_transition() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::load(dir.path().join("runtime.json")).unwrap();
+        store.set_remote_token("old-token".into()).await.unwrap();
+        let (handle, close_observer, shutdown_rx) = server_handle(43123);
+        let remote = remote_with_handle("old-token", handle);
+
+        let restart = commit_token_rotation(&remote, &store, "new-token")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            restart,
+            Some(ServerRestart {
+                port: 43123,
+                mode: ServerMode::Loopback,
+            })
+        );
+        assert_eq!(*remote.token.read().await, "new-token");
+        assert_eq!(store.get_remote_token().await, "new-token");
+        assert!(remote.handle.lock().await.is_none());
+        assert_eq!(
+            *close_observer.borrow(),
+            Some(ConnectionCloseReason::TokenRotated)
+        );
+        shutdown_rx.await.unwrap();
+
+        let reloaded = RuntimeStore::load(dir.path().join("runtime.json")).unwrap();
+        assert_eq!(reloaded.get_remote_token().await, "new-token");
+    }
+
+    #[tokio::test]
+    async fn rotation_persistence_failure_preserves_token_handle_and_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join("config");
+        let runtime_path = config_dir.join("runtime.json");
+        let store = RuntimeStore::load(runtime_path.clone()).unwrap();
+        store.set_remote_token("old-token".into()).await.unwrap();
+
+        // Turn the parent directory into a regular file so the next atomic
+        // snapshot write fails deterministically on every platform.
+        std::fs::remove_file(&runtime_path).unwrap();
+        std::fs::remove_dir(&config_dir).unwrap();
+        std::fs::write(&config_dir, b"blocks runtime directory").unwrap();
+
+        let (handle, close_observer, mut shutdown_rx) = server_handle(43124);
+        let remote = remote_with_handle("old-token", handle);
+        let result = commit_token_rotation(&remote, &store, "new-token").await;
+
+        assert!(result.is_err());
+        assert_eq!(*remote.token.read().await, "old-token");
+        assert_eq!(store.get_remote_token().await, "old-token");
+        assert!(remote.handle.lock().await.is_some());
+        assert_eq!(*close_observer.borrow(), None);
+        assert!(matches!(
+            shutdown_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
     }
 }

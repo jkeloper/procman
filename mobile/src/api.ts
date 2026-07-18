@@ -1,11 +1,20 @@
 // Thin client wrappers around procman remote API.
 
-import { baseUrl, authHeader, loadPair } from './pair';
+import { authHeader, loadPair } from './pair';
+import {
+  isTerminalTransportError,
+  openTransportSocket,
+  TransportError,
+  transportRequest,
+  type TransportSocket,
+} from './transport';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`, {
+  const pair = loadPair();
+  if (!pair) throw new Error('not paired');
+  const res = await transportRequest(pair, path, {
     ...init,
-    headers: { ...authHeader(), ...(init?.headers ?? {}) },
+    headers: { ...authHeader(pair), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}`);
@@ -147,59 +156,138 @@ export type StreamEvent =
   | { type: 'status'; id: string; status: string; pid: number | null; exit_code: number | null; ts_ms: number }
   | { type: 'log'; script_id: string; line: LogLine };
 
+const STREAM_AUTH_PROBE_TIMEOUT_MS = 5_000;
+
+function authRevokedError(): TransportError {
+  return new TransportError('AUTH_REVOKED');
+}
+
+async function classifyStreamFailure(pair: NonNullable<ReturnType<typeof loadPair>>, error: Error): Promise<Error> {
+  if (isTerminalTransportError(error)) return error;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), STREAM_AUTH_PROBE_TIMEOUT_MS);
+  try {
+    const response = await transportRequest(pair, '/api/ping', {
+      headers: authHeader(pair),
+      signal: controller.signal,
+    });
+    return response.status === 401 || response.status === 403
+      ? authRevokedError()
+      : error;
+  } catch (probeError) {
+    return isTerminalTransportError(probeError) && probeError instanceof Error
+      ? probeError
+      : error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function openStream(
   onEvent: (ev: StreamEvent) => void,
   onStatus: (connected: boolean) => void,
+  onError?: (error: Error) => void,
 ): () => void {
   let closed = false;
-  let ws: WebSocket | null = null;
+  let terminal = false;
+  let socket: TransportSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
+  let generation = 0;
 
   const connect = () => {
     const pair = loadPair();
     if (!pair) return;
-    // Token delivered via WebSocket subprotocol, not `?token=`. We also
-    // offer a stable `procman` protocol so the server can select that and
-    // avoid echoing the token-bearing protocol in response headers.
-    const url = `${baseUrl().replace(/^http/, 'ws')}/api/stream`;
-    try {
-      ws = new WebSocket(url, ['procman', `procman-token.${pair.token}`]);
-    } catch {
-      scheduleReconnect();
-      return;
-    }
-    ws.onopen = () => {
-      attempt = 0;
-      onStatus(true);
-    };
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        // flatten `status` nested payload
-        if (data.type === 'status' && 'id' in data === false) {
-          // event is wrapped
-          Object.assign(data, data.data ?? {});
-        }
-        onEvent(data);
-      } catch {
-        // Ignore malformed stream frames and keep the socket alive.
-      }
-    };
-    ws.onclose = () => {
+    const currentGeneration = ++generation;
+    let ended = false;
+    let classifying = false;
+
+    const endConnection = (error?: Error) => {
+      if (ended || closed || currentGeneration !== generation) return;
+      ended = true;
       onStatus(false);
-      if (!closed) scheduleReconnect();
+      if (error && isTerminalTransportError(error)) {
+        terminal = true;
+        onError?.(error);
+        socket?.close();
+        return;
+      }
+      socket?.close();
+      scheduleReconnect();
     };
-    ws.onerror = () => {
-      ws?.close();
+
+    const classifyAndEnd = (error: Error) => {
+      if (ended || closed || classifying || currentGeneration !== generation) return;
+      if (isTerminalTransportError(error)) {
+        endConnection(error);
+        return;
+      }
+      classifying = true;
+      void classifyStreamFailure(pair, error).then((classifiedError) => {
+        classifying = false;
+        endConnection(classifiedError);
+      });
     };
+
+    // Token delivery remains in the WebSocket subprotocol; neither browser
+    // URLs nor native connection metadata expose it as a query parameter.
+    void openTransportSocket(
+      pair,
+      '/api/stream',
+      ['procman', `procman-token.${pair.token}`],
+      {
+        onOpen: () => {
+          if (closed || ended || currentGeneration !== generation) return;
+          attempt = 0;
+          onStatus(true);
+        },
+        onMessage: (message) => {
+          if (closed || ended || currentGeneration !== generation) return;
+          try {
+            const data = JSON.parse(message);
+            // Flatten the server's wrapped status payload.
+            if (data.type === 'status' && 'id' in data === false) {
+              Object.assign(data, data.data ?? {});
+            }
+            onEvent(data);
+          } catch {
+            // Ignore malformed stream frames and keep the socket alive.
+          }
+        },
+        onClose: (code, reason) => {
+          if (classifying) return;
+          if (code === 4001) {
+            endConnection(authRevokedError());
+            return;
+          }
+          if (code === 1006) {
+            classifyAndEnd(new Error(reason || 'WebSocket connection failed'));
+            return;
+          }
+          endConnection();
+        },
+        onError: (error) => classifyAndEnd(error),
+      },
+    ).then((opened) => {
+      if (closed || ended || currentGeneration !== generation) {
+        opened.close();
+      } else {
+        socket = opened;
+      }
+    }).catch((error: unknown) => {
+      classifyAndEnd(error instanceof Error ? error : new Error(String(error)));
+    });
   };
 
   const scheduleReconnect = () => {
-    if (closed) return;
+    if (closed || terminal || reconnectTimer) return;
     attempt++;
     const delay = Math.min(30000, 500 * Math.pow(2, Math.min(attempt, 6)));
-    reconnectTimer = setTimeout(connect, delay);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
   };
 
   connect();
@@ -207,6 +295,7 @@ export function openStream(
   return () => {
     closed = true;
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    ws?.close();
+    generation++;
+    socket?.close();
   };
 }

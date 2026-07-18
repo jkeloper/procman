@@ -53,8 +53,9 @@ web/
 ## Updating the download URL / version
 
 Every externally-facing URL lives in [`src/config/site.ts`](src/config/site.ts).
-Bump the `version` and `downloadUrl` fields there when you cut a new DMG release
-— the Hero, Install section, and footer all read from this one file.
+The release script synchronizes its `version` and `downloadUrl`; the Hero,
+Install section, and footer all read from this one file. See
+[`../VERSIONING.md`](../VERSIONING.md) for the ownership policy.
 
 ## Replacing screenshots
 
@@ -94,7 +95,7 @@ Astro is zero-config on Vercel.
    - **Build command**: `cd web && pnpm install && pnpm build`
    - **Build output directory**: `web/dist`
    - **Root directory (advanced)**: leave as `/`
-   - **Environment variable**: `NODE_VERSION=20` (and optionally `PNPM_VERSION=9`)
+   - **Environment variables**: use the Node and pnpm versions from `../.tool-versions`
 3. Save and deploy.
 
 ### Option C — any static host

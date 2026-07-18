@@ -104,11 +104,12 @@ pub fn run() {
             let token = tauri::async_runtime::block_on(rs.get_remote_token());
             let token = if token.is_empty() {
                 let fresh = server::auth::generate_token();
-                let rs_c = rs.clone();
-                let t_c = fresh.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = rs_c.set_remote_token(t_c).await;
-                });
+                // The first live credential must already be durable. A
+                // detached write can race a later rotation and resurrect the
+                // old token on disk after it has been revoked in memory.
+                tauri::async_runtime::block_on(rs.set_remote_token(fresh.clone())).map_err(
+                    |e| std::io::Error::other(format!("persist initial remote token: {e}")),
+                )?;
                 fresh
             } else {
                 token

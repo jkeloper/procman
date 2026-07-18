@@ -6,23 +6,29 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ### Prerequisites
 - macOS 14+
-- Rust 1.85+ (`rustup`)
-- Node.js 20+ / pnpm 10+
+- Rust 1.88+ (`rustup`)
+- Node.js and pnpm versions pinned in `.tool-versions`
 - Xcode (for iOS builds)
 
 ### Getting Started
 ```bash
 git clone https://github.com/jkeloper/procman.git
-cd procman/app
-pnpm install
+cd procman
+(cd app && pnpm install)
 source "$HOME/.cargo/env"
-pnpm tauri dev    # starts dev server on :1420
+(cd app && pnpm tauri dev)    # starts dev server on :1420
 ```
 
 ### Running Tests
 ```bash
-cd app/src-tauri
-cargo test --lib
+(cd app/src-tauri && cargo test --lib)
+(cd app && pnpm test && pnpm lint && pnpm build)
+(cd mobile && pnpm test && pnpm lint && pnpm build)
+swift test --package-path mobile/ios/PinnedTransportCore
+(cd mobile && pnpm exec cap sync ios)
+xcodebuild -project mobile/ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+(cd vscode-extension && pnpm typecheck && pnpm test && pnpm build)
+scripts/test-repository-checks.sh
 ```
 
 ## Project Structure
@@ -36,7 +42,7 @@ cargo test --lib
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Make your changes
-4. Run `cargo test --lib` and `pnpm tsc -b --noEmit`
+4. Run the repository-root test commands above
 5. Commit with a descriptive message
 6. Push and open a PR
 

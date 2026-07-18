@@ -5,13 +5,13 @@
 
 VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리하는 1인 개발자 페인을 해결하는 Mac 전용 GUI. 데스크톱 Tauri 앱 + 모바일 PWA/iOS 동반 앱으로 구성.
 
-## 현재 상태 (2026-06-29)
-🟢 **v0.3 targeted refactor (WS1~WS9) 완료 + 코드리뷰 하드닝 적용** (브랜치 `redesign/v0.3-targeted-refactor`)
+## 현재 상태 (2026-07-16)
+🟢 **v0.3.0 안정 릴리스 공개 + post-release 하드닝 진행** (`main`)
 
 - Week 0 스파이크 → MVP Sprint 1-3 → v0.2 Feature Pack → Post-MVP S1-S5 → 모바일 PWA + iOS Capacitor → **v0.3 점진 개편(WS1~WS9, 2026-06)** 순으로 진행됨
 - v0.3은 검증된 코어(race-safe kill·영속화·순수함수)를 verbatim 보존하며 "한 화면 장악" 목표의 빈틈만 외과적으로 메움. 헤드라인은 전역 "All running" 뷰 + 단일 런타임(piped+PTY) 수렴.
 - v0.3 코드리뷰에서 2 HIGH·3 MED·9 LOW를 적대적 검증 후 수정 완료. 다음 로드맵은 TODO.md 참고.
-- Rust 테스트 219개, frontend vitest 52개 통과 기준 (clippy --all-targets / fmt / app·mobile tsc·eslint 전부 green).
+- Rust·frontend 테스트와 clippy --all-targets / fmt / app·mobile lint·production build를 CI 기준선으로 사용. 정확한 테스트 개수는 변동 값이므로 생활 문서에 고정하지 않음.
 
 ## 구현된 기능
 
@@ -35,7 +35,7 @@ VSCode 10개 + 터미널 10개 + Docker + Cloudflare Tunnel을 동시에 관리�
 - **iOS Capacitor 앱** — 네이티브 셸 + PWA (Xcode 프로젝트 커밋됨)
 
 ## 기술 스택
-- **데스크톱**: Tauri v2.10 + Rust 1.85+ + tokio + DashMap + notify + React 19/TS + Vite + shadcn/ui + Tailwind v4
+- **데스크톱**: Tauri v2.10 + Rust 1.88+ + tokio + DashMap + notify + React 19/TS + Vite + shadcn/ui + Tailwind v4
 - **로그**: `react-window` + `ansi-to-html`
 - **모바일**: Capacitor + React/TS (동일 shadcn 스택)
 - **원격**: REST + WebSocket + Cloudflare Tunnel
@@ -63,12 +63,13 @@ Flow: `User → Manager → Planner → Worker → Evaluator + User-tester → (
 ## 핵심 규칙
 - **수정사항마다 `TODO.md` / `CHANGELOG.md` / `README.md` 업데이트 필수** (사용자 피드백 규칙)
 - 에이전트 작업 시 반드시 `~/.claude/agents/{name}.md` 정의를 따를 것
-- Scope 변경은 TODO.md `Planned (next)` / `Not planned` 섹션에서만 추가/이동 (기존 목표 외 신규 scope 금지)
+- Scope 변경은 TODO.md `Current` / `Not planned` 섹션에서만 추가/이동 (기존 목표 외 신규 scope 금지)
 
 ## 문서 맵
 - **[README.md](README.md)** — 개요 + 기능 + 빌드 (영문/국문 한 파일)
 - **[TODO.md](TODO.md)** — 작업 체크리스트 + Post-S5 선택지
 - **[CHANGELOG.md](CHANGELOG.md)** — 변경 이력
+- **[VERSIONING.md](VERSIONING.md)** — 버전 소유권·동기화 정책
 - **[docs/07-port-management-v2.md](docs/07-port-management-v2.md)** — 현행 포트 관리 설계
 - **[app/README.md](app/README.md)** — 데스크톱 앱 개발 가이드
 - **[mobile/README.md](mobile/README.md)** — 모바일 PWA/iOS 가이드

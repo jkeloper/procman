@@ -22,5 +22,5 @@ If applicable, add screenshots.
 
 **Environment**
 - OS: [e.g. macOS 15.1]
-- procman version: [e.g. 0.1.0]
+- procman version: [e.g. 0.3.0]
 - Mode: [Desktop / Mobile / VSCode Extension]

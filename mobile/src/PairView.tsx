@@ -1,5 +1,13 @@
 import { lazy, Suspense, useState } from 'react';
-import { savePair } from './pair';
+import {
+  parsePairingUrl,
+  savePair,
+  validatePairInfo,
+  type ConnectionMode,
+  type PairInfo,
+} from './pair';
+import { isNativeIOS } from './platform';
+import { isTerminalTransportError, transportRequest } from './transport';
 import './mobile.css';
 
 // Lazy boundary: the QR scanner (and its heavy html5-qrcode dependency) is a
@@ -11,14 +19,12 @@ interface Props {
   onPaired: () => void;
 }
 
-type Mode = 'lan' | 'tunnel';
-
 export function PairView({ onPaired }: Props) {
+  const nativeIOS = isNativeIOS();
   const isEmbedded =
     window.location.port !== '' && window.location.hostname !== 'localhost';
 
-  const [mode, setMode] = useState<Mode>('lan');
-  const [scheme, setScheme] = useState<'http' | 'https'>('https');
+  const [mode, setMode] = useState<ConnectionMode>(nativeIOS ? 'lan' : 'tunnel');
   const [host, setHost] = useState(isEmbedded ? window.location.hostname : '');
   const [port, setPort] = useState(isEmbedded ? window.location.port : '7777');
   const [tunnelUrl, setTunnelUrl] = useState('');
@@ -40,31 +46,20 @@ export function PairView({ onPaired }: Props) {
   function handleQrScan(text: string) {
     setScanning(false);
     try {
-      // QR format: "http(s)://host:port#token=xxx&fp=cert-sha256"
-      const url = new URL(text);
-      const hashParams = new URLSearchParams(url.hash.slice(1));
-      const scannedToken = hashParams.get('token');
-      const scannedFingerprint = hashParams.get('fp') ?? hashParams.get('cert_sha256');
-      if (!scannedToken) {
-        setErr('QR code has no token. Generate a new QR from procman Remote Access.');
-        return;
-      }
-      const isTunnel = url.hostname.includes('trycloudflare.com');
-      if (isTunnel) {
+      const pair = parsePairingUrl(text);
+      if (pair.connectionMode === 'tunnel') {
         setMode('tunnel');
-        setTunnelUrl(`${url.protocol}//${url.host}`);
-        setScheme(url.protocol === 'https:' ? 'https' : 'http');
+        setTunnelUrl(`https://${pair.host}`);
       } else {
         setMode('lan');
-        setScheme(url.protocol === 'https:' ? 'https' : 'http');
-        setHost(url.hostname);
-        setPort(url.port || (url.protocol === 'https:' ? '443' : '80'));
+        setHost(pair.host);
+        setPort(String(pair.port));
       }
-      setToken(scannedToken);
-      setCertFingerprint(scannedFingerprint);
+      setToken(pair.token);
+      setCertFingerprint(pair.certFingerprintSha256);
       setErr(null);
-    } catch {
-      setErr('Invalid QR code. Expected a procman pairing URL.');
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : 'Invalid procman pairing QR code.');
     }
   }
 
@@ -75,32 +70,38 @@ export function PairView({ onPaired }: Props) {
       return;
     }
 
-    let baseUrl: string;
-    let pairHost: string;
-    let pairPort: number;
+    let candidate: PairInfo;
 
-    if (mode === 'tunnel') {
-      let url = tunnelUrl.trim();
-      if (!url) {
-        setErr('Tunnel URL required');
-        return;
+    try {
+      if (mode === 'tunnel') {
+        let value = tunnelUrl.trim();
+        if (!value) throw new Error('Tunnel URL required');
+        if (!value.includes('://')) value = `https://${value}`;
+        const parsed = new URL(value);
+        if (parsed.username || parsed.password || (parsed.pathname !== '/' && parsed.pathname !== '')) {
+          throw new Error('Enter the Tunnel origin only, without credentials or a path.');
+        }
+        candidate = validatePairInfo({
+          connectionMode: 'tunnel',
+          host: parsed.hostname,
+          port: parsed.port ? Number.parseInt(parsed.port, 10) : 443,
+          scheme: parsed.protocol === 'https:' ? 'https' : 'http',
+          token,
+          certFingerprintSha256: null,
+        });
+      } else {
+        candidate = validatePairInfo({
+          connectionMode: 'lan',
+          host,
+          port: Number.parseInt(port, 10),
+          scheme: 'https',
+          token,
+          certFingerprintSha256: certFingerprint,
+        });
       }
-      // Normalize: remove trailing slash, ensure https://
-      url = url.replace(/\/+$/, '');
-      if (!url.startsWith('http')) url = 'https://' + url;
-      baseUrl = url;
-      // For tunnel, store the full URL as host with port 443
-      const parsed = new URL(url);
-      pairHost = parsed.hostname;
-      pairPort = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'https:' ? 443 : 80);
-    } else {
-      if (!host.trim() || !port.trim()) {
-        setErr('Host and port required');
-        return;
-      }
-      pairHost = host.trim();
-      pairPort = parseInt(port, 10);
-      baseUrl = `${scheme}://${pairHost}:${pairPort}`;
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : 'Invalid connection settings.');
+      return;
     }
 
     setBusy(true);
@@ -108,16 +109,17 @@ export function PairView({ onPaired }: Props) {
     const ctrl = new AbortController();
     setAbortCtrl(ctrl);
 
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, 10_000);
+
     try {
-      const res = await Promise.race([
-        fetch(`${baseUrl}/api/ping`, {
-          headers: { Authorization: `Bearer ${token.trim()}` },
-          signal: ctrl.signal,
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timed out (10s). Check the address and try again.')), 10000),
-        ),
-      ]);
+      const res = await transportRequest(candidate, '/api/ping', {
+        headers: { Authorization: `Bearer ${candidate.token}` },
+        signal: ctrl.signal,
+      });
       if (!res.ok) {
         const msg =
           res.status === 401 ? 'Invalid token. Check Remote Access in procman.' :
@@ -125,36 +127,32 @@ export function PairView({ onPaired }: Props) {
           res.status === 404 ? 'Server found but API not available. Check procman version.' :
           `Server error (${res.status}). Try again later.`;
         setErr(msg);
-        setBusy(false);
-        setAbortCtrl(null);
         return;
       }
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') {
-        setBusy(false);
-        setAbortCtrl(null);
+        if (timedOut) {
+          setErr('Connection timed out (10s). Check the address and try again.');
+        }
         return;
       }
       const message = e instanceof Error ? e.message : String(e);
-      const msg = message.includes('timed out')
+      const msg = isTerminalTransportError(e)
+        ? message
+        : message.includes('timed out')
         ? message
         : message.includes('Failed to fetch') || message.includes('NetworkError')
         ? `Can't reach ${mode === 'tunnel' ? 'tunnel' : 'server'}. Check:\n• ${mode === 'lan' ? 'Same Wi-Fi network?' : 'Tunnel still running?'}\n• IP address correct?\n• procman server started?`
         : `Connection failed: ${message}`;
       setErr(msg);
+      return;
+    } finally {
+      window.clearTimeout(timeout);
       setBusy(false);
       setAbortCtrl(null);
-      return;
     }
-    setAbortCtrl(null);
 
-    savePair({
-      host: pairHost,
-      port: pairPort,
-      scheme: mode === 'tunnel' ? (baseUrl.startsWith('https:') ? 'https' : 'http') : scheme,
-      token: token.trim(),
-      certFingerprintSha256: certFingerprint,
-    });
+    savePair(candidate);
     onPaired();
   }
 
@@ -220,13 +218,16 @@ export function PairView({ onPaired }: Props) {
           <button
             type="button"
             onClick={() => { setMode('lan'); setErr(null); }}
+            disabled={!nativeIOS}
+            title={!nativeIOS ? 'LAN pinning requires the procman iOS app' : undefined}
             style={{
               flex: 1,
               padding: '10px 0',
               border: 'none',
               fontSize: 13,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: nativeIOS ? 'pointer' : 'not-allowed',
+              opacity: nativeIOS ? 1 : 0.45,
               background: mode === 'lan' ? 'var(--primary)' : 'transparent',
               color: mode === 'lan' ? '#fff' : 'var(--fg2)',
             }}
@@ -235,7 +236,7 @@ export function PairView({ onPaired }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => { setMode('tunnel'); setScheme('https'); setCertFingerprint(null); setErr(null); }}
+            onClick={() => { setMode('tunnel'); setCertFingerprint(null); setErr(null); }}
             style={{
               flex: 1,
               padding: '10px 0',
@@ -251,6 +252,23 @@ export function PairView({ onPaired }: Props) {
             Tunnel
           </button>
         </div>
+
+        {!nativeIOS && (
+          <div
+            role="note"
+            style={{
+              margin: '-6px 0 14px',
+              color: 'var(--fg3)',
+              fontSize: 12,
+              lineHeight: 1.45,
+              textAlign: 'left',
+            }}
+          >
+            Browser/PWA access is Tunnel-only. Start a Cloudflare Tunnel in
+            procman on your Mac, then scan its QR code or enter its HTTPS URL.
+            Direct LAN access with certificate pinning is available in the iOS app.
+          </div>
+        )}
 
         <button
           type="button"
@@ -291,9 +309,9 @@ export function PairView({ onPaired }: Props) {
               <div style={{ display: 'flex', gap: 8, width: '100%', boxSizing: 'border-box' }}>
                 <label className="field" style={{ flex: 'none', width: 88 }}>
                   <span>Scheme</span>
-                  <select
-                    value={scheme}
-                    onChange={(e) => setScheme(e.target.value as 'http' | 'https')}
+                  <input
+                    value="HTTPS"
+                    readOnly
                     style={{
                       width: '100%',
                       height: 44,
@@ -303,10 +321,7 @@ export function PairView({ onPaired }: Props) {
                       color: 'var(--fg)',
                       padding: '0 10px',
                     }}
-                  >
-                    <option value="https">HTTPS</option>
-                    <option value="http">HTTP</option>
-                  </select>
+                  />
                 </label>
                 <label className="field" style={{ flex: 1, minWidth: 0 }}>
                   <span>Host / IP</span>
@@ -328,17 +343,25 @@ export function PairView({ onPaired }: Props) {
                   />
                 </label>
               </div>
-              {certFingerprint && (
-                <p style={{
-                  margin: '0 0 4px',
-                  color: 'var(--fg3)',
-                  fontSize: 11,
-                  lineHeight: 1.4,
-                  wordBreak: 'break-all',
-                }}>
-                  TLS pin: {certFingerprint}
-                </p>
-              )}
+              <label className="field">
+                <span>SHA-256 certificate fingerprint</span>
+                <input
+                  value={certFingerprint ?? ''}
+                  onChange={(e) => setCertFingerprint(e.target.value)}
+                  placeholder="AA:BB:… (scan QR recommended)"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </label>
+              <p style={{
+                margin: '0 0 4px',
+                color: 'var(--fg3)',
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}>
+                The iOS app pins this fingerprint for both API and live-stream traffic.
+              </p>
             </>
           ) : (
             <label className="field">

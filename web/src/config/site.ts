@@ -4,9 +4,9 @@ export const site = {
   tagline: 'Local Mission Control for macOS',
   description:
     'Manage every dev server, Docker container, and Cloudflare tunnel from one window.',
-  version: '0.2.0',
+  version: '0.3.0',
   downloadUrl:
-    'https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0_aarch64.dmg',
+    'https://github.com/jkeloper/procman/releases/latest/download/procman_0.3.0_aarch64.dmg',
   latestReleaseUrl: 'https://github.com/jkeloper/procman/releases/latest',
   githubUrl: 'https://github.com/jkeloper/procman',
   installScriptUrl:

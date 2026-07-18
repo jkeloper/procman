@@ -242,7 +242,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|v| v.as_str().map(&substitute))
+                .filter_map(|v| v.as_str().map(substitute))
                 .collect()
         })
         .unwrap_or_default();
@@ -282,7 +282,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
     let runtime_exec = cfg
         .get("runtimeExecutable")
         .and_then(|v| v.as_str())
-        .map(&substitute);
+        .map(substitute);
 
     let command = match base_kind.as_str() {
         "node-terminal" => {
@@ -293,7 +293,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let raw_cmd = cfg
                 .get("command")
                 .and_then(|v| v.as_str())
-                .map(&substitute)
+                .map(substitute)
                 .unwrap_or_default();
             if raw_cmd.is_empty() {
                 return skip(
@@ -318,7 +318,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|v| v.as_str().map(&substitute))
+                        .filter_map(|v| v.as_str().map(substitute))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -372,11 +372,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         "python" | "debugpy" => {
             // VSCode Python uses "python" field for the interpreter path,
             // not runtimeExecutable.
-            let python_path = cfg.get("python").and_then(|v| v.as_str()).map(&substitute);
+            let python_path = cfg.get("python").and_then(|v| v.as_str()).map(substitute);
             let interp = runtime_exec
                 .or(python_path)
                 .unwrap_or_else(|| "python3".to_string());
-            let module = cfg.get("module").and_then(|v| v.as_str()).map(&substitute);
+            let module = cfg.get("module").and_then(|v| v.as_str()).map(substitute);
             let target = if let Some(m) = module {
                 format!("-m {}", shell_quote(&m))
             } else {
@@ -418,7 +418,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let main_class = cfg
                 .get("mainClass")
                 .and_then(|v| v.as_str())
-                .map(&substitute);
+                .map(substitute);
             let vm_args = cfg
                 .get("vmArgs")
                 .and_then(|v| v.as_str())

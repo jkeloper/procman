@@ -25,13 +25,14 @@ const ansi = new AnsiToHtml({
 export function LogView({ scriptId, scriptName, onBack }: Props) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [connected, setConnected] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    api.logs(scriptId).then(setLines).catch(() => {
-      // Keep the live stream usable even if the initial snapshot fails.
+    api.logs(scriptId).then(setLines).catch((error: unknown) => {
+      setStreamError(error instanceof Error ? error.message : 'Connection failed');
     });
     const stop = openStream((ev) => {
       if (ev.type === 'log' && ev.script_id === scriptId) {
@@ -41,7 +42,7 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
           return next;
         });
       }
-    }, setConnected);
+    }, setConnected, (error) => setStreamError(error.message));
     return stop;
   }, [scriptId]);
 
@@ -110,6 +111,11 @@ export function LogView({ scriptId, scriptName, onBack }: Props) {
             color: '#e4efe7', outline: 'none',
           }}
         />
+        {streamError && (
+          <div role="alert" style={{ color: 'var(--red)', fontSize: 11, paddingTop: 5 }}>
+            {streamError}
+          </div>
+        )}
       </div>
       <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
         {filtered.length === 0 ? (

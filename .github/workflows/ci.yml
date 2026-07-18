@@ -11,35 +11,48 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version-file: .tool-versions
-      - name: Install pnpm
-        # Pin to the version in .tool-versions. A bare `npm install -g pnpm`
-        # pulls the latest pnpm, which (10.16+) turns the "ignored build
-        # scripts" notice into a hard `ERR_PNPM_IGNORED_BUILDS` failure on a
-        # fresh `--frozen-lockfile` install. The pinned 10.33.0 (matching local
-        # dev) treats it as a warning; the ignored scripts (esbuild's binary
-        # ships in its platform optional-dep, msw's SW copy isn't needed for
-        # node tests) are not required for the build/test/lint to pass.
-        run: npm install -g pnpm@10.33.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt, clippy
       # Build the mobile PWA so rust-embed (app/src-tauri/src/server/spa.rs
       # embeds mobile/dist) compiles against the real SPA. Without this the
       # CI binary embeds an empty dist — diverging from the shipped binary
       # and masking LAN/mobile/QR pairing breakage. cargo test exercises the
       # actual embed.
-      - name: Build mobile PWA (rust-embed source)
+      - name: Build mobile PWA and sync iOS resources
         working-directory: mobile
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+          pnpm exec cap sync ios
+      - name: Test iOS certificate-pinning core
+        run: swift test --package-path mobile/ios/PinnedTransportCore
+      - name: Build iOS pinned transport (unsigned simulator)
+        run: |
+          xcodebuild \
+            -project mobile/ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/procman-ios-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
       - name: Cargo test
         working-directory: app/src-tauri
         run: cargo test --lib
+      - name: Cargo fmt
+        working-directory: app/src-tauri
+        run: cargo fmt -- --check
       - name: Cargo clippy
         working-directory: app/src-tauri
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   typescript:
     runs-on: macos-latest
@@ -48,31 +61,59 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .tool-versions
-      - name: Install pnpm
-        # Pin to the version in .tool-versions. A bare `npm install -g pnpm`
-        # pulls the latest pnpm, which (10.16+) turns the "ignored build
-        # scripts" notice into a hard `ERR_PNPM_IGNORED_BUILDS` failure on a
-        # fresh `--frozen-lockfile` install. The pinned 10.33.0 (matching local
-        # dev) treats it as a warning; the ignored scripts (esbuild's binary
-        # ships in its platform optional-dep, msw's SW copy isn't needed for
-        # node tests) are not required for the build/test/lint to pass.
-        run: npm install -g pnpm@10.33.0
-      - name: Install & type-check (desktop)
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - name: Install desktop dependencies
         working-directory: app
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm tsc -b --noEmit
+        run: pnpm install --frozen-lockfile
       - name: Test (desktop, vitest)
         working-directory: app
         run: pnpm test
       - name: Lint (desktop, eslint)
         working-directory: app
         run: pnpm lint
-      - name: Install & type-check (mobile)
+      - name: Build (desktop, TypeScript + Vite)
+        working-directory: app
+        run: pnpm build
+      - name: Install mobile dependencies
         working-directory: mobile
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm tsc --noEmit
+        run: pnpm install --frozen-lockfile
+      - name: Test (mobile, vitest)
+        working-directory: mobile
+        run: pnpm test
       - name: Lint (mobile, eslint)
         working-directory: mobile
         run: pnpm lint
+      - name: Build (mobile, TypeScript + Vite/PWA)
+        working-directory: mobile
+        run: pnpm build
+
+  auxiliary-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .tool-versions
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - name: Build landing site
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm build
+      - name: Type-check and build VS Code extension
+        working-directory: vscode-extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm build
+      - name: Verify release metadata and living docs
+        run: |
+          scripts/check-release-version.sh
+          scripts/check-docs-current.sh
+          scripts/test-repository-checks.sh

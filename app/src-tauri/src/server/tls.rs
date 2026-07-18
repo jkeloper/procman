@@ -1,9 +1,10 @@
 // Self-signed TLS certificate generation for LAN mode.
 //
 // Generates a cert on first server start, caches it in the procman config
-// directory so the same key survives across restarts. LAN clients (mobile
-// PWA) pin the SHA-256 fingerprint during pairing — browsers won't trust
-// a self-signed cert, so the app must verify manually.
+// directory so the same key survives across restarts. Pairing metadata carries
+// the SHA-256 fingerprint enforced by the Capacitor iOS native transport for
+// both REST and WebSocket. Browser/PWA clients cannot inspect this certificate
+// and therefore use the publicly trusted Cloudflare Tunnel path instead.
 
 use rcgen::{CertificateParams, DnType, KeyPair, SanType};
 use sha2::{Digest, Sha256};
@@ -35,9 +36,9 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
     params
         .distinguished_name
         .push(DnType::OrganizationName, "procman-local");
-    // SAN list is mostly cosmetic: mobile clients pin the fingerprint and
-    // won't hostname-match anyway. Keep the local identities we can
-    // enumerate; LAN IPs can't be listed exhaustively in rcgen.
+    // Keep the stable local identities we can enumerate. A trusted browser
+    // still hostname-matches, so LAN-IP SAN generation/trust distribution is
+    // tracked separately from this certificate bootstrap.
     params.subject_alt_names = vec![
         SanType::DnsName("localhost".try_into().unwrap()),
         SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
@@ -68,7 +69,8 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
 
 /// SHA-256 fingerprint of the cert's DER-encoded form, formatted as
 /// uppercase colon-separated hex (the format `openssl x509 -fingerprint`
-/// emits). Used during mobile pairing to pin the server identity.
+/// emits). Included in mobile pairing metadata and enforced by the Capacitor
+/// iOS native transport.
 pub fn fingerprint_sha256(cert_pem: &str) -> Result<String, String> {
     let der = pem_to_der(cert_pem).ok_or("invalid PEM")?;
     let digest = Sha256::digest(&der);

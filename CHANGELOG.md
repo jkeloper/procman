@@ -4,6 +4,31 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 
 ## [Unreleased]
 
+### Security
+- **LAN TLS now fails closed** — LAN remote control no longer falls back to plaintext on `0.0.0.0` when certificate or fingerprint setup fails.
+- **Bounded WebSocket delivery** — each remote stream now has a fixed 1,024-event queue with observable overflow handling instead of an unbounded memory sink.
+- **VS Code Webview hardening** — sidebar and log panels use nonce-based CSP, safe script-value serialization, DOM event listeners, and `textContent` instead of dynamic `innerHTML`/inline handlers.
+- **Transactional token rotation** — a new remote token becomes live only after its runtime snapshot is durable; a failed write preserves the old token, server handle, and existing authenticated streams, while a successful rotation swaps credentials and closes every old stream as one transition.
+- **Native LAN certificate pinning** — Capacitor iOS direct-LAN REST and WebSocket traffic uses the native transport to verify the exact SHA-256 fingerprint of the paired self-signed leaf certificate. Missing or mismatched pins fail closed with no Web transport fallback, and a replaced certificate requires explicit re-pairing.
+- **Browser PWA LAN boundary** — direct LAN endpoints are disabled in the browser PWA, which now requires a publicly trusted HTTPS Cloudflare Tunnel. In LAN mode the server also rejects browser-marked or unmarked protected requests and serves an iOS app/Tunnel explanation instead of the PWA. The self-signed certificate's missing dynamic LAN-IP SAN is handled only inside the native iOS pin-verification path.
+
+### Changed
+- **CI and release gates** — CI now covers Rust formatting/all targets, desktop/mobile production builds, Swift pinned-transport tests, an unsigned iOS simulator app build, the landing site, and the VS Code extension. Distribution releases fail before upload when versions, tags, credentials, Developer ID identity, or updater artifacts are missing or inconsistent.
+- **Version ownership** — desktop release surfaces are synchronized and checked from one canonical version; iOS, VS Code extension, and private build-package versions are explicitly independent. Living documentation no longer hard-codes volatile test counts.
+- **Rust toolchain baseline** — the repository, Cargo MSRV, CI, release workflow, and development docs now use Rust 1.88, the actual minimum required by the locked Tauri dependency graph. Policy tests reject future drift between those pins.
+- **Clippy policy** — all non-exempt Clippy warnings remain fatal on the pinned Rust toolchain. The pre-existing positional-format style migration is explicitly isolated behind one temporary `uninlined_format_args` allowance and tracked for removal instead of generating a broad unrelated source rewrite in this hardening set.
+
+### Fixed
+- **Release documentation** — the README and landing site now point to the published v0.3.0 DMG, roadmap status reflects the completed release, and repository-root test commands resolve correctly.
+- **Mobile alert overlap** — an in-flight declared-port conflict poll now blocks overlapping interval ticks, preventing stale state replacement and duplicate notifications while still resuming on the next interval.
+- **VS Code keyboard actions** — pressing Enter on a start/stop/restart button no longer bubbles into the parent row and opens the log panel as a second action.
+- **WebSocket termination** — peer EOF/errors and closed producer channels now end the forwarding task instead of leaving an idle upgraded connection waiting indefinitely.
+
+### Testing
+- **Remote boundary integration** — real Axum router and TCP WebSocket tests cover bearer/subprotocol auth, fail-closed empty tokens, failed-auth bans, request limits, protocol token non-reflection, event delivery, rotation shutdown, stale reconnect rejection, transactional persistence failure, LAN pre-bind TLS failures, and the production queue boundary.
+- **Client and repository gates** — mobile pairing/reconnect/notification tests, executable jsdom VS Code Webview security/action tests, Astro diagnostics, and isolated positive/negative release-document policy tests now run in CI and the release quality gate.
+- **Native pinning gates** — Swift tests exercise fingerprint normalization, exact SecTrust leaf match/mismatch, challenge-host binding, and redirect restrictions; a localhost self-signed TLS check confirms a correct pin succeeds and a wrong pin is rejected. The iOS app target also builds unsigned for a generic simulator with the native plugin linked.
+
 ## [0.3.0] - 2026-07-09
 
 ### Added
@@ -81,4 +106,4 @@ Rust: 219 unit tests (audit persistence, crash-retention disposition, rate-limit
 
 ## Earlier
 
-Pre-Unreleased history (MVP, port management v2, liveness probe, observability, `depends_on`, mobile PWA, iOS Capacitor, remote API, Cloudflare Tunnel integration) is condensed here intentionally; see release tags for the granular rollout once v0.2.0 is cut.
+Pre-Unreleased history (MVP, port management v2, liveness probe, observability, `depends_on`, mobile PWA, iOS Capacitor, remote API, Cloudflare Tunnel integration) is condensed here intentionally; see the v0.1.0 and v0.2.0 release tags for granular history.

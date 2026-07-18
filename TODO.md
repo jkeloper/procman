@@ -2,7 +2,7 @@
 
 Public roadmap. Internal planning, decision logs, and completed-issue detail are kept in `docs/private/TODO.full.md` (gitignored).
 
-## Shipped (pre-v0.2.0)
+## Shipped
 - Project / script CRUD with filesystem scanning
 - Process lifecycle: login-shell wrap, pgid-based kill, zombie-free
 - Ring-buffered log viewer (react-window + ansi-to-html)
@@ -28,18 +28,20 @@ Public roadmap. Internal planning, decision logs, and completed-issue detail are
 - Port ownership v3: backend-owned conflict checks across start / restart / start-all / group / remote paths
 - Frontend visibility-aware polling for dashboard / remote / declared-port hooks
 - LAN remote URL/TLS status display + backend LAN opt-in gate
-- Remote pairing TLS hardening: certificate fingerprint in status/QR/mobile pairing + WebSocket query-token fallback removed
+- Remote pairing TLS hardening: native SHA-256 leaf pinning for Capacitor iOS LAN REST/WebSocket, browser PWA direct-LAN rejection, certificate-change re-pairing, and WebSocket query-token fallback removal
 - Graceful shutdown UX: `process://shutdown` progress events, group Stop button, and configurable SIGTERM timeout
 - Multi-window / tear-off log panel: individual process logs can open in dedicated Tauri windows
 - Scheduled / cron execution: repeat a script on a five-field local-time cron expression
 - xterm.js PTY shell: run a script in an interactive pseudo-terminal with stdin/resize support
 - Mobile push notifications: mobile alerts for script crashes, port conflicts, and unreachable procman
 
-## Planned (next)
-- **v0.3.0 release** (in progress): version bumped 0.2.0 → 0.3.0 across `package.json` / `tauri.conf.json` / `Cargo.toml` / `Cargo.lock`; CHANGELOG `[0.3.0]` finalized. Tag `v0.3.0` triggers the signed + notarized DMG + updater workflow (`.github/workflows/release.yml`), which creates a **draft** Release — publish it so the auto-updater picks up `latest.json`.
+## Current
+- **v0.3.0 release — done:** signed and notarized Apple Silicon DMG plus updater artifacts were published on 2026-07-09. GitHub Releases marks v0.3.0 as the latest stable release.
+- **Post-release hardening — in progress:** remote-access fail-closed behavior, bounded WebSocket backpressure, VS Code Webview CSP/safe rendering, complete CI gates, fail-closed release validation, and version/documentation consistency.
+- **LAN client trust — done:** Capacitor iOS routes LAN REST/WebSocket through native SHA-256 leaf pinning and fails closed; browser PWA direct LAN is disabled in favor of HTTPS Cloudflare Tunnel; certificate replacement requires explicit re-pairing. Native trust, real localhost pin match/mismatch, mobile policy, server boundary, and unsigned iOS simulator build gates pass.
 - v0.2.0 release hardening — **done** (v0.2.0 shipped signed + notarized via the pipeline: DMG + `.app.tar.gz`/`.sig` + `latest.json`, published 2026-04-25; 7 repo secrets + Developer ID cert + Tauri key all in place).
 
-## v0.3 — targeted refactor (complete — committed on `redesign/v0.3-targeted-refactor`, review-hardened)
+## v0.3 — targeted refactor (complete — released as v0.3.0, review-hardened)
 Outcome of a full-codebase assessment: keep the verified core (race-safe kill, config/runtime persistence, pure helpers) verbatim and surgically close the gaps that block the "one screen to govern everything" goal. No new scope beyond the existing goal.
 - [x] WS1 — pipeline trust: clean-install mobile embed (`lib-build.sh`), CI vitest/eslint gates + mobile build before Rust job, audit disk persistence + token-rotation WS cutoff, vscode-extension WS subprotocol auth
 - [x] WS2 — preserve crash logs (retain a `Crashed` state instead of dropping the in-memory buffer) + `dismiss_process` command; live-only filtering of deps/metrics/ownership
@@ -59,6 +61,8 @@ Outcome of a full-codebase assessment: keep the verified core (race-safe kill, c
 - Session-restore clear lost-update: a clean self-exit racing a same-id respawn is now guarded by a late `is_live` recheck, but full closure needs a generation-aware `mark_running` (LOW; silent, recoverable — one script missing from the next restore prompt).
 - Auto-restart readiness parity: an auto-restart re-enters `spawn_inner` directly, skipping the port-conflict + `depends_on` readiness gate the manual/group/scheduler starts enforce (`ProcessManager` has no `AppState` handle). Restoring it cleanly is a design change — route auto-restart through a config-aware callback rather than the in-`process.rs` path. Deferred (verified-core-adjacent; the existing exponential backoff already self-corrects a bind failure).
 - Optional: persistent global crashed indicator on the dashboard tabs (currently project top bar only); `pid_index` ownership-guarded removal on the retained-crash path (pre-existing, theoretical pid-reuse edge).
+- Rust formatting maintenance: convert the pre-existing positional `format!`/logging arguments flagged by Rust 1.88, then remove the temporary `uninlined_format_args` Clippy allowance. Every other Clippy warning remains fatal in CI.
+- Remote-hardening polish (from the post-release review; all LOW): WS overflow is server-log-only — consider a client-visible drop notice or drop-oldest for `status` events; iOS WS has no keepalive ping against URLSession's 30s idle request timer (JS reconnect masks it — verify on device); native transport binary payloads lack an `isBase64` discriminator; VS Code webview CSP `connect-src` could pin to the configured server origin instead of `http: https: ws: wss:`; verify nonce-locked `style-src` against VS Code's injected default styles in a real webview once; `test-repository-checks.sh` failure cases accept any non-zero exit — grep for the specific error message; release job re-runs the full CI matrix serially before signing (~tens of minutes) — consider requiring CI status on the tagged commit instead.
 
 ## Not planned
 - Team sharing / multi-user sync. procman stays a single-user tool.

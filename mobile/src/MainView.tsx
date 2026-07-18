@@ -37,6 +37,7 @@ export function MainView({ onUnpair }: Props) {
   const [processes, setProcesses] = useState<ProcessSnapshot[]>([]);
   const [connected, setConnected] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [securityPairError, setSecurityPairError] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set('__init__'));
@@ -46,19 +47,26 @@ export function MainView({ onUnpair }: Props) {
   const [notificationPermission, setNotificationPermission] = useState<NotificationCapability>('prompt');
 
   const initialLoadDone = useRef(false);
+  // Latched by the stream's terminal pairing error. A refresh that resolves
+  // (or 401s) after that point must not replace the actionable re-pairing
+  // message with a generic response — the mount-time refresh can lose that
+  // race even though the on-connect refresh is already gated.
+  const securityPairErrorRef = useRef(false);
   const refresh = useCallback(async () => {
     try {
       const [cfg, procs] = await Promise.all([api.projects(), api.processes()]);
       setProjects(cfg.projects);
       setGroups(cfg.groups);
       setProcesses(procs);
-      setLoadError(null);
+      if (!securityPairErrorRef.current) setLoadError(null);
       if (!initialLoadDone.current) {
         initialLoadDone.current = true;
         setCollapsed(new Set(cfg.projects.map((p) => p.id)));
       }
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : 'Connection failed');
+      if (!securityPairErrorRef.current) {
+        setLoadError(e instanceof Error ? e.message : 'Connection failed');
+      }
     }
   }, []);
 
@@ -89,7 +97,14 @@ export function MainView({ onUnpair }: Props) {
       }
     }, (c) => {
       setConnected(c);
-      void refresh();
+      // Refresh snapshots after a successful handshake. Refreshing again on
+      // a terminal 401/403 races the stream's actionable re-pairing message
+      // and can overwrite it with a generic "401 Unauthorized" response.
+      if (c) void refresh();
+    }, (error) => {
+      securityPairErrorRef.current = true;
+      setSecurityPairError(true);
+      setLoadError(error.message);
     });
     return stop;
   }, [refresh, notifyProcessStatus]);
@@ -244,6 +259,7 @@ export function MainView({ onUnpair }: Props) {
             </div>
           )}
           <div className="settings-row"><span>Connection</span><span style={{ color: connected ? 'var(--green)' : 'var(--red)' }}>{connected ? 'Connected' : 'Disconnected'}</span></div>
+          <div className="settings-row"><span>Mode</span><span>{pair?.connectionMode === 'lan' ? 'LAN (iOS pinned)' : 'Cloudflare Tunnel'}</span></div>
           <div className="settings-row"><span>Projects</span><span>{projects.length}</span></div>
           <div className="settings-row"><span>Running</span><span>{totalRunning}</span></div>
         </div>
@@ -325,7 +341,17 @@ export function MainView({ onUnpair }: Props) {
             <WifiOff size={48} strokeWidth={1.5} />
             <div style={{ fontSize: 18, fontWeight: 600 }}>Not connected</div>
             <div style={{ fontSize: 14, color: 'var(--fg3)', textAlign: 'center', maxWidth: 280, lineHeight: '1.5' }}>{loadError}</div>
-            <button className="btn-start" style={{ marginTop: 8, padding: '12px 28px', fontSize: 16 }} onClick={refresh}>Retry</button>
+            {securityPairError ? (
+              <button
+                className="btn-start"
+                style={{ marginTop: 8, padding: '12px 28px', fontSize: 16 }}
+                onClick={() => { clearPair(); onUnpair(); }}
+              >
+                Unpair &amp; scan again
+              </button>
+            ) : (
+              <button className="btn-start" style={{ marginTop: 8, padding: '12px 28px', fontSize: 16 }} onClick={refresh}>Retry</button>
+            )}
           </div>
         ) : !connected && !loadError ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12, height: '60%' }}>

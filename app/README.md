@@ -3,9 +3,8 @@
 Tauri v2 + React/TS. The Mac-only process manager GUI at the heart of procman. For the overall project overview see the [root README](../README.md).
 
 ## Prerequisites
-- Rust 1.85+ (install via `rustup`)
-- Node 20+
-- pnpm 10
+- Rust 1.88+ (install via `rustup`)
+- Node and pnpm versions pinned in `../.tool-versions`
 
 ## Dev mode
 ```bash
@@ -35,11 +34,8 @@ brew install fswatch                  # one-time
 
 ## Testing
 ```bash
-cd src-tauri
-cargo test --lib                      # 179 unit tests
-
-cd ..
-pnpm test                             # 36 frontend tests
+(cd app/src-tauri && cargo test --lib)
+(cd app && pnpm test)
 ```
 
 ## Directory layout
@@ -88,9 +84,8 @@ Signing isn't required for personal use. `scripts/install.sh` automatically clea
 Tauri v2 + React/TS. Mac 전용 프로세스 매니저 GUI 본체. 전체 프로젝트 개요는 [루트 README](../README.md) 참고.
 
 ## Prerequisites
-- Rust 1.85+ (`rustup` 권장)
-- Node 20+
-- pnpm 10
+- Rust 1.88+ (`rustup` 권장)
+- `../.tool-versions`에 고정된 Node와 pnpm
 
 ## 개발 모드
 ```bash
@@ -120,11 +115,8 @@ brew install fswatch                  # 최초 1회
 
 ## 테스트
 ```bash
-cd src-tauri
-cargo test --lib                      # 179 unit tests
-
-cd ..
-pnpm test                             # 프론트엔드 36개 테스트
+(cd app/src-tauri && cargo test --lib)
+(cd app && pnpm test)
 ```
 
 ## 디렉토리 구조

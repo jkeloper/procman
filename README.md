@@ -1,5 +1,7 @@
 # 🐸 procman
 
+<!-- latest-release: 0.3.0 -->
+
 > **Your local dev environment's Mission Control — one screen for every running process.**
 
 [![Release](https://img.shields.io/github/v/release/jkeloper/procman?color=2b6b3a)](https://github.com/jkeloper/procman/releases/latest)
@@ -10,9 +12,9 @@ Mac-only process manager GUI for solo developers juggling many local servers, tu
 
 ## Status
 
-**v0.2.0 release candidate**, with the **v0.3 targeted refactor** (WS1–WS9 — global "All running" view, single piped+PTY runtime, batched port status, config v4) landed on the `redesign/v0.3-targeted-refactor` branch. The project is in final packaging, signing, and docs hardening.
+**v0.3.0 is the latest stable release.** It includes the targeted refactor (WS1–WS9 — global "All running" view, single piped+PTY runtime, batched port status, config v4). `main` also carries post-release security, CI, and documentation hardening for the next release.
 
-Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client — all backed by a Rust core with **215 tests passing** on the backend and **52 tests passing** on the frontend.
+Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare tunnels, session restore, a command palette, and a paired mobile client are covered by passing Rust and frontend test suites. CI also checks formatting, lint, production builds, the landing site, and the VS Code extension.
 
 ## Features
 
@@ -21,7 +23,7 @@ Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare 
 - **Logs & terminal** — 5,000-line ring buffer per process, virtualized (`react-window`), ANSI color rendering, substring search, multi-tab switching, tear-off log windows, and an xterm.js PTY shell for interactive scripts. Backed by a SQLite FTS index for persistent history.
 - **Ports** — Declarative `ports[]` (multi-port per script; legacy `expected_port` migrated to `ports[0]` in config v4) + visibility-aware batched `lsof` polling + TCP liveness probes; one-click kill on conflicts.
 - **Groups** — "Morning Stack" style batches that launch scripts in `depends_on` topological order behind readiness gates (independent members start immediately; a crashed dependency fails fast); individual failures don't block the rest.
-- **Mobile** — iOS/PWA companion via Capacitor; QR-code pairing, full S1–S5 feature parity, local notifications for crashes/port conflicts/unreachable procman, reachable over Cloudflare Tunnel.
+- **Mobile** — iOS/PWA companion via Capacitor; QR-code pairing, full S1–S5 feature parity, local notifications for crashes/port conflicts/unreachable procman, pinned direct-LAN access on iOS, and HTTPS Cloudflare Tunnel access in the browser PWA.
 - **Scheduling** — Five-field local-time cron schedules can repeat scripts without adding external cron jobs.
 - **Auto-updater** — Tauri signed update feed from the GitHub Releases channel.
 - **Docker Compose** — First-class project type; compose services are treated as scripts.
@@ -33,7 +35,7 @@ Scripts, grouped launches, a virtualized log viewer, port dashboard, Cloudflare 
 Download the latest signed, notarized DMG (Apple Silicon) — no quarantine workaround needed:
 
 ```bash
-open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0_aarch64.dmg"
+open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.3.0_aarch64.dmg"
 ```
 
 Prefer building it yourself? `scripts/install.sh` builds and installs from a cloned checkout — see [Build from Source](#build-from-source).
@@ -42,8 +44,8 @@ Prefer building it yourself? `scripts/install.sh` builds and installs from a clo
 
 ### Prerequisites
 - macOS 14+ (Apple Silicon recommended)
-- Rust 1.85+ via `rustup`
-- Node 20+ with pnpm 10
+- Rust 1.88+ via `rustup`
+- Node and pnpm versions pinned in `.tool-versions`
 
 ### Dev loop
 ```bash
@@ -72,14 +74,20 @@ For day-to-day work prefer `pnpm tauri dev`; `watch-install.sh` is for "keep the
 ## Testing
 
 ```bash
-# Rust (backend) — 214 unit tests
-cd app/src-tauri
-cargo test --lib
+# Rust backend (from the repository root)
+(cd app/src-tauri && cargo test --lib)
 
-# Frontend — 52 tests
-cd app
-pnpm test
+# Desktop frontend (from the repository root)
+(cd app && pnpm test)
+
+# Mobile pairing, stream, and notification boundaries
+(cd mobile && pnpm test)
+
+# VS Code Webview security and actions
+(cd vscode-extension && pnpm test)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete lint, build, and repository-policy gate.
 
 ## Architecture
 
@@ -96,24 +104,27 @@ procman/
 ```
 
 ### Tech stack
-- **Desktop** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
+- **Desktop** — Tauri v2.10, Rust 1.88+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
 - **Logs** — `react-window` virtualization + `ansi-to-html` + SQLite FTS5
 - **Mobile** — Capacitor + React/TS (shares shadcn/Tailwind with desktop)
-- **Remote API** — REST + WebSocket over loopback/LAN/Tunnel, bearer token auth, rate limiting, optional self-signed TLS for LAN
+- **Remote API** — REST + WebSocket over loopback/LAN/Tunnel, bearer token auth, rate limiting, fail-closed self-signed TLS for LAN
 
 ## Remote Access
 
-1. Desktop → **Dashboard → Network → Start (LAN)** for local pairing, or keep loopback-only for desktop use.
-2. Click **Expose via Cloudflare** for a public HTTPS URL when you need access outside the LAN.
-3. Open the QR code on your phone → scan → connected. LAN QR payloads include the TLS certificate SHA-256 fingerprint in the URL fragment for client pinning.
+1. For the Capacitor iOS app, choose **Dashboard → Network → Start (LAN)**, open procman's in-app scanner, and scan the LAN pairing QR. Do not open this QR with Safari or the system camera. Native REST and WebSocket connections pin the exact SHA-256 fingerprint of the self-signed leaf certificate from that QR and fail closed if it is missing or does not match.
+2. For the browser-installed PWA, start Remote Access as **Local only**, choose **Expose via Cloudflare**, and scan the Tunnel QR or open its publicly trusted HTTPS URL. Direct LAN endpoints are deliberately disabled in the browser PWA.
+3. If procman's LAN certificate is replaced or its fingerprint changes, the iOS app rejects the connection. Scan a new QR to explicitly re-pair before reconnecting.
 
-Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is enforced per-IP, LAN mode can be served with a self-signed certificate, WebSocket auth uses bearer/subprotocol credentials rather than query-string tokens, and the API surface only exposes actions on registered scripts.
+Tokens are 256-bit CSPRNG bearer tokens. CORS is restricted, rate limiting is enforced per-IP, LAN mode requires a self-signed certificate and fails closed if TLS setup fails, WebSocket auth uses bearer/subprotocol credentials rather than query-string tokens, and the API surface only exposes actions on registered scripts.
+
+The LAN certificate intentionally has no dynamic LAN-IP SAN. Only the Capacitor iOS native transport handles that self-signed certificate, and only after both REST and WebSocket verify its exact leaf SHA-256 pin; it never falls back to the browser networking stack. The browser PWA neither bypasses platform TLS validation nor accepts direct LAN pairing—it uses the HTTPS Cloudflare Tunnel path instead.
 
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — AI agent project context
 - [TODO.md](TODO.md) — active work + Post-S5 options
 - [CHANGELOG.md](CHANGELOG.md) — release history
+- [VERSIONING.md](VERSIONING.md) — version ownership and release synchronization policy
 - [app/README.md](app/README.md) — desktop app dev guide
 - [mobile/README.md](mobile/README.md) — mobile PWA / iOS guide
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 spike verdict
@@ -144,9 +155,9 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 
 ## 상태
 
-**v0.2.0 릴리스 후보** + **v0.3 targeted refactor**(WS1~WS9 — 전역 "All running" 뷰, 단일 piped+PTY 런타임, 배치 포트 상태, config v4)가 `redesign/v0.3-targeted-refactor` 브랜치에 반영됨. 현재 패키징·서명·문서 하드닝 단계.
+**v0.3.0이 최신 안정 릴리스**입니다. targeted refactor(WS1~WS9 — 전역 "All running" 뷰, 단일 piped+PTY 런타임, 배치 포트 상태, config v4)를 포함합니다. `main`에는 다음 릴리스를 위한 보안·CI·문서 하드닝도 반영되어 있습니다.
 
-스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트까지 — 백엔드 Rust 코어 **215개 테스트 통과**, 프론트엔드 **52개 테스트 통과**.
+스크립트, 그룹 실행, 가상 스크롤 로그 뷰어, 포트 대시보드, Cloudflare 터널, 세션 복원, 커맨드 팔레트, QR 페어링 모바일 클라이언트는 Rust·프론트엔드 테스트로 검증됩니다. CI는 포맷·린트·프로덕션 빌드·랜딩 사이트·VS Code 확장도 검사합니다.
 
 ## 기능
 
@@ -155,7 +166,7 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 - **로그 & 터미널** — 프로세스당 5,000라인 ring buffer, `react-window` 가상 스크롤, ANSI 컬러 렌더링, substring 검색, 멀티탭, 분리 로그 창, interactive script용 xterm.js PTY 셸. SQLite FTS 인덱스로 영구 히스토리 지원.
 - **포트** — 선언형 `ports[]`(스크립트별 멀티 포트; 레거시 `expected_port`는 config v4에서 `ports[0]`로 마이그레이션) + visibility-aware 배치 `lsof` 폴링 + TCP liveness probe, 충돌 시 원클릭 kill.
 - **그룹** — "Morning Stack" 스타일로 `depends_on` 위상정렬 + readiness 게이트 순차 실행(독립 멤버는 즉시 시작, 크래시한 의존성은 fast-fail). 개별 실패가 나머지를 막지 않음.
-- **모바일** — Capacitor 기반 iOS/PWA 동반 앱. QR 코드 페어링, S1~S5 기능 전부 미러링, 크래시/포트 충돌/procman 접속 불가 로컬 알림, Cloudflare Tunnel 경유 접근.
+- **모바일** — Capacitor 기반 iOS/PWA 동반 앱. QR 코드 페어링, S1~S5 기능 전부 미러링, 크래시/포트 충돌/procman 접속 불가 로컬 알림, iOS의 인증서 고정 direct-LAN 접근, 브라우저 PWA의 HTTPS Cloudflare Tunnel 접근.
 - **스케줄링** — 외부 cron 없이 5필드 로컬 시간 cron 표현식으로 스크립트 반복 실행.
 - **자동 업데이터** — GitHub Releases 채널에서 Tauri 서명 업데이트 피드 수신.
 - **Docker Compose** — 1급 프로젝트 타입. compose 서비스를 스크립트로 취급.
@@ -167,7 +178,7 @@ Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.
 서명·노터라이즈된 최신 DMG(Apple Silicon)를 받으세요 — quarantine 우회 불필요:
 
 ```bash
-open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0_aarch64.dmg"
+open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.3.0_aarch64.dmg"
 ```
 
 직접 빌드하려면 `scripts/install.sh`가 클론된 체크아웃에서 빌드·설치합니다 — [소스 빌드](#build-from-source) 참고.
@@ -176,8 +187,8 @@ open "https://github.com/jkeloper/procman/releases/latest/download/procman_0.2.0
 
 ### Prerequisites
 - macOS 14+ (Apple Silicon 권장)
-- Rust 1.85+ (`rustup`)
-- Node 20+, pnpm 10
+- Rust 1.88+ (`rustup`)
+- `.tool-versions`에 고정된 Node와 pnpm
 
 ### 개발 모드
 ```bash
@@ -206,14 +217,20 @@ brew install fswatch
 ## 테스트
 
 ```bash
-# Rust 백엔드 — 215개 unit test
-cd app/src-tauri
-cargo test --lib
+# Rust 백엔드 (저장소 루트에서 실행)
+(cd app/src-tauri && cargo test --lib)
 
-# 프론트엔드 — 52개 test
-cd app
-pnpm test
+# 데스크톱 프론트엔드 (저장소 루트에서 실행)
+(cd app && pnpm test)
+
+# 모바일 페어링·스트림·알림 경계
+(cd mobile && pnpm test)
+
+# VS Code Webview 보안·액션
+(cd vscode-extension && pnpm test)
 ```
+
+전체 lint·build·저장소 정책 gate는 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
 
 ## 아키텍처
 
@@ -230,24 +247,27 @@ procman/
 ```
 
 ### 기술 스택
-- **데스크톱** — Tauri v2.10, Rust 1.85+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
+- **데스크톱** — Tauri v2.10, Rust 1.88+, tokio, DashMap, notify, React 19/TS, Vite, shadcn/ui, Tailwind v4
 - **로그** — `react-window` 가상화 + `ansi-to-html` + SQLite FTS5
 - **모바일** — Capacitor + React/TS (데스크톱과 shadcn/Tailwind 공유)
-- **원격 API** — loopback/LAN/Tunnel 위의 REST + WebSocket, bearer token 인증, rate limiting, LAN self-signed TLS 옵션
+- **원격 API** — loopback/LAN/Tunnel 위의 REST + WebSocket, bearer token 인증, rate limiting, LAN self-signed TLS fail-closed 적용
 
 ## 원격 접근
 
-1. 데스크톱 → **Dashboard → Network → Start (LAN)** 으로 로컬 페어링, 또는 데스크톱 전용이면 loopback-only 유지
-2. 외부 접근이 필요하면 **Expose via Cloudflare** 클릭 → 공개 HTTPS URL 획득
-3. 폰에서 QR 코드 스캔 → 연결 완료. LAN QR payload에는 client pinning을 위한 TLS certificate SHA-256 fingerprint가 포함됩니다.
+1. Capacitor iOS 앱에서는 **Dashboard → Network → Start (LAN)** 을 선택하고 procman 앱 내부 스캐너로 LAN 페어링 QR을 스캔합니다. Safari나 시스템 카메라로 이 QR을 열지 마세요. 네이티브 REST와 WebSocket 연결은 QR에 담긴 self-signed leaf 인증서의 SHA-256 fingerprint를 정확히 고정하며, 값이 없거나 일치하지 않으면 fail-closed로 연결을 거부합니다.
+2. 브라우저 설치형 PWA에서는 Remote Access를 **Local only**로 시작한 뒤 **Expose via Cloudflare**를 선택하고 Tunnel QR 또는 공개적으로 신뢰되는 HTTPS URL로 페어링합니다. 브라우저 PWA의 direct LAN endpoint는 의도적으로 비활성화되어 있습니다.
+3. procman LAN 인증서가 교체되거나 fingerprint가 바뀌면 iOS 앱은 연결을 거부합니다. 새 QR을 스캔해 명시적으로 다시 페어링해야 합니다.
 
-토큰은 256-bit CSPRNG bearer token. CORS 제한, per-IP rate limiting 적용, LAN 모드는 self-signed certificate로 서빙 가능하고, WebSocket 인증은 query-string token 대신 bearer/subprotocol credentials를 사용하며, API 표면은 등록된 스크립트에 대한 액션만 노출.
+토큰은 256-bit CSPRNG bearer token. CORS 제한과 per-IP rate limiting을 적용하며, LAN 모드는 self-signed certificate가 필수이고 TLS 준비 실패 시 서버를 열지 않습니다. WebSocket 인증은 query-string token 대신 bearer/subprotocol credentials를 사용하며, API 표면은 등록된 스크립트에 대한 액션만 노출합니다.
+
+LAN 인증서에는 의도적으로 동적 LAN-IP SAN을 넣지 않습니다. 이 self-signed 인증서는 Capacitor iOS 네이티브 전송 계층에서만 사용하며, REST와 WebSocket 모두 정확한 leaf SHA-256 pin을 확인한 뒤 연결합니다. 브라우저 네트워크 계층으로 폴백하지 않습니다. 브라우저 PWA는 플랫폼 TLS 검증을 우회하거나 direct LAN 페어링을 허용하지 않고 HTTPS Cloudflare Tunnel 경로만 사용합니다.
 
 ## 문서
 
 - [CLAUDE.md](CLAUDE.md) — AI 에이전트용 프로젝트 컨텍스트
 - [TODO.md](TODO.md) — 진행 중 작업 + Post-S5 선택지
 - [CHANGELOG.md](CHANGELOG.md) — 릴리즈 히스토리
+- [VERSIONING.md](VERSIONING.md) — 버전 소유권과 릴리스 동기화 정책
 - [app/README.md](app/README.md) — 데스크톱 앱 개발 가이드
 - [mobile/README.md](mobile/README.md) — 모바일 PWA/iOS 가이드
 - [spikes/FINAL-VERDICT.md](spikes/FINAL-VERDICT.md) — Week 0 스파이크 최종 판정

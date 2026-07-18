@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const REQ_PER_MINUTE: u32 = 60;
@@ -137,10 +137,10 @@ impl Default for RateLimiter {
 /// Process-wide shared limiter. Kept outside ServerState so the middleware
 /// stack doesn't need to plumb it through layers that aren't
 /// `commands/`-owned.
-static GLOBAL: OnceLock<RateLimiter> = OnceLock::new();
+static GLOBAL: OnceLock<Arc<RateLimiter>> = OnceLock::new();
 
-pub fn global() -> &'static RateLimiter {
-    GLOBAL.get_or_init(RateLimiter::new)
+pub fn global() -> Arc<RateLimiter> {
+    Arc::clone(GLOBAL.get_or_init(|| Arc::new(RateLimiter::new())))
 }
 
 #[cfg(test)]

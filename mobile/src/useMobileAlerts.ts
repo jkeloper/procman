@@ -112,40 +112,48 @@ export function useMobileAlerts({
     }
 
     let cancelled = false;
+    let pollInFlight = false;
 
     async function tick() {
-      const activeKeys = new Set<string>();
-      const fresh: Array<{ scriptName: string; conflict: PortConflict }> = [];
+      if (cancelled || pollInFlight) return;
+      pollInFlight = true;
 
-      await Promise.all(
-        targets.map(async (script) => {
-          try {
-            const conflicts = await api.portConflicts(script.id);
-            for (const conflict of conflicts) {
-              const key = conflictKey(script.id, conflict);
-              activeKeys.add(key);
-              if (!activeConflictKeysRef.current.has(key)) {
-                fresh.push({ scriptName: script.name, conflict });
+      try {
+        const activeKeys = new Set<string>();
+        const fresh: Array<{ scriptName: string; conflict: PortConflict }> = [];
+
+        await Promise.all(
+          targets.map(async (script) => {
+            try {
+              const conflicts = await api.portConflicts(script.id);
+              for (const conflict of conflicts) {
+                const key = conflictKey(script.id, conflict);
+                activeKeys.add(key);
+                if (!activeConflictKeysRef.current.has(key)) {
+                  fresh.push({ scriptName: script.name, conflict });
+                }
               }
+            } catch {
+              // Connectivity is handled by the unreachable watcher.
             }
-          } catch {
-            // Connectivity is handled by the unreachable watcher.
-          }
-        }),
-      );
+          }),
+        );
 
-      if (cancelled) return;
-      activeConflictKeysRef.current = activeKeys;
-      if (fresh.length === 0) return;
+        if (cancelled) return;
+        activeConflictKeysRef.current = activeKeys;
+        if (fresh.length === 0) return;
 
-      const first = fresh[0];
-      const suffix = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : '';
-      void notifyProcman(
-        'port_conflict',
-        `Port conflict detected${suffix}`,
-        describeConflict(first.scriptName, first.conflict),
-        { count: fresh.length, port: first.conflict.spec.number },
-      );
+        const first = fresh[0];
+        const suffix = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : '';
+        void notifyProcman(
+          'port_conflict',
+          `Port conflict detected${suffix}`,
+          describeConflict(first.scriptName, first.conflict),
+          { count: fresh.length, port: first.conflict.spec.number },
+        );
+      } finally {
+        pollInFlight = false;
+      }
     }
 
     void tick();
