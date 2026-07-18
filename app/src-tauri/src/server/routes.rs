@@ -352,7 +352,7 @@ async fn start_process(
         Ok(pid) => {
             state
                 .audit
-                .record("start", &id, true, Some(format!("pid {}", pid)))
+                .record("start", &id, true, Some(format!("pid {pid}")))
                 .await;
             Ok(Json(serde_json::json!({ "pid": pid })))
         }
@@ -430,7 +430,7 @@ async fn restart_process(
         Ok(pid) => {
             state
                 .audit
-                .record("restart", &id, true, Some(format!("pid {}", pid)))
+                .record("restart", &id, true, Some(format!("pid {pid}")))
                 .await;
             Ok(Json(serde_json::json!({ "pid": pid })))
         }
@@ -456,7 +456,7 @@ async fn run_group(
         Ok(results) => {
             for r in &results {
                 let detail = match (r.ok, &r.error, r.pid) {
-                    (true, _, Some(pid)) => Some(format!("pid {}", pid)),
+                    (true, _, Some(pid)) => Some(format!("pid {pid}")),
                     (false, Some(e), _) => Some(e.clone()),
                     _ => None,
                 };

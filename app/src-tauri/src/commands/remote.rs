@@ -217,10 +217,9 @@ pub async fn rotate_token(
             Err(e) => {
                 // Restart failed: leave the server stopped rather than running
                 // with stale active sockets. The user can start it again.
-                log::warn!("server restart after token rotation failed: {}", e);
+                log::warn!("server restart after token rotation failed: {e}");
                 return Err(format!(
-                    "token rotated but server restart failed: {}. Start the server again.",
-                    e
+                    "token rotated but server restart failed: {e}. Start the server again."
                 ));
             }
         }

@@ -161,7 +161,7 @@ pub fn schedule_runtime_ports_delta_emit(app: &AppHandle, delay: Duration) {
         .await;
 
         if let Err(e) = result {
-            log::warn!("runtime ports delta emit failed: {}", e);
+            log::warn!("runtime ports delta emit failed: {e}");
         }
         RUNTIME_PORTS_DELTA_EMIT_PENDING.store(false, Ordering::SeqCst);
     });
@@ -173,7 +173,7 @@ pub fn emit_runtime_metrics_delta(app: &AppHandle, processes: &[ProcessSnapshot]
         processes: processes.to_vec(),
     };
     if let Err(e) = app.emit(RUNTIME_DELTA_EVENT, &delta) {
-        log::warn!("runtime delta emit failed: {}", e);
+        log::warn!("runtime delta emit failed: {e}");
     }
 }
 

@@ -155,7 +155,7 @@ mod tests {
     fn evicts_oldest_at_capacity() {
         let mut b = LogBuffer::new(3);
         for i in 0..5 {
-            b.push(LogStream::Stdout, format!("line-{}", i));
+            b.push(LogStream::Stdout, format!("line-{i}"));
         }
         assert_eq!(b.len(), 3);
         let snap = b.snapshot();
@@ -191,7 +191,7 @@ mod tests {
     fn search_respects_limit() {
         let mut b = LogBuffer::new(100);
         for i in 0..20 {
-            b.push(LogStream::Stdout, format!("hit {}", i));
+            b.push(LogStream::Stdout, format!("hit {i}"));
         }
         let hits = b.search("hit", false, 5);
         assert_eq!(hits.len(), 5);
@@ -208,7 +208,7 @@ mod tests {
     fn tail_returns_last_n() {
         let mut b = LogBuffer::new(100);
         for i in 0..10 {
-            b.push(LogStream::Stdout, format!("l{}", i));
+            b.push(LogStream::Stdout, format!("l{i}"));
         }
         let t = b.tail(3);
         assert_eq!(t.len(), 3);

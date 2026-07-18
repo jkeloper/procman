@@ -38,8 +38,8 @@ async fn run_docker(args: Vec<&str>) -> Result<std::process::Output, String> {
     let exec = Command::new("docker").args(&args).output();
     match tokio::time::timeout(Duration::from_secs(COMPOSE_TIMEOUT_SECS), exec).await {
         Ok(Ok(out)) => Ok(out),
-        Ok(Err(e)) => Err(format!("docker spawn failed: {}", e)),
-        Err(_) => Err(format!("docker timed out after {}s", COMPOSE_TIMEOUT_SECS)),
+        Ok(Err(e)) => Err(format!("docker spawn failed: {e}")),
+        Err(_) => Err(format!("docker timed out after {COMPOSE_TIMEOUT_SECS}s")),
     }
 }
 
@@ -49,7 +49,7 @@ fn lookup(state: &AppConfigSnapshot, id: &str) -> Result<ComposeProject, String>
         .iter()
         .find(|p| p.id == id)
         .cloned()
-        .ok_or_else(|| format!("compose project not found: {}", id))
+        .ok_or_else(|| format!("compose project not found: {id}"))
 }
 
 // Tiny helper struct to avoid leaking the full AppState mutex beyond each call.
@@ -91,7 +91,7 @@ pub async fn compose_add_project(
     }
     let p = Path::new(&compose_path);
     if !p.exists() || !p.is_file() {
-        return Err(format!("compose file does not exist: {}", compose_path));
+        return Err(format!("compose file does not exist: {compose_path}"));
     }
     // Normalize to absolute path so later `docker compose -f` works from anywhere.
     let canon = p
@@ -107,7 +107,7 @@ pub async fn compose_add_project(
             .iter()
             .any(|cp| cp.compose_path == canon)
         {
-            return Err(format!("already registered: {}", canon));
+            return Err(format!("already registered: {canon}"));
         }
     }
 
@@ -289,9 +289,9 @@ fn parse_one_service(v: &serde_json::Value) -> Option<ComposeService> {
                     return None;
                 }
                 Some(if url.is_empty() {
-                    format!("{}->{}/{}", pub_port, tgt_port, proto)
+                    format!("{pub_port}->{tgt_port}/{proto}")
                 } else {
-                    format!("{}:{}->{}/{}", url, pub_port, tgt_port, proto)
+                    format!("{url}:{pub_port}->{tgt_port}/{proto}")
                 })
             })
             .collect()

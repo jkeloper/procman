@@ -64,7 +64,7 @@ pub async fn update_group(
         })
         .await
         .map_err(|e| e.to_string())?;
-    result.ok_or_else(|| format!("group not found: {}", id))
+    result.ok_or_else(|| format!("group not found: {id}"))
 }
 
 #[tauri::command]
@@ -81,7 +81,7 @@ pub async fn delete_group(
         .await
         .map_err(|e| e.to_string())?;
     if !removed {
-        return Err(format!("group not found: {}", id));
+        return Err(format!("group not found: {id}"));
     }
     Ok(())
 }
@@ -135,7 +135,7 @@ pub(crate) async fn run_group_core(
     let members: Vec<(String, String, crate::types::Script, String)> = {
         let guard = state.config.lock().await;
         let Some(g) = guard.groups.iter().find(|g| g.id == id) else {
-            return Err(format!("group not found: {}", id));
+            return Err(format!("group not found: {id}"));
         };
         g.members
             .iter()
@@ -251,7 +251,7 @@ pub async fn stop_group(
     let (timeout_ms, mut members): (u64, Vec<(String, String)>) = {
         let guard = state.config.lock().await;
         let Some(g) = guard.groups.iter().find(|g| g.id == id) else {
-            return Err(format!("group not found: {}", id));
+            return Err(format!("group not found: {id}"));
         };
         let members = g
             .members
@@ -303,7 +303,7 @@ mod group_order_tests {
         Script {
             id: id.to_string(),
             name: id.to_string(),
-            command: format!("echo {}", id),
+            command: format!("echo {id}"),
             ports: vec![PortSpec {
                 name: "http".into(),
                 number: 9000,
@@ -327,8 +327,7 @@ mod group_order_tests {
         let pos = |id: &str| order.iter().position(|x| x == id).unwrap();
         assert!(
             pos("db") < pos("api"),
-            "db must start before api: {:?}",
-            order
+            "db must start before api: {order:?}"
         );
     }
 

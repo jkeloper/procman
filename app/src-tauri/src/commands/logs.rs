@@ -25,12 +25,12 @@ pub async fn search_log(
         log_storage::search(&query, script_id.as_deref(), since_ms, cap)
     })
     .await
-    .map_err(|e| format!("join: {}", e))?
+    .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
 pub async fn get_log_storage_stats() -> Result<StorageStats, String> {
     tokio::task::spawn_blocking(log_storage::stats)
         .await
-        .map_err(|e| format!("join: {}", e))?
+        .map_err(|e| format!("join: {e}"))?
 }

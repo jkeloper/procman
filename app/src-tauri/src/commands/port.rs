@@ -249,7 +249,7 @@ pub async fn list_ports() -> Result<Vec<PortInfo>, String> {
     let output = Command::new("lsof")
         .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcnT"])
         .output()
-        .map_err(|e| format!("lsof spawn: {}", e))?;
+        .map_err(|e| format!("lsof spawn: {e}"))?;
 
     if !output.status.success() {
         // lsof returns 1 when no results — treat empty stdout as empty list
@@ -346,7 +346,7 @@ pub async fn kill_port(port: u16) -> Result<(), String> {
         .map(|p| p.pid)
         .collect();
     if targets.is_empty() {
-        return Err(format!("no process listening on :{}", port));
+        return Err(format!("no process listening on :{port}"));
     }
     for &pid in &targets {
         unsafe {
@@ -381,7 +381,7 @@ pub async fn list_descendant_pids(root_pids: Vec<u32>) -> Result<Vec<u32>, Strin
     let ps_out = Command::new("ps")
         .args(["-ax", "-o", "pid=,pgid="])
         .output()
-        .map_err(|e| format!("ps: {}", e))?;
+        .map_err(|e| format!("ps: {e}"))?;
     let text = String::from_utf8_lossy(&ps_out.stdout);
     let mut result: Vec<u32> = Vec::new();
     for line in text.lines() {
@@ -426,7 +426,7 @@ pub async fn list_ports_for_script_pid(root_pid: u32) -> Result<Vec<PortInfo>, S
     let ps_out = Command::new("ps")
         .args(["-ax", "-o", "pid=,ppid=,pgid="])
         .output()
-        .map_err(|e| format!("ps: {}", e))?;
+        .map_err(|e| format!("ps: {e}"))?;
     let text = String::from_utf8_lossy(&ps_out.stdout);
 
     let (pid_pgid, children) = process_ownership_maps(&text);
@@ -638,9 +638,9 @@ pub async fn tcp_probe(bind: &str, port: u16, timeout_ms: u64) -> bool {
         other => other,
     };
     let addr = if host.contains(':') && !host.starts_with('[') {
-        format!("[{}]:{}", host, port)
+        format!("[{host}]:{port}")
     } else {
-        format!("{}:{}", host, port)
+        format!("{host}:{port}")
     };
     let fut = tokio::net::TcpStream::connect(&addr);
     matches!(
@@ -693,7 +693,7 @@ pub async fn port_status_for_script(
 ) -> Result<Vec<DeclaredPortStatus>, String> {
     let (_proj_id, script) = lookup_script(&state, &script_id)
         .await
-        .ok_or_else(|| format!("script not found: {}", script_id))?;
+        .ok_or_else(|| format!("script not found: {script_id}"))?;
 
     if script.ports.is_empty() {
         return Ok(Vec::new());
@@ -798,7 +798,7 @@ pub async fn check_port_conflicts(
 ) -> Result<Vec<PortConflict>, String> {
     let (_proj_id, script) = lookup_script(&state, &script_id)
         .await
-        .ok_or_else(|| format!("script not found: {}", script_id))?;
+        .ok_or_else(|| format!("script not found: {script_id}"))?;
     if script.ports.is_empty() {
         return Ok(Vec::new());
     }
@@ -824,7 +824,7 @@ pub async fn list_ports_for_script(
 ) -> Result<Vec<PortInfo>, String> {
     let (_proj_id, script) = lookup_script(&state, &script_id)
         .await
-        .ok_or_else(|| format!("script not found: {}", script_id))?;
+        .ok_or_else(|| format!("script not found: {script_id}"))?;
 
     let all = list_ports().await?;
     // WS3: read path → cached ownership snapshot.
@@ -1156,8 +1156,7 @@ mod tests {
         let ok = tcp_probe("127.0.0.1", port, 500).await;
         assert!(
             ok,
-            "probe should succeed against a live listener on :{}",
-            port
+            "probe should succeed against a live listener on :{port}"
         );
     }
 

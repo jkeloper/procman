@@ -60,7 +60,7 @@ pub fn run() {
     // we just lose the history table for this session.
     if let Some(log_db) = log_storage::default_db_path() {
         if let Err(e) = log_storage::init(log_db) {
-            log::warn!("log_storage init failed: {}", e);
+            log::warn!("log_storage init failed: {e}");
         }
     }
 
@@ -124,7 +124,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            log::info!("procman started, config at {:?}", config_path);
+            log::info!("procman started, config at {config_path:?}");
             watcher::spawn_config_watcher(app.handle().clone(), watch_state, watch_path);
 
             // Tunnel recovery: re-map running cloudflared processes to
@@ -213,7 +213,7 @@ pub fn run() {
                             continue;
                         }
                         if let Ok(()) = commands::port::kill_port(port).await {
-                            log::info!("orphan cleanup: freed port {}", port);
+                            log::info!("orphan cleanup: freed port {port}");
                         }
                     }
                     // WS5: do NOT clear last_running here. Orphan *port*
@@ -389,7 +389,7 @@ pub fn run() {
                 // orphan-cleanup is the partial safety net there).
                 if let Some(rs) = app_handle.try_state::<Arc<RuntimeStore>>() {
                     if let Err(e) = tauri::async_runtime::block_on(rs.flush()) {
-                        log::warn!("runtime state final flush on exit failed: {}", e);
+                        log::warn!("runtime state final flush on exit failed: {e}");
                     }
                 }
                 if let Some(pm) = app_handle.try_state::<ProcessManager>() {
@@ -463,7 +463,7 @@ pub fn run() {
                         for pid in &extra_pids {
                             unsafe {
                                 if libc::kill(*pid as i32, 0) == 0 {
-                                    log::info!("exit: killing orphan descendant pid {}", pid);
+                                    log::info!("exit: killing orphan descendant pid {pid}");
                                     libc::kill(*pid as i32, libc::SIGKILL);
                                 }
                             }
@@ -514,7 +514,7 @@ fn path_matches_project(cwd: &str, project_path: &str) -> bool {
     let with_sep = if project_path.ends_with('/') {
         project_path.to_string()
     } else {
-        format!("{}/", project_path)
+        format!("{project_path}/")
     };
     cwd.starts_with(&with_sep)
 }

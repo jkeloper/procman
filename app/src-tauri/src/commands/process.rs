@@ -36,7 +36,7 @@ pub async fn spawn_process(
 ) -> Result<u32, String> {
     let (script, cwd) = find_script(&state, &project_id, &script_id)
         .await
-        .ok_or_else(|| format!("script not found: {}/{}", project_id, script_id))?;
+        .ok_or_else(|| format!("script not found: {project_id}/{script_id}"))?;
     if !ignore_port_conflicts.unwrap_or(false) {
         let conflicts = crate::commands::port::blocking_conflicts_for_script(
             &script.id,
@@ -79,7 +79,7 @@ pub(crate) async fn wait_for_dependencies(
                 .cloned();
             match found {
                 Some(s) => acc.push(s),
-                None => return Err(format!("unknown dependency script id: {}", id)),
+                None => return Err(format!("unknown dependency script id: {id}")),
             }
         }
         acc
@@ -255,7 +255,7 @@ pub async fn restart_process(
 ) -> Result<u32, String> {
     let (script, cwd) = find_script(&state, &project_id, &script_id)
         .await
-        .ok_or_else(|| format!("script not found: {}/{}", project_id, script_id))?;
+        .ok_or_else(|| format!("script not found: {project_id}/{script_id}"))?;
     let conflicts = crate::commands::port::blocking_conflicts_for_script(
         &script.id,
         &script.ports,

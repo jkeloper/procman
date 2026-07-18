@@ -106,7 +106,7 @@ pub fn init(db_path: PathBuf) -> Result<(), String> {
         return Ok(());
     }
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
     }
 
     // Writer connection. OpenFlags include CREATE so the file springs
@@ -132,7 +132,7 @@ pub fn init(db_path: PathBuf) -> Result<(), String> {
     std::thread::Builder::new()
         .name("procman-log-writer".into())
         .spawn(move || writer_loop(writer, rx))
-        .map_err(|e| format!("spawn writer: {}", e))?;
+        .map_err(|e| format!("spawn writer: {e}"))?;
     Ok(())
 }
 
@@ -179,7 +179,7 @@ fn apply_schema(conn: &Connection) -> Result<(), String> {
         END",
     ];
     for s in stmts {
-        conn.execute(s, []).map_err(|e| format!("schema: {}", e))?;
+        conn.execute(s, []).map_err(|e| format!("schema: {e}"))?;
     }
     Ok(())
 }
@@ -214,7 +214,7 @@ pub fn search(
     let Some(conn_slot) = READ_CONN.get() else {
         return Ok(Vec::new());
     };
-    let conn = conn_slot.lock().map_err(|e| format!("lock: {}", e))?;
+    let conn = conn_slot.lock().map_err(|e| format!("lock: {e}"))?;
     // Cast to i64 so `ToSql` picks the stable integer binding (sqlite has no
     // native usize; on a 32-bit host usize would bind as INTEGER-32 which is
     // needlessly fragile). clamp() also forbids runaway limits.
@@ -238,17 +238,17 @@ pub fn search(
     {
         let mut param_idx = if has_fts { 2 } else { 1 };
         if script_id.is_some() {
-            sql.push_str(&format!("AND logs.script_id = ?{} ", param_idx));
+            sql.push_str(&format!("AND logs.script_id = ?{param_idx} "));
             param_idx += 1;
         }
         if since_ms.is_some() {
-            sql.push_str(&format!("AND logs.ts_ms >= ?{} ", param_idx));
+            sql.push_str(&format!("AND logs.ts_ms >= ?{param_idx} "));
             param_idx += 1;
         }
-        sql.push_str(&format!("ORDER BY logs.ts_ms DESC LIMIT ?{}", param_idx));
+        sql.push_str(&format!("ORDER BY logs.ts_ms DESC LIMIT ?{param_idx}"));
     }
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {}", e))?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
 
     // Collect params into a Vec<Box<dyn ToSql>>-ish shape. rusqlite's
     // `params!` macro needs a comptime-known tuple, which we don't have
@@ -292,10 +292,10 @@ pub fn search(
                 })
             },
         )
-        .map_err(|e| format!("query: {}", e))?;
+        .map_err(|e| format!("query: {e}"))?;
     let mut out = Vec::new();
     for r in rows {
-        out.push(r.map_err(|e| format!("row: {}", e))?);
+        out.push(r.map_err(|e| format!("row: {e}"))?);
     }
     Ok(out)
 }
@@ -310,7 +310,7 @@ pub fn stats() -> Result<StorageStats, String> {
     let Some(conn_slot) = READ_CONN.get() else {
         return Ok(s);
     };
-    let conn = conn_slot.lock().map_err(|e| format!("lock: {}", e))?;
+    let conn = conn_slot.lock().map_err(|e| format!("lock: {e}"))?;
     conn.query_row(
         "SELECT COUNT(*), MIN(ts_ms), MAX(ts_ms) FROM logs",
         [],
@@ -321,7 +321,7 @@ pub fn stats() -> Result<StorageStats, String> {
             Ok(())
         },
     )
-    .map_err(|e| format!("stats: {}", e))?;
+    .map_err(|e| format!("stats: {e}"))?;
     Ok(s)
 }
 
@@ -352,11 +352,11 @@ fn writer_loop(mut conn: Connection, rx: std::sync::mpsc::Receiver<LogLineRecord
                 if let Err(e) = flush(&mut conn, &buf) {
                     // Don't kill the thread — log and keep trying. A transient
                     // FS error (disk full, permissions) should self-heal.
-                    log::warn!("log_storage: flush failed: {}", e);
+                    log::warn!("log_storage: flush failed: {e}");
                 }
                 buf.clear();
                 if let Err(e) = enforce_retention(&mut conn) {
-                    log::warn!("log_storage: retention failed: {}", e);
+                    log::warn!("log_storage: retention failed: {e}");
                 }
             }
             last_flush = Instant::now();
@@ -365,13 +365,13 @@ fn writer_loop(mut conn: Connection, rx: std::sync::mpsc::Receiver<LogLineRecord
 }
 
 fn flush(conn: &mut Connection, batch: &[LogLineRecord]) -> Result<(), String> {
-    let tx = conn.transaction().map_err(|e| format!("begin: {}", e))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
     {
         let mut stmt = tx
             .prepare_cached(
                 "INSERT INTO logs(ts_ms, script_id, seq, stream, line) VALUES (?1, ?2, ?3, ?4, ?5)",
             )
-            .map_err(|e| format!("prepare: {}", e))?;
+            .map_err(|e| format!("prepare: {e}"))?;
         for r in batch {
             stmt.execute(params![
                 r.ts_ms,
@@ -380,10 +380,10 @@ fn flush(conn: &mut Connection, batch: &[LogLineRecord]) -> Result<(), String> {
                 r.stream,
                 r.line
             ])
-            .map_err(|e| format!("insert: {}", e))?;
+            .map_err(|e| format!("insert: {e}"))?;
         }
     }
-    tx.commit().map_err(|e| format!("commit: {}", e))?;
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
 }
 
@@ -400,7 +400,7 @@ fn enforce_retention(conn: &mut Connection) -> Result<(), String> {
     // cheaper than `DELETE ... ORDER BY ts_ms LIMIT N` on big tables.
     let total: i64 = conn
         .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
-        .map_err(|e| format!("count: {}", e))?;
+        .map_err(|e| format!("count: {e}"))?;
     if total <= 0 {
         return Ok(());
     }
@@ -418,7 +418,7 @@ fn enforce_retention(conn: &mut Connection) -> Result<(), String> {
         .ok();
     if let Some(cutoff) = cutoff {
         conn.execute("DELETE FROM logs WHERE id <= ?1", params![cutoff])
-            .map_err(|e| format!("delete: {}", e))?;
+            .map_err(|e| format!("delete: {e}"))?;
         // After an actual trim, opportunistically reclaim footprint without the
         // multi-second exclusive-lock stall a full VACUUM/optimize would cause:
         //   1) checkpoint + truncate the WAL so the -wal file doesn't drift up
@@ -521,7 +521,7 @@ mod tests {
         // would take once it decided to act.
         let (mut conn, _tmp) = fresh_conn();
         let batch: Vec<LogLineRecord> = (0..100)
-            .map(|i| rec(1000 + i, "s1", i as u64, &format!("line-{}", i)))
+            .map(|i| rec(1000 + i, "s1", i as u64, &format!("line-{i}")))
             .collect();
         flush(&mut conn, &batch).unwrap();
         // Trim the oldest 10.

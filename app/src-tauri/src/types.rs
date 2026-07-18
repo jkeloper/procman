@@ -482,7 +482,7 @@ mod tests {
             depends_on: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&script).unwrap();
-        eprintln!("serialized:\n{}", yaml);
+        eprintln!("serialized:\n{yaml}");
         let back: Script = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(script, back);
     }

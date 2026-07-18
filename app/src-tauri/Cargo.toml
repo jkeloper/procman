@@ -8,12 +8,6 @@ repository = ""
 edition = "2021"
 rust-version = "1.88"
 
-[lints.clippy]
-# The pre-existing codebase still uses positional format arguments extensively.
-# Keep every other Clippy warning fatal while that mechanical cleanup is tracked
-# with the broader maintenance work.
-uninlined_format_args = "allow"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

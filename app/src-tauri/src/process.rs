@@ -331,7 +331,7 @@ impl ProcessManager {
             cmd.current_dir(d);
         }
 
-        let mut child = cmd.spawn().map_err(|e| format!("spawn: {}", e))?;
+        let mut child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
         let pid = child.id().ok_or("no pid")?;
 
         let cap = self.log_capacity.load(Ordering::Relaxed) as usize;
@@ -564,19 +564,14 @@ impl ProcessManager {
 
             if let Some(delay_ms) = delay_ms {
                 let attempt = attempt_for_restart.expect("attempt set when delay computed");
-                log::info!(
-                    "[auto-restart] {} attempt #{}, backoff {}ms",
-                    id,
-                    attempt,
-                    delay_ms
-                );
+                log::info!("[auto-restart] {id} attempt #{attempt}, backoff {delay_ms}ms");
                 let msg = format!(
                     "[procman] auto-restart #{} in {:.1}s…",
                     attempt,
                     delay_ms as f64 / 1000.0
                 );
                 let _ = app.emit(
-                    &format!("log://{}", id),
+                    &format!("log://{id}"),
                     crate::log_buffer::LogLine {
                         seq: 0,
                         stream: crate::types::LogStream::Stderr,
@@ -603,11 +598,7 @@ impl ProcessManager {
                     .unwrap_or(false);
                 if cancelled || user_now || replaced {
                     log::info!(
-                        "[auto-restart] {} skipped (cancelled={} user={} replaced={})",
-                        id,
-                        cancelled,
-                        user_now,
-                        replaced
+                        "[auto-restart] {id} skipped (cancelled={cancelled} user={user_now} replaced={replaced})"
                     );
                 } else if !procs.contains_key(&id) {
                     pm_clone.schedule_auto_restart(script_clone, cwd_clone, restart_count);
@@ -788,10 +779,7 @@ impl ProcessManager {
             unsafe {
                 // Check if still alive before killing
                 if libc::kill(*dpid as i32, 0) == 0 {
-                    log::info!(
-                        "killing orphan descendant pid {} (survived group kill)",
-                        dpid
-                    );
+                    log::info!("killing orphan descendant pid {dpid} (survived group kill)");
                     libc::kill(*dpid as i32, libc::SIGKILL);
                 }
             }
@@ -865,7 +853,7 @@ impl ProcessManager {
         // Double-run guard: refuse to register if a live entry already owns
         // this id. The caller kills + retries for a uniform restart.
         if self.is_live(script_id) {
-            return Err(format!("script already running: {}", script_id));
+            return Err(format!("script already running: {script_id}"));
         }
 
         let generation = self.generation_counter.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1186,7 +1174,7 @@ impl ProcessManager {
                     let snapshots = self.list();
                     if !snapshots.is_empty() {
                         if let Err(e) = self.app.emit("process://metrics", &snapshots) {
-                            log::warn!("process://metrics emit failed: {}", e);
+                            log::warn!("process://metrics emit failed: {e}");
                         }
                         crate::commands::runtime::emit_runtime_metrics_delta(&self.app, &snapshots);
                     }
@@ -1198,7 +1186,7 @@ impl ProcessManager {
                     continue;
                 }
                 if let Err(e) = self.app.emit("process://metrics", &snapshots) {
-                    log::warn!("process://metrics emit failed: {}", e);
+                    log::warn!("process://metrics emit failed: {e}");
                 }
                 crate::commands::runtime::emit_runtime_metrics_delta(&self.app, &snapshots);
             }
@@ -1213,7 +1201,7 @@ pub(crate) fn command_line_for_script(script: &Script, cwd: Option<&str>) -> Str
         let resolved = if env_path.starts_with('/') {
             env_path.clone()
         } else if let Some(d) = cwd {
-            format!("{}/{}", d, env_path)
+            format!("{d}/{env_path}")
         } else {
             env_path.clone()
         };
@@ -1235,10 +1223,7 @@ pub(crate) fn command_line_for_script(script: &Script, cwd: Option<&str>) -> Str
 
     // Source ~/.zshrc too. `zsh -l -c` is a login shell but it is NOT
     // interactive, so zsh only sources .zshenv and .zprofile.
-    format!(
-        "[ -f $HOME/.zshrc ] && source $HOME/.zshrc 2>/dev/null; {}{}",
-        venv_prefix, base_cmd
-    )
+    format!("[ -f $HOME/.zshrc ] && source $HOME/.zshrc 2>/dev/null; {venv_prefix}{base_cmd}")
 }
 
 /// S3: One-shot metrics sample for a set of pids via a single `ps` call.
@@ -1305,13 +1290,13 @@ fn spawn_reader_stdout(
                         stream: "stdout".into(),
                         line: entry.text.clone(),
                     });
-                    let _ = app.emit(&format!("log://{}", id), entry);
+                    let _ = app.emit(&format!("log://{id}"), entry);
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    let msg = format!("[procman: stdout read error: {}]", e);
+                    let msg = format!("[procman: stdout read error: {e}]");
                     let entry = buf.lock().unwrap().push(LogStream::Stderr, msg);
-                    let _ = app.emit(&format!("log://{}", id), entry);
+                    let _ = app.emit(&format!("log://{id}"), entry);
                     break;
                 }
             }
@@ -1340,13 +1325,13 @@ fn spawn_reader_stderr(
                         stream: "stderr".into(),
                         line: entry.text.clone(),
                     });
-                    let _ = app.emit(&format!("log://{}", id), entry);
+                    let _ = app.emit(&format!("log://{id}"), entry);
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    let msg = format!("[procman: stderr read error: {}]", e);
+                    let msg = format!("[procman: stderr read error: {e}]");
                     let entry = buf.lock().unwrap().push(LogStream::Stderr, msg);
-                    let _ = app.emit(&format!("log://{}", id), entry);
+                    let _ = app.emit(&format!("log://{id}"), entry);
                     break;
                 }
             }
@@ -1919,7 +1904,7 @@ mod tests {
             kind: ProcessKind::Pty,
         };
         let json = serde_json::to_string(&snap).unwrap();
-        assert!(json.contains("\"kind\":\"pty\""), "got: {}", json);
+        assert!(json.contains("\"kind\":\"pty\""), "got: {json}");
     }
 
     // notify_pty_exit classifies the exit via `classify_exit`, identical to

@@ -18,7 +18,7 @@ pub fn default_plist_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| {
         h.join("Library")
             .join("LaunchAgents")
-            .join(format!("{}.plist", LAUNCH_AGENT_LABEL))
+            .join(format!("{LAUNCH_AGENT_LABEL}.plist"))
     })
 }
 

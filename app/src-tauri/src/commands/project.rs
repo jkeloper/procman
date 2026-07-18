@@ -28,10 +28,10 @@ pub async fn create_project(
     // Validate path exists + is a directory.
     let pb = std::path::Path::new(&path);
     if !pb.exists() {
-        return Err(format!("path does not exist: {}", path));
+        return Err(format!("path does not exist: {path}"));
     }
     if !pb.is_dir() {
-        return Err(format!("path is not a directory: {}", path));
+        return Err(format!("path is not a directory: {path}"));
     }
     if name.trim().is_empty() {
         return Err("name cannot be empty".into());
@@ -51,7 +51,7 @@ pub async fn create_project(
                 .unwrap_or(false)
                 || p.path == path
         }) {
-            return Err(format!("project already registered: {}", canon));
+            return Err(format!("project already registered: {canon}"));
         }
     }
 
@@ -80,7 +80,7 @@ pub async fn update_project(
     if let Some(ref p) = path {
         let pb = std::path::Path::new(p);
         if !pb.exists() || !pb.is_dir() {
-            return Err(format!("invalid path: {}", p));
+            return Err(format!("invalid path: {p}"));
         }
     }
     let result = state
@@ -99,7 +99,7 @@ pub async fn update_project(
         })
         .await
         .map_err(|e| e.to_string())?;
-    result.ok_or_else(|| format!("project not found: {}", id))
+    result.ok_or_else(|| format!("project not found: {id}"))
 }
 
 #[tauri::command]

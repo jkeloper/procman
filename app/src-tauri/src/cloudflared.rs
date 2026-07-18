@@ -59,7 +59,7 @@ pub fn managed_argv0(script_id: &str) -> Result<String, String> {
     let mut marker = String::with_capacity(MANAGED_ARGV0_PREFIX.len() + script_id.len() * 2);
     marker.push_str(MANAGED_ARGV0_PREFIX);
     for byte in script_id.as_bytes() {
-        let _ = write!(marker, "{:02x}", byte);
+        let _ = write!(marker, "{byte:02x}");
     }
     Ok(marker)
 }
@@ -118,7 +118,7 @@ pub async fn list_cf_tunnels() -> Result<Vec<NamedTunnel>, String> {
     let out = Command::new("cloudflared")
         .args(["tunnel", "list", "--output", "json"])
         .output()
-        .map_err(|e| format!("cloudflared spawn: {}", e))?;
+        .map_err(|e| format!("cloudflared spawn: {e}"))?;
     if !out.status.success() {
         // Not authenticated / no tunnels / wrong version → return empty
         return Ok(vec![]);
@@ -166,7 +166,7 @@ pub async fn detect_running_cloudflared() -> Result<Vec<RunningCloudflared>, Str
     let out = Command::new("ps")
         .args(["-ww", "-eo", "pid=,command="])
         .output()
-        .map_err(|e| format!("ps: {}", e))?;
+        .map_err(|e| format!("ps: {e}"))?;
     if !out.status.success() {
         return Err(format!(
             "ps failed while detecting cloudflared: {}",
@@ -301,14 +301,11 @@ async fn terminate_cloudflared_pid(
     // here would make the tracked entry un-stoppable (and un-startable)
     // forever, since retries can never succeed against a recycled PID.
     if let Err(mismatch) = verify_identity(pid, &command, Some(&exact_identity)) {
-        log::info!(
-            "cloudflared stop: {} — treating as already exited",
-            mismatch
-        );
+        log::info!("cloudflared stop: {mismatch} — treating as already exited");
         return Ok(());
     }
 
-    let pid_i32 = i32::try_from(pid).map_err(|_| format!("invalid process id {}", pid))?;
+    let pid_i32 = i32::try_from(pid).map_err(|_| format!("invalid process id {pid}"))?;
     if send_signal(pid_i32, libc::SIGTERM, "SIGTERM")? == SignalResult::Missing {
         return Ok(());
     }
@@ -322,10 +319,7 @@ async fn terminate_cloudflared_pid(
         return Ok(());
     };
     if let Err(mismatch) = verify_identity(pid, &command, Some(&exact_identity)) {
-        log::info!(
-            "cloudflared stop: {} after SIGTERM grace — treating as exited",
-            mismatch
-        );
+        log::info!("cloudflared stop: {mismatch} after SIGTERM grace — treating as exited");
         return Ok(());
     }
     let _ = send_signal(pid_i32, libc::SIGKILL, "SIGKILL")?;
@@ -336,7 +330,7 @@ fn process_command(pid: u32) -> Result<Option<String>, String> {
     let out = Command::new("ps")
         .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
         .output()
-        .map_err(|e| format!("ps: {}", e))?;
+        .map_err(|e| format!("ps: {e}"))?;
     let command = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if !out.status.success() {
         // BSD `ps` exits non-zero with empty stdout when the PID no longer
@@ -426,7 +420,7 @@ fn send_signal(pid: i32, signal: i32, name: &str) -> Result<SignalResult, String
     if error.raw_os_error() == Some(libc::ESRCH) {
         return Ok(SignalResult::Missing);
     }
-    Err(format!("{} PID {} failed: {}", name, pid, error))
+    Err(format!("{name} PID {pid} failed: {error}"))
 }
 
 #[cfg(test)]
@@ -454,7 +448,7 @@ mod tests {
     #[test]
     fn parses_managed_owner_from_custom_argv0() {
         let marker = managed_argv0("project A/서버").unwrap();
-        let sample = format!("777 {} tunnel --url http://localhost:7777", marker);
+        let sample = format!("777 {marker} tunnel --url http://localhost:7777");
         let parsed = parse_ps_for_cloudflared(&sample);
         assert_eq!(parsed.len(), 1);
         assert_eq!(

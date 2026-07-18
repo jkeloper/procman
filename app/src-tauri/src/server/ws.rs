@@ -149,7 +149,7 @@ async fn handle_socket(
                 let id_for_handler = id.clone();
                 let tx = tx_log.clone();
                 let dropped = Arc::clone(&dropped_log);
-                let handle = app_for_log.listen(format!("log://{}", id), move |ev| {
+                let handle = app_for_log.listen(format!("log://{id}"), move |ev| {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(ev.payload()) {
                         let out = OutEvent::Log {
                             script_id: id_for_handler.clone(),
@@ -268,7 +268,7 @@ fn try_enqueue(tx: &tokio::sync::mpsc::Sender<String>, message: String, dropped:
         // Log on powers of two to make sustained pressure observable without
         // creating another log flood.
         if count.is_power_of_two() {
-            log::warn!("WebSocket client backpressure: dropped {} events", count);
+            log::warn!("WebSocket client backpressure: dropped {count} events");
         }
     }
 }

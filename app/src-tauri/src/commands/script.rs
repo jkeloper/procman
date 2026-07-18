@@ -31,19 +31,18 @@ pub(crate) fn validate_ports(input: &[PortSpec]) -> Result<Vec<PortSpec>, String
             return Err("port name cannot be empty".into());
         }
         if name.len() > 32 {
-            return Err(format!("port name '{}' exceeds 32 chars", name));
+            return Err(format!("port name '{name}' exceeds 32 chars"));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
             return Err(format!(
-                "port name '{}' has invalid chars (allowed: a-zA-Z0-9_-)",
-                name
+                "port name '{name}' has invalid chars (allowed: a-zA-Z0-9_-)"
             ));
         }
         if !seen_names.insert(name.clone()) {
-            return Err(format!("duplicate port name '{}'", name));
+            return Err(format!("duplicate port name '{name}'"));
         }
         if p.number == 0 {
             return Err("port number 0 is reserved".to_string());
@@ -90,7 +89,7 @@ pub async fn list_scripts(
         .projects
         .iter()
         .find(|p| p.id == project_id)
-        .ok_or_else(|| format!("project not found: {}", project_id))?;
+        .ok_or_else(|| format!("project not found: {project_id}"))?;
     Ok(proj.scripts.clone())
 }
 
@@ -122,12 +121,9 @@ pub async fn create_script(
             .projects
             .iter()
             .find(|p| p.id == project_id)
-            .ok_or_else(|| format!("project not found: {}", project_id))?;
+            .ok_or_else(|| format!("project not found: {project_id}"))?;
         if proj.scripts.iter().any(|s| s.name == trimmed_name) {
-            return Err(format!(
-                "script with name '{}' already exists",
-                trimmed_name
-            ));
+            return Err(format!("script with name '{trimmed_name}' already exists"));
         }
         if proj.scripts.iter().any(|s| s.command == trimmed_cmd) {
             return Err("script with identical command already exists".to_string());
@@ -162,7 +158,7 @@ pub async fn create_script(
         .await
         .map_err(|e| e.to_string())?;
     if !found {
-        return Err(format!("project not found: {}", project_id));
+        return Err(format!("project not found: {project_id}"));
     }
     Ok(to_return)
 }
@@ -220,7 +216,7 @@ pub async fn update_script(
         })
         .await
         .map_err(|e| e.to_string())?;
-    result.ok_or_else(|| format!("script not found: {}/{}", project_id, id))
+    result.ok_or_else(|| format!("script not found: {project_id}/{id}"))
 }
 
 #[tauri::command]

@@ -127,7 +127,7 @@ impl TunnelState {
             let identity = process.identity();
             let entry = TunnelInner {
                 pid: process.pid,
-                url: format!("(tunnel active on :{})", port),
+                url: format!("(tunnel active on :{port})"),
                 port,
                 identity: identity.clone(),
             };
@@ -317,7 +317,7 @@ pub async fn start_tunnel(
     state.stop_one_inner(&script_id).await?;
 
     let bin = resolve_cloudflared();
-    let origin = format!("http://localhost:{}", port);
+    let origin = format!("http://localhost:{port}");
     let mut command = Command::new(&bin);
     command
         .args(["tunnel", "--url", &origin])
@@ -331,7 +331,7 @@ pub async fn start_tunnel(
 
     let mut child = command
         .spawn()
-        .map_err(|e| format!("cloudflared not installed or failed: {}", e))?;
+        .map_err(|e| format!("cloudflared not installed or failed: {e}"))?;
 
     let pid = child.id().ok_or("no pid")?;
 
@@ -474,7 +474,7 @@ fn canonical_trycloudflare_origin(candidate: &str) -> Option<String> {
     if prefix.is_empty() || prefix.split('.').any(str::is_empty) {
         return None;
     }
-    Some(format!("https://{}", host))
+    Some(format!("https://{host}"))
 }
 
 #[cfg(test)]
@@ -492,18 +492,18 @@ mod tests {
         RunningCloudflared {
             pid,
             command,
-            url: Some(format!("http://localhost:{}", port)),
+            url: Some(format!("http://localhost:{port}")),
             tunnel_name: None,
             managed_script_id: Some(script_id.to_string()),
         }
     }
 
     fn legacy_process(pid: u32, port: u16) -> RunningCloudflared {
-        let command = format!("cloudflared tunnel --url http://localhost:{}", port);
+        let command = format!("cloudflared tunnel --url http://localhost:{port}");
         RunningCloudflared {
             pid,
             command,
-            url: Some(format!("http://localhost:{}", port)),
+            url: Some(format!("http://localhost:{port}")),
             tunnel_name: None,
             managed_script_id: None,
         }
@@ -512,7 +512,7 @@ mod tests {
     fn tracked_process(pid: u32, script_id: &str, port: u16) -> TunnelInner {
         TunnelInner {
             pid,
-            url: format!("https://{}.trycloudflare.com", script_id),
+            url: format!("https://{script_id}.trycloudflare.com"),
             port,
             identity: CloudflaredIdentity::Managed(script_id.to_string()),
         }

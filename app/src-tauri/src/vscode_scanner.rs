@@ -38,12 +38,12 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
     if !path.exists() {
         return Ok(vec![]);
     }
-    let bytes = std::fs::read(&path).map_err(|e| format!("read launch.json: {}", e))?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("read launch.json: {e}"))?;
     let text = strip_jsonc_comments(std::str::from_utf8(&bytes).unwrap_or(""));
     let text = strip_trailing_commas(&text);
     let json: Value = match serde_json::from_str(&text) {
         Ok(v) => v,
-        Err(e) => return Err(format!("parse launch.json: {}", e)),
+        Err(e) => return Err(format!("parse launch.json: {e}")),
     };
     let configs = json
         .get("configurations")
@@ -121,15 +121,15 @@ pub fn scan_launch_json(project_dir: &Path) -> Result<Vec<LaunchConfigCandidate>
             // Use `( ... & ) ... ; wait` with a trap to propagate termination.
             let parallel = member_cmds
                 .iter()
-                .map(|c| format!("( {} ) &", c))
+                .map(|c| format!("( {c} ) &"))
                 .collect::<Vec<_>>()
                 .join(" ");
             let body = if let Some(pre) = compound_pre {
-                format!("{} && {} wait", pre, parallel)
+                format!("{pre} && {parallel} wait")
             } else {
-                format!("{} wait", parallel)
+                format!("{parallel} wait")
             };
-            let command_line = format!("trap 'kill 0' EXIT; {}", body);
+            let command_line = format!("trap 'kill 0' EXIT; {body}");
 
             let script = Script {
                 id: Uuid::new_v4().to_string(),
@@ -268,7 +268,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             } else {
                 shell_quote(&val)
             };
-            format!("{}={}", k, quoted)
+            format!("{k}={quoted}")
         })
         .collect::<Vec<_>>()
         .join(" ");
@@ -338,15 +338,15 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let extra_args = if quoted_args.is_empty() {
                     String::new()
                 } else {
-                    format!(" {}", quoted_args)
+                    format!(" {quoted_args}")
                 };
-                format!("{} {}{}", interp, quoted_runtime_args, extra_args)
+                format!("{interp} {quoted_runtime_args}{extra_args}")
             } else if let Some(prog) = program.clone() {
                 // node <program> [args]
                 let prefix = if quoted_runtime_args.is_empty() {
                     String::new()
                 } else {
-                    format!("{} ", quoted_runtime_args)
+                    format!("{quoted_runtime_args} ")
                 };
                 format!(
                     "{} {}{} {}",
@@ -360,12 +360,12 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let extra_args = if quoted_args.is_empty() {
                     String::new()
                 } else {
-                    format!(" {}", quoted_args)
+                    format!(" {quoted_args}")
                 };
-                format!("{} {}{}", interp, quoted_runtime_args, extra_args)
+                format!("{interp} {quoted_runtime_args}{extra_args}")
             } else {
                 // Absolute last resort: assume `node index.js`.
-                format!("{} index.js {}", interp, quoted_args)
+                format!("{interp} index.js {quoted_args}")
             };
             prefix_envfile(&env_file, &prefix_env(&env_prefix, base.trim()))
         }
@@ -383,7 +383,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let prog = program.clone().unwrap_or_else(|| "main.py".to_string());
                 shell_quote(&prog)
             };
-            let base = format!("{} {} {}", interp, target, quoted_args);
+            let base = format!("{interp} {target} {quoted_args}");
             prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
         }
         "shell" | "bashdb" => {
@@ -399,7 +399,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         "lldb" | "cppdbg" | "rust" | "codelldb" => {
             let has_cargo = Path::new(workspace).join("Cargo.toml").exists();
             if has_cargo {
-                let base = format!("cargo run -- {}", quoted_args);
+                let base = format!("cargo run -- {quoted_args}");
                 prefix_envfile(&env_file, prefix_env(&env_prefix, base.trim()).as_str())
             } else if let Some(prog) = program.clone() {
                 let base = format!("{} {}", shell_quote(&prog), quoted_args);
@@ -433,7 +433,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
 
             if has_mvnw || has_pom {
                 let runner = if has_mvnw { "./mvnw" } else { "mvn" };
-                let mut base = format!("{} spring-boot:run", runner);
+                let mut base = format!("{runner} spring-boot:run");
                 if !vm_args.is_empty() {
                     base.push_str(&format!(
                         " -Dspring-boot.run.jvmArguments={}",
@@ -449,7 +449,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
             } else if has_gradlew || has_gradle {
                 let runner = if has_gradlew { "./gradlew" } else { "gradle" };
-                let mut base = format!("{} bootRun", runner);
+                let mut base = format!("{runner} bootRun");
                 let mut extras: Vec<String> = Vec::new();
                 if !vm_args.is_empty() {
                     extras.push(format!("-Dorg.gradle.jvmargs={}", shell_quote(&vm_args)));
@@ -502,7 +502,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                 let base = if quoted_args.is_empty() {
                     "dotnet run".to_string()
                 } else {
-                    format!("dotnet run -- {}", quoted_args)
+                    format!("dotnet run -- {quoted_args}")
                 };
                 prefix_envfile(&env_file, &prefix_env(&env_prefix, &base))
             } else if let Some(prog) = program.clone() {
@@ -542,9 +542,9 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                     .map(|s| s.contains("flutter:"))
                     .unwrap_or(false);
             let base = if is_flutter {
-                format!("flutter run {}", quoted_args)
+                format!("flutter run {quoted_args}")
             } else if has_pubspec {
-                format!("dart run {}", quoted_args)
+                format!("dart run {quoted_args}")
             } else if let Some(prog) = program.clone() {
                 format!("dart {} {}", shell_quote(&prog), quoted_args)
             } else {
@@ -560,7 +560,7 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
         "swift" => {
             let has_pkg = Path::new(workspace).join("Package.swift").exists();
             let base = if has_pkg {
-                format!("swift run {}", quoted_args)
+                format!("swift run {quoted_args}")
             } else if let Some(prog) = program.clone() {
                 format!("swift {} {}", shell_quote(&prog), quoted_args)
             } else {
@@ -611,9 +611,9 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
                     .map(|s| s.contains("phoenix"))
                     .unwrap_or(false);
             let base = if is_phoenix {
-                format!("mix phx.server {}", quoted_args)
+                format!("mix phx.server {quoted_args}")
             } else if has_mix {
-                format!("mix run --no-halt {}", quoted_args)
+                format!("mix run --no-halt {quoted_args}")
             } else if let Some(prog) = program.clone() {
                 format!("elixir {} {}", shell_quote(&prog), quoted_args)
             } else {
@@ -630,11 +630,11 @@ fn translate_config(cfg: &Value, workspace: &str) -> LaunchConfigCandidate {
             let has_lein = Path::new(workspace).join("project.clj").exists();
             let has_deps = Path::new(workspace).join("deps.edn").exists();
             let base = if has_lein {
-                format!("lein run {}", quoted_args)
+                format!("lein run {quoted_args}")
             } else if has_deps {
                 let main_class = cfg.get("main").and_then(|v| v.as_str()).unwrap_or("");
                 if main_class.is_empty() {
-                    format!("clojure -M {}", quoted_args)
+                    format!("clojure -M {quoted_args}")
                 } else {
                     format!("clojure -M -m {} {}", shell_quote(main_class), quoted_args)
                 }
@@ -779,7 +779,7 @@ fn parse_tasks(project_dir: &Path) -> HashMap<String, String> {
             let base = if joined_args.is_empty() {
                 cmd
             } else {
-                format!("{} {}", cmd, joined_args)
+                format!("{cmd} {joined_args}")
             };
             match task_cwd {
                 Some(c) if c.trim_end_matches('/') != workspace.trim_end_matches('/') => {
@@ -871,15 +871,15 @@ fn resolve_task(
     if task.parallel {
         let bg_part = bg_cmds
             .iter()
-            .map(|c| format!("( {} ) &", c))
+            .map(|c| format!("( {c} ) &"))
             .collect::<Vec<_>>()
             .join(" ");
         let fg_part = fg_cmds.join(" && ");
         let composed = if !bg_part.is_empty() && !fg_part.is_empty() {
-            format!("{} {}", bg_part, fg_part)
+            format!("{bg_part} {fg_part}")
         } else if !bg_part.is_empty() {
             // No fg deps to anchor on — wait for the background ones.
-            format!("{} wait", bg_part)
+            format!("{bg_part} wait")
         } else {
             fg_part
         };
@@ -889,7 +889,7 @@ fn resolve_task(
             if composed.is_empty() {
                 Some(own.clone())
             } else {
-                Some(format!("{} && {}", composed, own))
+                Some(format!("{composed} && {own}"))
             }
         } else {
             Some(composed)
@@ -956,7 +956,7 @@ pub fn extract_ports_from_launch(cfg: &Value) -> Vec<PortSpec> {
         if used_names.contains(&name) {
             let mut i = 2;
             loop {
-                let cand = format!("{}{}", name_hint, i);
+                let cand = format!("{name_hint}{i}");
                 if !used_names.contains(&cand) {
                     name = cand;
                     break;
@@ -1078,7 +1078,7 @@ fn prefix_env(env_prefix: &str, cmd: &str) -> String {
     if env_prefix.is_empty() {
         cmd.to_string()
     } else {
-        format!("{} {}", env_prefix, cmd)
+        format!("{env_prefix} {cmd}")
     }
 }
 
@@ -1124,7 +1124,7 @@ fn shell_quote_double(s: &str) -> String {
             _ => c.to_string(),
         })
         .collect();
-    format!("\"{}\"", escaped)
+    format!("\"{escaped}\"")
 }
 
 /// Substitute VSCode variables. Only supports MVP subset.
@@ -1154,7 +1154,7 @@ fn resolve_var(key: &str, workspace: &str, env_map: &HashMap<String, String>) ->
         "workspaceFolder" | "workspaceRoot" => workspace.to_string(),
         "file" | "fileBasename" | "fileDirname" | "relativeFile" => {
             // No single file context in MVP; leave placeholder visible.
-            format!("${{{}}}", key)
+            format!("${{{key}}}")
         }
         _ => {
             if let Some(rest) = key.strip_prefix("env:") {
@@ -1174,17 +1174,17 @@ fn resolve_var(key: &str, workspace: &str, env_map: &HashMap<String, String>) ->
                 // ~/.zshrc / .zprofile / a sourced .env file flow into
                 // the running command, instead of being baked-in as the
                 // empty string at scan time.
-                return format!("${}", rest);
+                return format!("${rest}");
             }
             if let Some(_rest) = key.strip_prefix("config:") {
                 // Unsupported
-                return format!("${{{}}}", key);
+                return format!("${{{key}}}");
             }
             // Inline env from launch.json env block
             if let Some(v) = env_map.get(key) {
                 return v.clone();
             }
-            format!("${{{}}}", key)
+            format!("${{{key}}}")
         }
     }
 }
@@ -1573,8 +1573,7 @@ mod tests {
         let cmd = &cfg.script.as_ref().unwrap().command;
         assert!(
             cmd.starts_with("npm run build:backend &&"),
-            "expected preLaunchTask prefix, got: {}",
-            cmd
+            "expected preLaunchTask prefix, got: {cmd}"
         );
         assert!(cmd.contains("dist/server.js"));
         fs::remove_dir_all(&tmp).unwrap();
@@ -1612,13 +1611,11 @@ mod tests {
         assert!(prepare.contains("npm run build:backend"));
         assert!(
             prepare.contains("( npx webpack serve ) &"),
-            "background not in `( ... ) &` form: {}",
-            prepare
+            "background not in `( ... ) &` form: {prepare}"
         );
         assert!(
             prepare.ends_with("npm run build:backend"),
-            "fg should come last so we wait on it: {}",
-            prepare
+            "fg should come last so we wait on it: {prepare}"
         );
         fs::remove_dir_all(&tmp).unwrap();
     }

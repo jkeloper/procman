@@ -60,7 +60,7 @@ pub fn start_scheduler(state: Arc<AppState>, pm: ProcessManager) {
         let mut last_minute: Option<i64> = None;
         loop {
             if let Err(e) = run_scheduler_minute(&state, &pm, &mut last_minute).await {
-                log::warn!("scheduled execution tick failed: {}", e);
+                log::warn!("scheduled execution tick failed: {e}");
             }
             tokio::time::sleep(Duration::from_secs(SCHEDULER_TICK_SECS)).await;
         }
@@ -236,7 +236,7 @@ impl CronField {
     fn parse(input: &str, min: u32, max: u32, label: &str) -> Result<Self, String> {
         let input = input.trim();
         if input.is_empty() {
-            return Err(format!("{} field cannot be empty", label));
+            return Err(format!("{label} field cannot be empty"));
         }
 
         let unrestricted = input == "*" || input == "*/1";
@@ -244,15 +244,15 @@ impl CronField {
         for part in input.split(',') {
             let part = part.trim();
             if part.is_empty() {
-                return Err(format!("{} field contains an empty list item", label));
+                return Err(format!("{label} field contains an empty list item"));
             }
             let (base, step) = match part.split_once('/') {
                 Some((base, step)) => {
                     let parsed_step = step
                         .parse::<u32>()
-                        .map_err(|_| format!("{} step must be a positive number", label))?;
+                        .map_err(|_| format!("{label} step must be a positive number"))?;
                     if parsed_step == 0 {
-                        return Err(format!("{} step must be greater than 0", label));
+                        return Err(format!("{label} step must be greater than 0"));
                     }
                     (base, parsed_step)
                 }
@@ -272,7 +272,7 @@ impl CronField {
             };
 
             if start > end {
-                return Err(format!("{} range must be ascending", label));
+                return Err(format!("{label} range must be ascending"));
             }
             let mut value = start;
             while value <= end {
@@ -285,7 +285,7 @@ impl CronField {
         }
 
         if values.is_empty() {
-            return Err(format!("{} field did not select any values", label));
+            return Err(format!("{label} field did not select any values"));
         }
         Ok(Self {
             unrestricted,
@@ -301,12 +301,9 @@ impl CronField {
 fn parse_number(input: &str, min: u32, max: u32, label: &str) -> Result<u32, String> {
     let value = input
         .parse::<u32>()
-        .map_err(|_| format!("{} value '{}' is not a number", label, input))?;
+        .map_err(|_| format!("{label} value '{input}' is not a number"))?;
     if value < min || value > max {
-        return Err(format!(
-            "{} value {} is outside {}..={}",
-            label, value, min, max
-        ));
+        return Err(format!("{label} value {value} is outside {min}..={max}"));
     }
     Ok(value)
 }

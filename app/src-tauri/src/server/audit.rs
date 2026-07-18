@@ -84,8 +84,8 @@ impl AuditLog {
             .await;
             match res {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => log::warn!("audit log write failed: {}", e),
-                Err(e) => log::warn!("audit log write task failed: {}", e),
+                Ok(Err(e)) => log::warn!("audit log write failed: {e}"),
+                Err(e) => log::warn!("audit log write task failed: {e}"),
             }
         }
         let mut guard = self.ring.lock().await;
@@ -108,7 +108,7 @@ pub fn default_audit_path() -> Option<PathBuf> {
     match crate::config_store::default_config_path() {
         Ok(p) => p.parent().map(|dir| dir.join("audit.log")),
         Err(e) => {
-            log::warn!("no config dir for audit log: {}", e);
+            log::warn!("no config dir for audit log: {e}");
             None
         }
     }
@@ -165,8 +165,8 @@ impl RotatingWriter {
     fn append(&mut self, entry: &AuditEntry) -> std::io::Result<()> {
         self.maybe_rotate()?;
         let line = serde_json::to_string(entry)
-            .map_err(|e| std::io::Error::other(format!("serialize: {}", e)))?;
-        writeln!(self.file, "{}", line)?;
+            .map_err(|e| std::io::Error::other(format!("serialize: {e}")))?;
+        writeln!(self.file, "{line}")?;
         Ok(())
     }
 
@@ -193,7 +193,7 @@ impl RotatingWriter {
 
 fn rotate_path(base: &Path, n: usize) -> PathBuf {
     let mut s = base.as_os_str().to_os_string();
-    s.push(format!(".{}", n));
+    s.push(format!(".{n}"));
     PathBuf::from(s)
 }
 
@@ -280,7 +280,7 @@ mod tests {
     async fn in_memory_ring_still_bounded() {
         let log = AuditLog::new();
         for i in 0..(RING_CAPACITY + 50) {
-            log.record("a", &format!("t{}", i), true, None).await;
+            log.record("a", &format!("t{i}"), true, None).await;
         }
         let snap = log.snapshot().await;
         assert_eq!(snap.len(), RING_CAPACITY);

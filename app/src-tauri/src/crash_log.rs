@@ -83,7 +83,7 @@ fn write_entry(body: &str) {
     };
     if let Err(e) = write_to(path, body) {
         // Don't recurse: emit to stderr and move on.
-        eprintln!("crash_log: write failed: {}", e);
+        eprintln!("crash_log: write failed: {e}");
     }
 }
 
@@ -139,7 +139,7 @@ fn now_iso() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let (y, mo, d, h, mi, s) = epoch_to_ymdhms(secs);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
 /// Proleptic Gregorian; accurate enough for log timestamps. Days counted

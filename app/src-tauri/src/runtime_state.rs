@@ -53,18 +53,15 @@ impl RuntimeStore {
                     // with no diagnostic. Log it and quarantine the bad file so
                     // the loss is visible and the file is recoverable, then fall
                     // back to default (never block startup).
-                    log::warn!(
-                        "runtime.json is corrupt ({}); quarantining and starting fresh",
-                        e
-                    );
+                    log::warn!("runtime.json is corrupt ({e}); quarantining and starting fresh");
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
                     let mut quarantine = path.clone().into_os_string();
-                    quarantine.push(format!(".corrupt-{}", ts));
+                    quarantine.push(format!(".corrupt-{ts}"));
                     if let Err(re) = fs::rename(&path, PathBuf::from(&quarantine)) {
-                        log::warn!("could not quarantine corrupt runtime.json: {}", re);
+                        log::warn!("could not quarantine corrupt runtime.json: {re}");
                     }
                     RuntimeState::default()
                 }
@@ -142,7 +139,7 @@ impl RuntimeStore {
             tokio::time::sleep(Duration::from_millis(500)).await;
             me.pending.store(false, std::sync::atomic::Ordering::SeqCst);
             if let Err(e) = me.flush_now().await {
-                log::warn!("runtime state flush failed: {}", e);
+                log::warn!("runtime state flush failed: {e}");
             }
         });
     }
@@ -279,7 +276,7 @@ mod tests {
         for i in 0..n {
             let s = Arc::clone(&store);
             handles.push(tokio::spawn(async move {
-                let id = format!("s{}", i);
+                let id = format!("s{i}");
                 s.mark_running(&id, true).await;
                 // Idempotent double-mark for even ids (must not duplicate).
                 if i % 2 == 0 {
@@ -321,7 +318,7 @@ mod tests {
         deduped.dedup();
         assert_eq!(got, deduped, "last_running must not contain duplicates");
         // Expected set: s2..s49 (s0, s1 flipped off) plus the late s99.
-        let mut expected: Vec<String> = (2..n).map(|i| format!("s{}", i)).collect();
+        let mut expected: Vec<String> = (2..n).map(|i| format!("s{i}")).collect();
         expected.push("s99".to_string());
         expected.sort();
         assert_eq!(got, expected, "in-memory set diverged under contention");

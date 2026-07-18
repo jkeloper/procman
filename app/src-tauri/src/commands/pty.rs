@@ -96,29 +96,29 @@ impl PtyManager {
         let session = self
             .sessions
             .get(id)
-            .ok_or_else(|| format!("pty session not found: {}", id))?;
+            .ok_or_else(|| format!("pty session not found: {id}"))?;
         let mut writer = session
             .writer
             .lock()
             .map_err(|_| "pty writer lock poisoned".to_string())?;
         writer
             .write_all(data.as_bytes())
-            .map_err(|e| format!("pty write: {}", e))?;
-        writer.flush().map_err(|e| format!("pty flush: {}", e))
+            .map_err(|e| format!("pty write: {e}"))?;
+        writer.flush().map_err(|e| format!("pty flush: {e}"))
     }
 
     fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
         let session = self
             .sessions
             .get(id)
-            .ok_or_else(|| format!("pty session not found: {}", id))?;
+            .ok_or_else(|| format!("pty session not found: {id}"))?;
         let size = pty_size(cols, rows);
         let result = session
             .master
             .lock()
             .map_err(|_| "pty master lock poisoned".to_string())?
             .resize(size)
-            .map_err(|e| format!("pty resize: {}", e));
+            .map_err(|e| format!("pty resize: {e}"));
         result
     }
 
@@ -178,12 +178,12 @@ impl PtyManager {
 
         let (script, cwd) = crate::commands::process::find_script(state, &project_id, &script_id)
             .await
-            .ok_or_else(|| format!("script not found: {}/{}", project_id, script_id))?;
+            .ok_or_else(|| format!("script not found: {project_id}/{script_id}"))?;
         let command_line = command_line_for_script(&script, Some(&cwd));
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(pty_size(cols, rows))
-            .map_err(|e| format!("open pty: {}", e))?;
+            .map_err(|e| format!("open pty: {e}"))?;
 
         let mut cmd = CommandBuilder::new("/bin/zsh");
         cmd.args(["-l", "-c", &command_line]);
@@ -195,7 +195,7 @@ impl PtyManager {
         let mut child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| format!("pty spawn: {}", e))?;
+            .map_err(|e| format!("pty spawn: {e}"))?;
         let pid = child.process_id();
         drop(pair.slave);
 
@@ -217,14 +217,14 @@ impl PtyManager {
             Ok(r) => r,
             Err(e) => {
                 let _ = killer.kill();
-                return Err(format!("pty reader: {}", e));
+                return Err(format!("pty reader: {e}"));
             }
         };
         let writer = match pair.master.take_writer() {
             Ok(w) => w,
             Err(e) => {
                 let _ = killer.kill();
-                return Err(format!("pty writer: {}", e));
+                return Err(format!("pty writer: {e}"));
             }
         };
 

@@ -154,7 +154,7 @@ mod restore_order_tests {
         Script {
             id: id.to_string(),
             name: id.to_string(),
-            command: format!("echo {}", id),
+            command: format!("echo {id}"),
             ports: vec![PortSpec {
                 name: "http".into(),
                 number: 9000,
@@ -177,7 +177,7 @@ mod restore_order_tests {
         let order = resolve_dep_order(&scripts).unwrap();
         let pos_a = order.iter().position(|x| x == "A").unwrap();
         let pos_b = order.iter().position(|x| x == "B").unwrap();
-        assert!(pos_b < pos_a, "B must start before A, got {:?}", order);
+        assert!(pos_b < pos_a, "B must start before A, got {order:?}");
     }
 
     #[test]
@@ -243,12 +243,11 @@ mod restore_order_tests {
         // A → B → A  (self-referential cycle through one hop)
         let scripts = vec![mk_script("A", &["B"]), mk_script("B", &["A"])];
         let res = resolve_dep_order(&scripts);
-        assert!(res.is_err(), "cycle must be rejected, got {:?}", res);
+        assert!(res.is_err(), "cycle must be rejected, got {res:?}");
         let err = res.err().unwrap();
         assert!(
             err.contains("cycle"),
-            "err message should mention cycle: {}",
-            err
+            "err message should mention cycle: {err}"
         );
     }
 
@@ -280,6 +279,6 @@ mod restore_order_tests {
         let scripts = vec![mk_script("A", &["B"]), mk_script("B", &[])];
         let order = resolve_dep_order(&scripts).unwrap();
         let idx = |id: &str| order.iter().position(|x| x == id).unwrap();
-        assert!(idx("B") < idx("A"), "B before A, got {:?}", order);
+        assert!(idx("B") < idx("A"), "B before A, got {order:?}");
     }
 }

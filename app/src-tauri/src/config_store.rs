@@ -103,17 +103,16 @@ impl ConfigStore {
             Ok(cfg) => Ok(cfg),
             Err(e @ ConfigError::Yaml(_)) => {
                 log::error!(
-                    "config.yaml is corrupt ({}); quarantining and starting with defaults",
-                    e
+                    "config.yaml is corrupt ({e}); quarantining and starting with defaults"
                 );
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 let mut quarantine = path.as_os_str().to_os_string();
-                quarantine.push(format!(".corrupt-{}", ts));
+                quarantine.push(format!(".corrupt-{ts}"));
                 if let Err(re) = fs::rename(path, std::path::PathBuf::from(&quarantine)) {
-                    log::error!("could not quarantine corrupt config.yaml: {}", re);
+                    log::error!("could not quarantine corrupt config.yaml: {re}");
                 }
                 Ok(AppConfig::default())
             }
@@ -175,9 +174,8 @@ impl ConfigStore {
                             .and_then(|n| u16::try_from(n).ok());
                         if coerced.is_none() {
                             log::warn!(
-                                "config migration: dropping unparseable expected_port {:?} \
-                                 (could not promote to ports[])",
-                                v
+                                "config migration: dropping unparseable expected_port {v:?} \
+                                 (could not promote to ports[])"
                             );
                         }
                         coerced

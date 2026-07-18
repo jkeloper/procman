@@ -44,14 +44,14 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
         SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
     ];
 
-    let key_pair = KeyPair::generate().map_err(|e| format!("keygen: {}", e))?;
+    let key_pair = KeyPair::generate().map_err(|e| format!("keygen: {e}"))?;
     let cert = params
         .self_signed(&key_pair)
-        .map_err(|e| format!("cert: {}", e))?;
+        .map_err(|e| format!("cert: {e}"))?;
 
-    fs::create_dir_all(config_dir).map_err(|e| format!("mkdir: {}", e))?;
-    fs::write(&cert_path, cert.pem()).map_err(|e| format!("write cert: {}", e))?;
-    fs::write(&key_path, key_pair.serialize_pem()).map_err(|e| format!("write key: {}", e))?;
+    fs::create_dir_all(config_dir).map_err(|e| format!("mkdir: {e}"))?;
+    fs::write(&cert_path, cert.pem()).map_err(|e| format!("write cert: {e}"))?;
+    fs::write(&key_path, key_pair.serialize_pem()).map_err(|e| format!("write key: {e}"))?;
 
     #[cfg(unix)]
     {
@@ -60,7 +60,7 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
         let _ = fs::set_permissions(&cert_path, fs::Permissions::from_mode(0o600));
     }
 
-    log::info!("TLS cert generated at {:?}", cert_path);
+    log::info!("TLS cert generated at {cert_path:?}");
     Ok(TlsFiles {
         cert_path,
         key_path,
@@ -74,12 +74,12 @@ pub fn ensure_self_signed_cert(config_dir: &std::path::Path) -> Result<TlsFiles,
 pub fn fingerprint_sha256(cert_pem: &str) -> Result<String, String> {
     let der = pem_to_der(cert_pem).ok_or("invalid PEM")?;
     let digest = Sha256::digest(&der);
-    let hex: Vec<String> = digest.iter().map(|b| format!("{:02X}", b)).collect();
+    let hex: Vec<String> = digest.iter().map(|b| format!("{b:02X}")).collect();
     Ok(hex.join(":"))
 }
 
 pub fn fingerprint_sha256_file(cert_path: &Path) -> Result<String, String> {
-    let pem = fs::read_to_string(cert_path).map_err(|e| format!("read cert: {}", e))?;
+    let pem = fs::read_to_string(cert_path).map_err(|e| format!("read cert: {e}"))?;
     fingerprint_sha256(&pem)
 }
 

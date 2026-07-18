@@ -38,7 +38,7 @@ pub struct ProjectCandidate {
 pub async fn scan_directory(path: String) -> Result<Vec<ProjectCandidate>, String> {
     let root = Path::new(&path);
     if !root.exists() || !root.is_dir() {
-        return Err(format!("not a directory: {}", path));
+        return Err(format!("not a directory: {path}"));
     }
 
     // Decision tree:
@@ -59,7 +59,7 @@ pub async fn scan_directory(path: String) -> Result<Vec<ProjectCandidate>, Strin
     let mut candidates = Vec::new();
     let entries = match std::fs::read_dir(root) {
         Ok(e) => e,
-        Err(e) => return Err(format!("read_dir: {}", e)),
+        Err(e) => return Err(format!("read_dir: {e}")),
     };
 
     for entry in entries.filter_map(|e| e.ok()) {
@@ -435,8 +435,8 @@ fn extract_kv(line: &str, key: &str) -> Option<String> {
 
 /// Extract the first `<tag>value</tag>` from a tiny XML blob (no full parser).
 fn xml_tag(text: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}>", tag);
-    let close = format!("</{}>", tag);
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
     let start = text.find(&open)? + open.len();
     let end_rel = text[start..].find(&close)?;
     let v = text[start..start + end_rel].trim().to_string();
@@ -470,7 +470,7 @@ fn scripts_from_package_json(path: &Path) -> Vec<Script> {
             Some(Script {
                 id: Uuid::new_v4().to_string(),
                 name: k.clone(),
-                command: format!("{} {}", pm, k),
+                command: format!("{pm} {k}"),
                 ports: ports_from(infer_port(cmd_str)),
                 auto_restart: false,
                 auto_restart_policy: None,

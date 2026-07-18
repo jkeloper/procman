@@ -27,7 +27,7 @@ pub fn spawn_config_watcher(app: AppHandle, state: Arc<AppState>, config_path: P
         let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
             Ok(w) => w,
             Err(e) => {
-                log::error!("notify init failed: {}", e);
+                log::error!("notify init failed: {e}");
                 return;
             }
         };
@@ -36,16 +36,16 @@ pub fn spawn_config_watcher(app: AppHandle, state: Arc<AppState>, config_path: P
         let parent = match config_path.parent() {
             Some(p) => p.to_path_buf(),
             None => {
-                log::error!("config path has no parent: {:?}", config_path);
+                log::error!("config path has no parent: {config_path:?}");
                 return;
             }
         };
         if std::fs::create_dir_all(&parent).is_err() {
-            log::error!("could not create {:?}", parent);
+            log::error!("could not create {parent:?}");
             return;
         }
         if let Err(e) = watcher.watch(&parent, RecursiveMode::NonRecursive) {
-            log::error!("watcher.watch failed: {}", e);
+            log::error!("watcher.watch failed: {e}");
             return;
         }
 
@@ -98,12 +98,12 @@ pub fn spawn_config_watcher(app: AppHandle, state: Arc<AppState>, config_path: P
                     *guard = cfg;
                     drop(guard);
                     if let Err(e) = app.emit("config-changed", ()) {
-                        log::warn!("emit config-changed failed: {}", e);
+                        log::warn!("emit config-changed failed: {e}");
                     } else {
                         log::info!("config reloaded from disk");
                     }
                 }
-                Err(e) => log::warn!("reload failed: {}", e),
+                Err(e) => log::warn!("reload failed: {e}"),
             }
         }
     });

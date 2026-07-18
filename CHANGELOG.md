@@ -16,7 +16,7 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 - **CI and release gates** — CI now covers Rust formatting/all targets, desktop/mobile production builds, Swift pinned-transport tests, an unsigned iOS simulator app build, the landing site, and the VS Code extension. Distribution releases fail before upload when versions, tags, credentials, Developer ID identity, or updater artifacts are missing or inconsistent.
 - **Version ownership** — desktop release surfaces are synchronized and checked from one canonical version; iOS, VS Code extension, and private build-package versions are explicitly independent. Living documentation no longer hard-codes volatile test counts.
 - **Rust toolchain baseline** — the repository, Cargo MSRV, CI, release workflow, and development docs now use Rust 1.88, the actual minimum required by the locked Tauri dependency graph. Policy tests reject future drift between those pins.
-- **Clippy policy** — all non-exempt Clippy warnings remain fatal on the pinned Rust toolchain. The pre-existing positional-format style migration is explicitly isolated behind one temporary `uninlined_format_args` allowance and tracked for removal instead of generating a broad unrelated source rewrite in this hardening set.
+- **Clippy policy** — every Clippy warning is fatal on the pinned Rust toolchain with no exemptions: the pre-existing positional-format style migration (228 call sites) was completed mechanically via `clippy --fix` and the temporary `uninlined_format_args` allowance removed.
 
 ### Fixed
 - **Release documentation** — the README and landing site now point to the published v0.3.0 DMG, roadmap status reflects the completed release, and repository-root test commands resolve correctly.

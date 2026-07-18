@@ -118,7 +118,7 @@ pub async fn start(
         let std_listener = prepared.listener;
         let actual = std_listener
             .local_addr()
-            .map_err(|e| format!("local_addr: {}", e))?;
+            .map_err(|e| format!("local_addr: {e}"))?;
         let actual_port = actual.port();
         let app_service = router.into_make_service_with_connect_info::<SocketAddr>();
 
@@ -131,7 +131,7 @@ pub async fn start(
             });
             let server = axum_server::from_tcp_rustls(std_listener, prepared.tls_config);
             if let Err(e) = server.handle(handle).serve(app_service).await {
-                log::warn!("axum-server (tls) exited: {}", e);
+                log::warn!("axum-server (tls) exited: {e}");
             }
         });
 
@@ -139,10 +139,10 @@ pub async fn start(
     } else {
         let listener = tokio::net::TcpListener::bind(addr)
             .await
-            .map_err(|e| format!("bind {}: {}", addr, e))?;
+            .map_err(|e| format!("bind {addr}: {e}"))?;
         let actual = listener
             .local_addr()
-            .map_err(|e| format!("local_addr: {}", e))?;
+            .map_err(|e| format!("local_addr: {e}"))?;
         let actual_port = actual.port();
         let app_service = router.into_make_service_with_connect_info::<SocketAddr>();
 
@@ -157,12 +157,7 @@ pub async fn start(
         (actual, actual_port)
     };
 
-    log::info!(
-        "procman remote server listening on {} ({:?}) tls={}",
-        actual_addr,
-        mode,
-        use_tls
-    );
+    log::info!("procman remote server listening on {actual_addr} ({mode:?}) tls={use_tls}");
 
     Ok(ServerHandle {
         shutdown: shutdown_tx,
@@ -192,12 +187,11 @@ async fn prepare_lan_transport(
     let tls_config =
         axum_server::tls_rustls::RustlsConfig::from_pem_file(&files.cert_path, &files.key_path)
             .await
-            .map_err(|e| format!("load TLS cert/key: {}", e))?;
+            .map_err(|e| format!("load TLS cert/key: {e}"))?;
 
     // Bind only after the certificate, fingerprint, and rustls config have all
     // succeeded. Port 0 is supported so callers can request an ephemeral port.
-    let listener =
-        std::net::TcpListener::bind(addr).map_err(|e| format!("bind {}: {}", addr, e))?;
+    let listener = std::net::TcpListener::bind(addr).map_err(|e| format!("bind {addr}: {e}"))?;
     Ok(PreparedLanTransport {
         listener,
         tls_config,
@@ -207,9 +201,9 @@ async fn prepare_lan_transport(
 
 fn prepare_lan_tls(config_dir: &std::path::Path) -> Result<(tls::TlsFiles, String), String> {
     let files = tls::ensure_self_signed_cert(config_dir)
-        .map_err(|e| format!("LAN TLS certificate setup failed: {}", e))?;
+        .map_err(|e| format!("LAN TLS certificate setup failed: {e}"))?;
     let fingerprint = tls::fingerprint_sha256_file(&files.cert_path)
-        .map_err(|e| format!("LAN TLS fingerprint failed: {}", e))?;
+        .map_err(|e| format!("LAN TLS fingerprint failed: {e}"))?;
     Ok((files, fingerprint))
 }
 
@@ -222,7 +216,7 @@ fn resolve_tls_dir() -> Option<std::path::PathBuf> {
     match crate::config_store::default_config_path() {
         Ok(p) => p.parent().map(std::path::Path::to_path_buf),
         Err(e) => {
-            log::warn!("no config dir for TLS cert: {}", e);
+            log::warn!("no config dir for TLS cert: {e}");
             None
         }
     }
