@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "tauri": "bash ../scripts/sweep-target.sh && tauri"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

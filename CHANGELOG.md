@@ -17,6 +17,7 @@ Public-facing changelog. Internal incident/audit detail is kept in `docs/private
 - **Version ownership** — desktop release surfaces are synchronized and checked from one canonical version; iOS, VS Code extension, and private build-package versions are explicitly independent. Living documentation no longer hard-codes volatile test counts.
 - **Rust toolchain baseline** — the repository, Cargo MSRV, CI, release workflow, and development docs now use Rust 1.88, the actual minimum required by the locked Tauri dependency graph. Policy tests reject future drift between those pins.
 - **Clippy policy** — every Clippy warning is fatal on the pinned Rust toolchain with no exemptions: the pre-existing positional-format style migration (228 call sites) was completed mechanically via `clippy --fix` and the temporary `uninlined_format_args` allowance removed.
+- **Build-cache hygiene** — `pnpm tauri dev`/`build` (and the install/release scripts) now run `scripts/sweep-target.sh` first, pruning Rust artifacts in `app/src-tauri/target/` older than `SWEEP_DAYS` days (default 7, via `cargo-sweep`) plus any from uninstalled toolchains, so the Tauri debug target no longer balloons into tens of GB. `SWEEP_DAYS=0` disables it; no-op when `cargo-sweep` isn't installed.
 
 ### Fixed
 - **Release documentation** — the README and landing site now point to the published v0.3.0 DMG, roadmap status reflects the completed release, and repository-root test commands resolve correctly.

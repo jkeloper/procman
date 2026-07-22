@@ -32,6 +32,15 @@ brew install fswatch                  # one-time
 
 (For day-to-day work `pnpm tauri dev` is faster. The pipeline above is for "keep the installed copy in sync".)
 
+### Build-cache hygiene
+Every `pnpm tauri dev`/`build` (and the install/release scripts) runs
+`scripts/sweep-target.sh` first, which prunes Rust artifacts in
+`app/src-tauri/target/` older than `SWEEP_DAYS` days (default 7) plus any built
+by a toolchain rustup no longer has. This keeps the Tauri debug target from
+ballooning into tens of GB. Tune with `SWEEP_DAYS=<n>` or disable with
+`SWEEP_DAYS=0`; needs a one-time `cargo install cargo-sweep` (no-op without it).
+To reclaim everything now: `cd app/src-tauri && cargo clean`.
+
 ## Testing
 ```bash
 (cd app/src-tauri && cargo test --lib)
@@ -112,6 +121,14 @@ brew install fswatch                  # 최초 1회
 ```
 
 (일상 개발은 `pnpm tauri dev`가 빠름. 위 파이프라인은 "설치된 버전 동기화" 용도.)
+
+### 빌드 캐시 위생
+`pnpm tauri dev`/`build`(및 install/release 스크립트)는 매번 먼저
+`scripts/sweep-target.sh`를 실행해 `app/src-tauri/target/`에서 `SWEEP_DAYS`일
+(기본 7)보다 오래된 Rust 아티팩트 + rustup에 더 이상 없는 툴체인 산출물을
+정리합니다. Tauri debug target이 수십 GB로 부푸는 것을 막습니다. `SWEEP_DAYS=<n>`
+으로 조정하거나 `SWEEP_DAYS=0`으로 끌 수 있고, 최초 1회 `cargo install cargo-sweep`이
+필요합니다(없으면 no-op). 지금 전부 회수: `cd app/src-tauri && cargo clean`.
 
 ## 테스트
 ```bash
